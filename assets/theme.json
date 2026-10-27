@@ -1,0 +1,38 @@
+{
+  "_help": "Colours are #RRGGBB, or #RRGGBBAA where AA is opacity (00 = invisible, FF = solid). Restart SyncWatch after changing this file. If it has a mistake, SyncWatch shows SW-112 and uses its built-in colours.",
+  "colors": {
+    "window": "#101318",
+    "panel": "#121620E6",
+    "panel_border": "#2A3140",
+    "text": "#E8EAED",
+    "text_dim": "#9AA3B2",
+    "accent": "#E5484D",
+    "accent_text": "#FFFFFF",
+    "button": "#262C38",
+    "button_hover": "#323A4A",
+    "button_pressed": "#3C4658",
+    "button_text": "#E8EAED",
+    "input": "#1A1F29",
+    "good": "#3CCB7F",
+    "warn": "#F5A524",
+    "bad": "#F0506E",
+    "seek_track": "#3A4150",
+    "seek_fill": "#E5484D",
+    "marker": "#4DA3FF",
+    "video_background": "#000000",
+    "check_box": "#F2F4F7",
+    "check_border": "#9AA3B2",
+    "check_mark": "#000000"
+  },
+  "font": {
+    "family": "",
+    "size_pt": 10
+  },
+  "corner_radius_px": 6,
+  "background": {
+    "image": "background.png",
+    "mode": "cover"
+  },
+  "logo": "logo.png",
+  "default_avatar": "default_avatar.png"
+}

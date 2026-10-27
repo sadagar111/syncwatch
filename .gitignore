@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.tmp
+positions.json
+movies/*
+!movies/PUT_MOVIE_HERE.txt
+# Secrets never live in the project folder (they are in your user profile),
+# but just in case, never commit these:
+*.key
+*.pem
+signing*
