@@ -25,13 +25,14 @@ from ..sync.controller import Controller, fmt_time
 from .controls import ControlBar
 from .dialogs import error_dialog
 from .dialogs.avatar_editor import choose_avatar
-from .dialogs.settings_dialog import SettingsDialog, diagnostics_extras, profile_extras
+from .dialogs.settings_dialog import SettingsDialog, diagnostics_extras, profile_extras, updates_extras
 from .dialogs.subtitle_timing import SubtitleTimingDialog
 from .overlay import Overlay, SubtitleStyle
 from .player import VIDEO_EXTENSIONS, Player
 from .qtutil import asset_pixmap
 from .sidebar import Sidebar
 from .subtitles_ui import Subtitles
+from .updates_ui import UpdateController
 
 log = logging.getLogger("syncwatch.window")
 
@@ -127,6 +128,7 @@ class MainWindow(QMainWindow):
         self._shortcuts: List[QShortcut] = []
         self._gap_text, self._gap_kind = "", ""
         self._dialogs: list = []
+        self.settings_dialog_refresh = None  # set while the settings window is open
 
         self._build()
         self._wire()
@@ -145,6 +147,10 @@ class MainWindow(QMainWindow):
         self.gap_timer.timeout.connect(self._refresh_gap)
         self._set_gap_rate()
         self.gap_timer.start()
+
+        self.updates = UpdateController(self)
+        self.sidebar.update_banner.clicked.connect(self._update_banner_clicked)
+        QTimer.singleShot(0, self.updates.startup)
 
     # ================================================================ building
     def _build(self) -> None:
@@ -563,14 +569,28 @@ class MainWindow(QMainWindow):
             font_family=s.get("subs.font"), bold=s.get("subs.bold"), margin_pct=s.get("subs.margin_pct")))
         self.overlay.subtitles_enabled = bool(s.get("subs.enabled"))
 
+    # ================================================================ updates
+    def _update_banner_clicked(self) -> None:
+        if self.updates.manager.staged():
+            self.request_restart()
+        else:
+            self.updates.open_dialog()
+
+    def request_restart(self) -> None:
+        """Close and start again (to finish an update). app.main() does the actual restart."""
+        self.ctx.restart = True
+        self.close()
+
     # ================================================================ settings window
     def open_settings(self) -> None:
         extras = {
             "Profile": profile_extras(lambda: self.avatar, self._change_avatar, lambda: self.set_avatar(None)),
+            "Updates": updates_extras(self.updates, self),
             "Diagnostics": diagnostics_extras(self.ctx.profile.logs_dir, self.copy_report, self.ctx.rerun_checks),
         }
         dialog = SettingsDialog(self.settings, extras, self)
         dialog.exec()
+        self.settings_dialog_refresh = None
         self.settings.save_if_dirty()
 
     def _change_avatar(self) -> None:

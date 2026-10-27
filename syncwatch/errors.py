@@ -12,7 +12,7 @@ Code ranges:
     4xx  rooms (later)
     5xx  watching in sync
     6xx  film sources such as Real-Debrid / Stremio (later)
-    7xx  updates (later)
+    7xx  updates
     8xx  profile pictures
     9xx  unexpected errors and crashes
 
@@ -268,6 +268,76 @@ CATALOG: Dict[str, Problem] = {
         "The host has limited your controls",
         "Only the host can do that right now. Your buttons work just for you until the host "
         "allows everyone again.",
+        [], INFO, popup=False),
+
+    # ---- 7xx: updates -------------------------------------------------------
+    "SW-701": Problem(
+        "Couldn't check for updates",
+        "SyncWatch couldn't reach GitHub to look for a new version. Everything else works normally.",
+        ["Check your internet connection and try again later.",
+         "Antivirus \"web protection\" or a school/work network can block this. Try another network."],
+        INFO, popup=False),
+    "SW-702": Problem(
+        "GitHub is busy",
+        "GitHub limits how often one internet connection can ask about updates. SyncWatch will try "
+        "again later by itself.",
+        [], INFO, popup=False),
+    "SW-703": Problem(
+        "An update was refused for your safety",
+        "SyncWatch found a new version, but it isn't signed by the person who publishes SyncWatch, "
+        "or it was damaged on the way. Nothing was downloaded or installed.",
+        ["Keep using your current version. It's not affected.",
+         "Click \"Copy details\" and send them to whoever gave you SyncWatch."]),
+    "SW-704": Problem(
+        "The update download didn't finish",
+        "The connection broke off while downloading. Nothing was installed. Next time the download "
+        "continues where it stopped.",
+        ["Check your internet connection and click Update again."], WARNING),
+    "SW-705": Problem(
+        "The downloaded update was damaged",
+        "The downloaded file doesn't match the published fingerprint, so it was thrown away. "
+        "Nothing was installed.",
+        ["Try again.",
+         "If it keeps happening, antivirus or a network filter may be changing downloads. Try "
+         "another network."], WARNING),
+    "SW-706": Problem(
+        "The update couldn't be installed",
+        "SyncWatch couldn't put the new version in place, so you're still on the version you had.",
+        ["Close all SyncWatch windows and start SyncWatch again. The update is retried automatically.",
+         "If SyncWatch is in a protected folder (like Program Files), move the whole SyncWatch folder "
+         "to Documents.",
+         "Antivirus can block changing files. Allow SyncWatch's folder in it."]),
+    "SW-707": Problem(
+        "SyncWatch went back to the previous version",
+        "Version {version} didn't start properly twice in a row, so SyncWatch went back to version "
+        "{to}. Automatic updates will skip version {version}.",
+        ["Click \"Copy details\" and send them to whoever gave you SyncWatch."], WARNING),
+    "SW-709": Problem(
+        "Updates are off in the source-code version",
+        "You're running SyncWatch from its source code (for example a Git folder), so the update "
+        "button is switched off.",
+        ["Update with Git instead:  git pull"], INFO),
+    "SW-710": Problem(
+        "Not enough disk space for the update",
+        "There isn't enough free space on the drive where SyncWatch is.",
+        ["Free up some space (the details show how much is needed), then click Update again."]),
+    "SW-711": Problem(
+        "Updates aren't set up yet",
+        "This copy of SyncWatch doesn't know where updates are published yet.",
+        [], INFO, popup=False),
+    "SW-712": Problem(
+        "SyncWatch couldn't start",
+        "The starter (boot.py) couldn't start the app.",
+        ["Start SyncWatch again.",
+         "Download the full SyncWatch zip again and unzip it over this folder. Your settings are kept, "
+         "they're stored separately."]),
+    "SW-713": Problem(
+        "SyncWatch's own Python is missing or damaged",
+        "The runtime folder, which holds the Python that SyncWatch brings along, is incomplete.",
+        ["Download the full SyncWatch zip again and unzip it over this folder. Your settings are kept."]),
+    "SW-714": Problem(
+        "Went back to the previous version",
+        "As you asked, SyncWatch went back from version {version} to version {to}.",
         [], INFO, popup=False),
 
     # ---- 8xx: profile pictures ----------------------------------------------

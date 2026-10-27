@@ -1,0 +1,26 @@
+SyncWatch includes the following software, each under its own licence.
+The full licence texts are included next to each component: inside
+runtime\<id>\ (Python's LICENSE.txt) and in each library's *.dist-info folder in
+runtime\<id>\Lib\site-packages\.
+
+Python 3.13 (Windows embeddable package)
+  Python Software Foundation License. https://www.python.org/
+
+Qt for Python (PySide6, shiboken6) and the Qt libraries it contains
+  GNU Lesser General Public License v3 (LGPLv3). https://www.qt.io/qt-for-python
+  These are the unmodified official builds from PyPI, loaded as separate,
+  replaceable libraries. Source code: https://code.qt.io/ and
+  https://download.qt.io/official_releases/QtForPython/
+
+FFmpeg (video decoding inside Qt Multimedia)
+  GNU Lesser General Public License v2.1 or later. https://ffmpeg.org/
+  Shipped as part of the official Qt for Python build. Source: https://ffmpeg.org/download.html
+
+cryptography
+  Apache License 2.0 or BSD 3-Clause. https://cryptography.io/
+
+cffi
+  MIT License. https://cffi.readthedocs.io/
+
+pycparser
+  BSD 3-Clause. https://github.com/eliben/pycparser

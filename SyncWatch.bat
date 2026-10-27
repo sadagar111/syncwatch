@@ -3,7 +3,34 @@ setlocal
 cd /d "%~dp0"
 title SyncWatch
 
-rem ---- 1. Find Python: "python" first (what version 0.1 used), then the "py" launcher -------
+rem ==== Installed version: SyncWatch brings its own Python (runtime folder) ==================
+rem Started without a console window. "SyncWatch.bat --console" shows one, for troubleshooting.
+if not exist "runtime\current.txt" goto source_version
+set /p RT=<"runtime\current.txt"
+if not exist "runtime\%RT%\pythonw.exe" goto broken_runtime
+if not exist "boot.py" goto broken_runtime
+rem (Inside the brackets, %2..%9 are the arguments after --console.)
+if /i "%~1"=="--console" (
+  "runtime\%RT%\python.exe" boot.py %2 %3 %4 %5 %6 %7 %8 %9
+  pause
+  exit /b
+)
+start "" "runtime\%RT%\pythonw.exe" boot.py %*
+exit /b 0
+
+:broken_runtime
+echo.
+echo  SW-713  SyncWatch's own Python is missing or damaged.
+echo.
+echo  Download the full SyncWatch zip again and unzip it over this folder.
+echo  Your settings are kept: they're stored separately.
+echo.
+pause
+exit /b 1
+
+rem ==== Source-code version (a Git folder): uses the Python installed on this PC =============
+:source_version
+rem ---- 1. Find Python: "python" first, then the "py" launcher --------------------------------
 rem (A Microsoft Store "python" shortcut without real Python fails this test, as it should.)
 set "PY="
 python -c "import sys" >nul 2>&1 && set "PY=python"
@@ -13,10 +40,10 @@ if not defined PY goto no_python
 rem ---- 2. Python version ---------------------------------------------------------------------
 %PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" || goto old_python
 
-rem ---- 3. Install the video/window library, only if it's missing ------------------------------
-%PY% -c "import PySide6.QtMultimedia" >nul 2>&1
+rem ---- 3. Install the libraries, only if something is missing --------------------------------
+%PY% -c "import PySide6.QtMultimedia, cryptography" >nul 2>&1
 if errorlevel 1 (
-  echo Installing the video and window library ^(PySide6^). This happens only once and takes a few minutes...
+  echo Installing the libraries SyncWatch needs ^(PySide6, cryptography^). This happens only once...
   %PY% -m pip install --disable-pip-version-check -r requirements.txt
   if errorlevel 1 goto install_failed
 )
@@ -57,12 +84,12 @@ exit /b 1
 
 :install_failed
 echo.
-echo  SW-104  Couldn't install what SyncWatch needs (PySide6).
+echo  SW-104  Couldn't install what SyncWatch needs (PySide6, cryptography).
 echo.
 echo  What you can try:
 echo   - Check your internet connection.
 echo   - If your Python is brand new (3.15 or newer), install Python 3.13 instead:
-echo     the library isn't available for brand-new Python versions straight away.
+echo     the libraries aren't available for brand-new Python versions straight away.
 echo   - Antivirus or a school/work network can block downloads. Try another network.
 echo.
 pause

@@ -1,11 +1,14 @@
 __pycache__/
 *.pyc
 *.tmp
+*.part
 positions.json
 movies/*
 !movies/PUT_MOVIE_HERE.txt
+# Release builds are made by tools/release.py into dist/ and uploaded to GitHub, never committed.
+dist/
 # Secrets never live in the project folder (they are in your user profile),
-# but just in case, never commit these:
+# but just in case, never commit anything that looks like a key:
 *.key
 *.pem
 signing*

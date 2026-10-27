@@ -26,7 +26,7 @@ log = logging.getLogger("syncwatch.settings")
 FILE_VERSION = 1
 
 SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "Interface",
-            "Keyboard", "Diagnostics"]
+            "Keyboard", "Updates", "Diagnostics"]
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ def _s(*args, **kwargs) -> Setting:
     return Setting(*args, **kwargs)
 
 
-P, PB, SB, WT, UI, KB, DG = SECTIONS
+P, PB, SB, WT, UI, KB, UP, DG = SECTIONS
 
 SCHEMA: List[Setting] = [
     # ---- Profile ----------------------------------------------------------------------
@@ -198,6 +198,17 @@ SCHEMA: List[Setting] = [
     _s("keys.open", "keys", "Ctrl+O", "Open film", KB, advanced=True),
     _s("keys.settings", "keys", "Ctrl+,", "Settings", KB, advanced=True),
     _s("keys.help", "keys", "F1", "Keyboard shortcuts", KB, advanced=True),
+
+    # ---- Updates ----------------------------------------------------------------------
+    _s("updates.auto_check", "bool", True, "Check for updates automatically", UP,
+       "Looks for a new version when SyncWatch starts. Nothing is downloaded until you click Update."),
+    _s("updates.test_versions", "bool", False, "Get test versions", UP,
+       "Test versions come out first to try new things, and may have more bugs. Leave this off "
+       "unless you're helping to test.", advanced=True),
+    _s("updates.check_hours", "int", 6, "Check at most every", UP,
+       "Avoids asking GitHub more often than needed.", advanced=True, minimum=1, maximum=168, suffix=" h"),
+    _s("updates.skip_version", "str", "", "Skipped version", UP, hidden=True, max_len=40),
+    _s("updates.last_check", "float", 0.0, "Last check", UP, hidden=True, minimum=0.0, maximum=4e9),
 
     # ---- Diagnostics ------------------------------------------------------------------
     _s("log.debug", "bool", False, "Detailed logging", DG,

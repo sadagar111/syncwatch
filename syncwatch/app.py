@@ -15,6 +15,7 @@ import argparse
 import faulthandler
 import getpass
 import logging
+import os
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -40,6 +41,7 @@ class AppContext:
     data_error: str
     startup_problems: List[str]
     check_results: list = field(default_factory=list)
+    restart: bool = False
     rerun_checks: Callable[[], None] = lambda: None
     build_report: Callable[[object], str] = lambda window: ""
 
@@ -237,6 +239,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     window = MainWindow(context)
     created["window"] = window
     window.show()
+    exit_after = os.environ.get("SYNCWATCH_TEST_EXIT_AFTER", "")  # automatic tests only
+    if exit_after.replace(".", "", 1).isdigit():
+        QTimer.singleShot(int(float(exit_after) * 1000), window.close)
 
     for code in dict.fromkeys(problems):
         errors.report(code)
@@ -254,10 +259,35 @@ def main(argv: Optional[List[str]] = None) -> int:
     exit_code = app.exec()
     settings.save()
     films.save_if_dirty()
+    try:
+        window.updates.manager.mark_healthy()  # closed normally: this version works
+    except Exception:
+        log.exception("could not record a healthy start")
     if data_ok:
         _clear_crash_file(profile)
-    log.info("SyncWatch closed (exit code %s)", exit_code)
+    log.info("SyncWatch closed (exit code %s)%s", exit_code, ", restarting" if context.restart else "")
+    if context.restart:
+        _restart(args)
     return exit_code
+
+
+def _restart(args: argparse.Namespace) -> None:
+    """Start SyncWatch again (after this one has released its profile lock)."""
+    import subprocess
+    if instance._held is not None:
+        instance._held.release()
+    root = paths.INSTALL_ROOT
+    extra = ["--profile", args.profile] if args.profile != "default" else []
+    if (root / "boot.py").is_file() and paths.APP_DIR.name == "app":
+        command = [sys.executable, str(root / "boot.py")] + extra
+    else:
+        command = [sys.executable, "-m", "syncwatch"] + extra
+    flags = 0x00000008 | 0x00000200 if sys.platform == "win32" else 0  # detached, own process group
+    try:
+        subprocess.Popen(command, cwd=str(root), creationflags=flags, close_fds=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as exc:
+        log.error("restart failed: %s", exc)
 
 
 def _fatal_popup(code: str, technical: str) -> None:
