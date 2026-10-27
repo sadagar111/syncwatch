@@ -83,7 +83,7 @@ def main() -> int:
                QT_QPA_PLATFORM="offscreen", PYTHONPATH="", SYNCWATCH_TEST_EXIT_AFTER="40")
     driver = work / "driver.py"
     driver.write_text(DRIVER.replace("@OUT@", str(OUT)))
-    first = subprocess.run([sys.executable, str(driver)], cwd=install, env=env, capture_output=True, text=True,
+    first = subprocess.run([sys.executable, str(driver)], cwd=install, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=180)
     print(first.stdout)
     if first.returncode != 0:
@@ -106,19 +106,26 @@ def main() -> int:
             break
         time.sleep(0.5)
     fake.close()
-    state = json.loads((install / "update_state.json").read_text())
+    def read(path: Path) -> str:
+        return path.read_text(encoding="utf-8", errors="replace") if path.exists() else f"(missing: {path.name})"
+
+    state_path = install / "update_state.json"
+    state = json.loads(state_path.read_text()) if state_path.exists() else {}
     text = log.read_text(errors="replace") if log.exists() else ""
     checks = {
         "driver ok": first.returncode == 0 and "DRIVER OK" in first.stdout,
         "new version started": started_new,
-        "app is 0.3.1": 'version__ = "0.3.1"' in (install / "app" / "syncwatch" / "__init__.py").read_text(),
-        "previous kept": 'version__ = "0.3.0"' in (install / "app.previous" / "syncwatch" / "__init__.py").read_text(),
-        "boot recorded update": "updated 0.3.0 -> 0.3.1" in (install / "boot.log").read_text(),
+        "app is 0.3.1": 'version__ = "0.3.1"' in read(install / "app" / "syncwatch" / "__init__.py"),
+        "previous kept": 'version__ = "0.3.0"' in read(install / "app.previous" / "syncwatch" / "__init__.py"),
+        "boot recorded update": "updated 0.3.0 -> 0.3.1" in read(install / "boot.log"),
         "new version marked healthy": state.get("healthy_version") == "0.3.1" and "just_updated" not in state,
         "no errors in log": " ERROR " not in text,
         "new version closed cleanly": text.count("SyncWatch closed") >= 2,
     }
     print("CHECKS:", checks)
+    if not all(checks.values()):
+        print("boot.log:\n" + read(install / "boot.log")[-2000:])
+        print("app log (end):\n" + "\n".join(text.splitlines()[-40:]))
     if " ERROR " in text:
         print("\n".join(l for l in text.splitlines() if " ERROR " in l)[-2000:])
     shutil.rmtree(work, ignore_errors=True)

@@ -27,7 +27,7 @@ if sys.platform.startswith("linux"):
 
 def check_ui(out: Path) -> bool:
     result = subprocess.run([sys.executable, str(HERE / "ui_harness.py"), "normal", str(out / "ui"), str(FILM)],
-                            env=ENV, capture_output=True, text=True, timeout=300)
+                            env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     (out / "ui.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("KEY CHECKS", "UI HARNESS",
                                                                                      "subtitle sources"))))
@@ -59,10 +59,10 @@ def check_pair(out: Path) -> bool:
     logs = {role: out / f"pair-{role}.jsonl" for role in ("host", "friend")}
     port = "50661"
     host = subprocess.Popen([sys.executable, str(HERE / "pair_harness.py"), "host", str(FILM), str(logs["host"]), port],
-                            env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                            env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     time.sleep(1.0)
     friend = subprocess.run([sys.executable, str(HERE / "pair_harness.py"), "friend", str(FILM), str(logs["friend"]),
-                             port], env=ENV, capture_output=True, text=True, timeout=300)
+                             port], env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     host_out, _ = host.communicate(timeout=120)
     (out / "pair.log").write_text(host_out + "\n----\n" + friend.stdout + friend.stderr, encoding="utf-8")
     if not all(p.exists() for p in logs.values()):
@@ -110,9 +110,12 @@ def check_pair(out: Path) -> bool:
 
 def check_update(out: Path) -> bool:
     result = subprocess.run([sys.executable, str(HERE / "update_e2e.py"), str(out / "update")], env=ENV,
-                            capture_output=True, text=True, timeout=600)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     (out / "update.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("CHECKS", "update found", "staged"))))
+    if result.returncode != 0:
+        print("update check failed; end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-60:]))
     return result.returncode == 0
 
 
