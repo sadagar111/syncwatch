@@ -1,6 +1,7 @@
 # Automatic tests: run by GitHub on every pull request and every change to main.
 # A pull request can only be merged when these pass (set up in lesson 3 of docs/GIT_GUIDE.md).
 # Screenshots and logs of each run: open the run on GitHub > "Artifacts" at the bottom.
+# When a step fails, the end of its output also appears as red notes on the pull request.
 name: tests
 
 on:
@@ -44,9 +45,9 @@ jobs:
       - name: Install libraries
         run: python -m pip install -r requirements.txt
       - name: Unit and integration tests
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+        run: python tests/ci_run.py python -m unittest discover -s tests -p "test_*.py" -v
       - name: Real-app checks (window, two apps in sync, update cycle)
-        run: python tests/gui_checks.py all --out gui-artifacts
+        run: python tests/ci_run.py python tests/gui_checks.py all --out gui-artifacts
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v7
@@ -74,7 +75,7 @@ jobs:
         run: |
           $zip = Get-ChildItem dist/SyncWatch-runtime-*.zip | Select-Object -First 1
           Expand-Archive $zip.FullName -DestinationPath rt
-          rt/python.exe tests/gui_checks.py ui --out portable-artifacts
+          python tests/ci_run.py rt/python.exe tests/gui_checks.py ui --out portable-artifacts
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v7
