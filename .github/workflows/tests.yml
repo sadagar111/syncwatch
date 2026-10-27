@@ -29,6 +29,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUNBUFFERED: "1"
+      SYNCWATCH_NO_POPUPS: "1"   # an error box would wait forever for a click
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -63,6 +64,7 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUNBUFFERED: "1"
+      SYNCWATCH_NO_POPUPS: "1"   # an error box would wait forever for a click
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

@@ -8,6 +8,7 @@ through the full log. Locally there's no need for it: just run the command.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from collections import deque
@@ -28,7 +29,8 @@ def main(command: list) -> int:
         return 2
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows runners default to cp1252
     tail: deque = deque(maxlen=LINES_SHOWN)
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")  # so ✓ and — survive on Windows too
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
                                text=True, encoding="utf-8", errors="replace", bufsize=1)
     assert process.stdout is not None
     for line in process.stdout:

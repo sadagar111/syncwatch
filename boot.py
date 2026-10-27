@@ -217,7 +217,7 @@ def fail(text):
                "- Start SyncWatch again.\n"
                "- Download the full SyncWatch zip again and unzip it over this folder. "
                "Your settings are kept, they're stored separately.\n\nDetails: %s" % (text, LOG))
-    if sys.platform == "win32":
+    if sys.platform == "win32" and not os.environ.get("SYNCWATCH_NO_POPUPS"):  # set by the tests
         try:
             import ctypes
             ctypes.windll.user32.MessageBoxW(None, message, "SyncWatch", 0x10)

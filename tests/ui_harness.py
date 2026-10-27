@@ -138,8 +138,17 @@ def run_script(errors_seen):
         QTest.keyClick(window, Qt.Key.Key_M); spin(0.1)
         checks["M mutes"] = window.settings.get("playback.muted") is True
         QTest.keyClick(window, Qt.Key.Key_M); spin(0.1)
-        QTest.keyClick(window, Qt.Key.Key_F); spin(0.4)
+        toggles = []
+        window.showFullScreen = lambda: (toggles.append(1), type(window).showFullScreen(window))
+        QTest.keyClick(window, Qt.Key.Key_F)
+        deadline = time.monotonic() + 2.0  # some platforms take a moment to change the window state
+        while not window.isFullScreen() and time.monotonic() < deadline:
+            spin(0.1)
+        del window.showFullScreen
         checks["F fullscreen"] = window.isFullScreen()
+        if not checks["F fullscreen"]:
+            print(f"fullscreen diagnostics: showFullScreen_calls={len(toggles)} state={window.windowState()!r} "
+                  f"focus={QApplication.focusWidget()!r} platform={QApplication.platformName()}")
         QTest.keyClick(window, Qt.Key.Key_Escape); spin(0.4)
         checks["Esc leaves fullscreen"] = not window.isFullScreen()
         vol = window.settings.get("playback.volume")

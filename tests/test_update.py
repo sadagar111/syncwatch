@@ -93,6 +93,8 @@ class Install:
         self.layout = Layout(self.root / "app")
 
     def boot(self, *args, env=None):
+        # SYNCWATCH_NO_POPUPS: on Windows, boot.py's error message box would wait forever for a click
+        env = dict(os.environ if env is None else env, SYNCWATCH_NO_POPUPS="1")
         return subprocess.run([sys.executable, str(self.root / "boot.py"), *args], cwd=self.root,
                               capture_output=True, text=True, timeout=120, env=env)
 
