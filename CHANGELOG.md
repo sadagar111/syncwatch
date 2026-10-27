@@ -17,6 +17,9 @@
 - `tools\release.bat` creates your signing key (24 words on paper + passphrase), checks your paper backup, and publishes releases.
 - Automatic tests run on GitHub's Windows and Linux machines for every change: the real window, two apps in sync, the whole update cycle, and the portable runtime.
 
+**Fixes**
+- When a third person tries to join, they now see "Your friend is already watching with someone" (SW-310) on Windows too, instead of "Network problem" (SW-312).
+
 ## 0.2.1 (fixes)
 - Setting explanations (ⓘ) now appear when you point at the ⓘ or click it. They didn't appear on Windows in 0.2.0.
 - New option in Settings > Interface: "Show explanations under the settings" writes them under each setting permanently.
