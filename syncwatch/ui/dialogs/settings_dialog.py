@@ -64,7 +64,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("SyncWatch settings")
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips)
         self.inline_help: List[QLabel] = []
-        self.resize(640, 560)
+        self.resize(780, 580)
         self.rows: Dict[str, List[QWidget]] = {}
         self.editors: Dict[str, QWidget] = {}
         self.resets: Dict[str, QToolButton] = {}
@@ -383,5 +383,36 @@ def profile_extras(get_avatar: Callable[[], Optional[bytes]], change_avatar: Cal
         row.addWidget(change)
         row.addWidget(remove)
         row.addStretch(1)
+        column.addLayout(row)
+    return add
+
+
+def updates_extras(controller, window):
+    """Version info and buttons for the Updates tab."""
+    def add(column: QVBoxLayout) -> None:
+        info = QLabel(controller.describe())
+        info.setWordWrap(True)
+        row = QHBoxLayout()
+        check = QPushButton("Check now")
+        check.clicked.connect(lambda: (controller.check(manual=True), info.setText(controller.describe())))
+        row.addWidget(check)
+        whats_new = QPushButton("What's new…")
+        whats_new.clicked.connect(controller.open_dialog)
+        row.addWidget(whats_new)
+        back_version = controller.can_go_back()
+        back = QPushButton(f"Go back to version {back_version}" if back_version else "Go back")
+        back.setToolTip("Restarts SyncWatch with the version you had before the last update.")
+        back.setVisible(bool(back_version))
+        back.clicked.connect(controller.go_back)
+        row.addWidget(back)
+        row.addStretch(1)
+
+        def refresh() -> None:
+            info.setText(controller.describe())
+            whats_new.setVisible(controller.result is not None and controller.result.status == "update")
+
+        refresh()
+        window.settings_dialog_refresh = refresh
+        column.addWidget(info)
         column.addLayout(row)
     return add

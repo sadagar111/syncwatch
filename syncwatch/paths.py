@@ -21,7 +21,11 @@ from pathlib import Path
 
 APP_DIR = Path(__file__).resolve().parent.parent
 ASSETS_DIR = APP_DIR / "assets"
-DEFAULT_MOVIES_DIR = APP_DIR / "movies"
+# Installed version: the app sits in <SyncWatch>\app and gets replaced by updates, so the
+# films folder is one level up, next to SyncWatch.bat. Source-code version: the project folder.
+INSTALL_ROOT = (APP_DIR.parent if APP_DIR.name == "app" and (APP_DIR.parent / "boot.py").is_file()
+                else APP_DIR)
+DEFAULT_MOVIES_DIR = INSTALL_ROOT / "movies"
 OLD_POSITIONS_FILE = APP_DIR / "positions.json"  # used by version 0.1
 
 _PROFILE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,32}$")

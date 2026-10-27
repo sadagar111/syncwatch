@@ -1,0 +1,6 @@
+# Libraries SyncWatch needs (the source-code version installs them with SyncWatch.bat).
+# The full PySide6 package is needed: PySide6-Essentials alone has no video support.
+# Tested with PySide6 6.12; 6.5 is the oldest with the FFmpeg video backend.
+PySide6>=6.5
+# Checks the signatures on updates (and, from step 3, encrypts rooms).
+cryptography>=42

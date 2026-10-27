@@ -1,0 +1,12 @@
+# Line endings. Git for Windows converts text files; these rules keep that safe:
+* text=auto
+# Windows batch files need CRLF, or "goto" can break. Release zips (git archive) follow this too.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# Files whose exact bytes matter: never convert.
+tools/bip39_english.txt -text
+*.srt -text
+*.png binary
+*.mkv binary
+*.mp4 binary
+*.zip binary

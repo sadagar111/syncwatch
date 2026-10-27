@@ -41,6 +41,9 @@ DEAD_AFTER_S = 12.0
 CONNECT_TIMEOUT_S = 8.0
 MAX_MSGS_PER_S = 60
 BURST = 120
+REFUSE_DRAIN_S = 3.0      # how long a refused extra caller gets to read "full"
+MAX_REFUSING = 8          # more callers than this at once are just cut off
+_refusing = threading.BoundedSemaphore(MAX_REFUSING)
 
 _HOSTNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _UNREACHABLE_NETWORK = {errno.ENETUNREACH, errno.ENETDOWN, 10050, 10051}
@@ -126,6 +129,34 @@ def _kill(sock: Optional[socket.socket]) -> None:
         sock.close()
     except OSError:
         pass
+
+
+def _refuse(sock: socket.socket) -> None:
+    """Tell an extra caller "full" and hang up politely.
+
+    Simply closing would reset the connection (their hello is still unread), and
+    Windows then throws away our "full" message before their app can read it:
+    they'd see "Network problem" instead of "already watching with someone".
+    So: send, signal the end of our data, read whatever they still send (at most
+    REFUSE_DRAIN_S seconds and 64 KB), then close.
+    """
+    try:
+        sock.settimeout(2)
+        sock.sendall(protocol.encode({"t": "bye", "reason": "full"}))
+        sock.shutdown(socket.SHUT_WR)
+        end = time.monotonic() + REFUSE_DRAIN_S
+        received = 0
+        while time.monotonic() < end and received < 65536:
+            sock.settimeout(max(0.05, end - time.monotonic()))
+            chunk = sock.recv(4096)
+            if not chunk:
+                break  # they read our message and closed their side
+            received += len(chunk)
+    except OSError:
+        pass
+    finally:
+        _kill(sock)
+        _refusing.release()
 
 
 class _Connection:
@@ -250,12 +281,10 @@ class Link:
                 busy = self.conn is not None and not self.conn.closed
             if busy or self.session != session:
                 log.info("refusing extra connection from %s (already connected)", peer)
-                try:
-                    sock.settimeout(2)
-                    sock.sendall(protocol.encode({"t": "bye", "reason": "full"}))
-                except OSError:
-                    pass
-                _kill(sock)
+                if _refusing.acquire(blocking=False):
+                    threading.Thread(target=_refuse, args=(sock,), name="sw-refuse", daemon=True).start()
+                else:
+                    _kill(sock)  # someone is hammering the port: don't spend threads on it
                 continue
             self._attach(sock, peer, session)
 

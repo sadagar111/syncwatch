@@ -5,7 +5,7 @@ The package is split so that everything except ``syncwatch.ui`` and
 subtitles, sync) testable on any machine and easy to reuse.
 """
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 APP_NAME = "SyncWatch"
 
 # Bumped whenever the messages two SyncWatch apps send each other change in

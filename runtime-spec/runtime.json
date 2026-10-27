@@ -1,0 +1,7 @@
+{
+  "_help": "What goes into SyncWatch's portable Windows runtime (its own Python + libraries). Changing anything here (or in requirements-win.lock) gives the runtime a new id, so the next release builds and uploads a new runtime; otherwise the existing one is reused. Hashes come from python.org and PyPI.",
+  "python_version": "3.13.17",
+  "python_tag": "313",
+  "embed_url": "https://www.python.org/ftp/python/3.13.17/python-3.13.17-embed-amd64.zip",
+  "embed_sha256": "9e35319bffedab8b36ad44d8f377cb4f1733bcec257a0b6d04d94f01486ddb38"
+}

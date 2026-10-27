@@ -203,6 +203,47 @@ class ActivityPanel(Panel):
         self.list.scrollToBottom()
 
 
+class UpdateBanner(QFrame):
+    """Shown at the top of the sidebar when a new version is available or downloaded."""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        self.setStyleSheet("#Panel { border: 1px solid #F5A524; }")
+        self.text = QLabel("")
+        self.text.setWordWrap(True)
+        self.button = QPushButton("What's new")
+        self.button.setObjectName("Accent")
+        self.button.clicked.connect(self.clicked)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(10, 8, 10, 8)
+        column.setSpacing(6)
+        column.addWidget(self.text)
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        button_row.addWidget(self.button)
+        column.addLayout(button_row)
+        self.setVisible(False)
+
+    def set_version(self, version: str, ready: bool = False) -> None:
+        if not version:
+            self.setVisible(False)
+            return
+        if ready:
+            self.text.setText(f"<b>Version {version} is downloaded.</b><br>Restart SyncWatch to start using it.")
+            self.button.setText("Restart")
+        else:
+            self.text.setText(f"<b>Version {version} is available.</b>")
+            self.button.setText("What's new")
+        self.setVisible(True)
+        # The sidebar sits in a splitter, which doesn't re-measure wrapped text by itself;
+        # without this, going from one line to two cut off the second line.
+        width = self.text.width() if self.text.width() > 50 else 250
+        self.text.setMinimumHeight(self.text.heightForWidth(width))
+        self.updateGeometry()
+
+
 class Sidebar(QWidget):
     def __init__(self, last_address: str = "", parent=None):
         super().__init__(parent)
@@ -220,15 +261,20 @@ class Sidebar(QWidget):
         header.addWidget(title)
         header.addWidget(version)
         header.addStretch(1)
+        self.update_banner = UpdateBanner()
         self.connection = ConnectionPanel(last_address)
         self.people = PeoplePanel()
         self.activity = ActivityPanel()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 8, 8, 8)
         layout.addLayout(header)
+        layout.addWidget(self.update_banner)
         layout.addWidget(self.connection)
         layout.addWidget(self.people)
         layout.addWidget(self.activity, 1)
+
+    def show_update(self, version: str, ready: bool = False) -> None:
+        self.update_banner.set_version(version, ready)
 
     def apply_settings(self, settings) -> None:
         self.connection.setVisible(settings.get("ui.panel_connection"))
