@@ -3,4 +3,4 @@
 While empty, updates are switched off (SW-711).
 """
 
-GITHUB_REPO = ""
+GITHUB_REPO = "sadagar111/syncwatch"
