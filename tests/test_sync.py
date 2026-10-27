@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from syncwatch import PROTOCOL_VERSION  # noqa: E402
 from syncwatch.net import link as link_module  # noqa: E402
 from syncwatch.settings import Settings  # noqa: E402
-from syncwatch.sync.controller import Controller  # noqa: E402
+from syncwatch.sync.controller import PAUSE_ALIGN_MS, Controller  # noqa: E402
 
 PORT = 50611
 
@@ -161,7 +161,9 @@ class SyncTests(unittest.TestCase):
         p.pump(0.5)
         self.assertFalse(p.ph.playing)
         self.assertFalse(p.pf.playing)
-        self.assertLess(abs(p.gap()), 1)  # paused on the same frame
+        # Both stop within PAUSE_ALIGN_MS of each other: closer than that isn't worth a jump.
+        # (On Linux this is ~0 ms; on Windows the clock ticks every ~16 ms, so ~10 ms is normal.)
+        self.assertLess(abs(p.gap()), PAUSE_ALIGN_MS)
 
     def test_friend_play_pause_cooldown(self):
         p = self.pair
