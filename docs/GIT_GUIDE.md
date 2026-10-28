@@ -228,12 +228,18 @@ in GitHub (and prints the address in GitHub). Don't set up both.
    - **Build command**: leave it empty. **Deploy command**: `npx wrangler deploy`.
 3. **Save and Deploy**. When the build finishes, its last lines show the
    address (`https://syncwatch-relay.<your name>.workers.dev`).
-4. Optional, so the app's own changes don't start relay builds: the Worker →
-   **Settings** → **Build** → **Build watch paths** → *Include paths*: `relay/*`.
+4. The Worker → **Settings** → **Build**:
+   - **Branch control**: clear **Enable Preview Builds**.
+     *Why:* pull requests don't need their own copy of the relay (the GitHub
+     check *Relay works* already tests the relay code); otherwise every pull
+     request also gets a Cloudflare check that can fail for no useful reason.
+   - Optional, so the app's own changes don't start relay builds:
+     **Build watch paths** → *Include paths*: `relay/*`.
 
 Already created it with other settings? Change them under the Worker →
-**Settings** → **Build**, then start the build again from the Worker's
-**Deployments** list (or push any change).
+**Settings** → **Build**, then open the failed build (the Worker's
+**Deployments** or builds list) and retry it, or wait for the next change to
+the `relay` folder on `main`.
 
 #### Way B: GitHub deploys it (`.github/workflows/relay.yml`)
 1. Note your **Account ID**: on the Workers & Pages page, under **Account
@@ -280,6 +286,7 @@ get a version that can't connect.
 | Message | What to do |
 |---|---|
 | `Could not detect a directory containing static files` (way A) | The **Root directory** isn't `relay`. Fix it in Settings → Build and build again. |
+| A red ✕ *Workers Builds: syncwatch-relay* on a pull request (way A) | Preview builds are on: clear **Enable Preview Builds** (way A, step 4). It doesn't block merging. |
 | The build says the Worker name doesn't match (way A) | Name the Worker `syncwatch-relay`, or tell Claude the name so `relay/wrangler.jsonc` can match it. |
 | *No Cloudflare secrets, so GitHub didn't deploy the relay* (way B) | The secrets from way B step 3 are missing or misspelled. With way A this note is expected. |
 | `You need to register a workers.dev subdomain` | Do step 2, then deploy again. |
