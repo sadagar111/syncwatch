@@ -82,7 +82,7 @@ def main() -> int:
     env = dict(os.environ, SYNCWATCH_DATA_DIR=str(data), SYNCWATCH_UPDATE_SERVER=fake.base,
                QT_QPA_PLATFORM="offscreen", PYTHONPATH="", SYNCWATCH_TEST_EXIT_AFTER="40")
     driver = work / "driver.py"
-    driver.write_text(DRIVER.replace('"@OUT@"', repr(str(OUT))))  # repr: Windows backslashes stay intact
+    driver.write_text(DRIVER.replace('"@OUT@"', repr(str(OUT))), encoding="utf-8")  # repr: Windows backslashes stay intact
     first = subprocess.run([sys.executable, str(driver)], cwd=install, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=180)
     print(first.stdout)
@@ -157,15 +157,24 @@ def scripted(self):
     print("update found:", ok, w.updates.result and str(w.updates.result.manifest.version))
     spin(0.3)
     w.grab().save(str(OUT / "e2e_1_banner.png"))
-    w.updates.open_dialog()
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog
+    settings = QDialog(w)          # stands in for the Settings window, which blocks the main window
+    settings.setWindowModality(Qt.WindowModality.ApplicationModal)
+    settings.show()
+    spin(0.3)
+    w.updates.open_dialog()        # "What's new…" pressed inside Settings
     spin(0.5)
+    on_top = (w.updates.dialog.parentWidget() is settings and w.updates.dialog.isVisible()
+              and QApplication.activeModalWidget() is w.updates.dialog)
+    print("update window usable above Settings:", on_top)
     w.updates.dialog.grab().save(str(OUT / "e2e_2_whats_new.png"))
     w.updates.dialog.updateClicked.emit()
     spin(30, lambda: w.updates.dialog.pages.currentIndex() == 2)
     w.updates.dialog.grab().save(str(OUT / "e2e_3_ready.png"))
     print("staged:", w.updates.manager.staged())
     w.grab().save(str(OUT / "e2e_4_banner_ready.png"))
-    if w.updates.manager.staged() == "0.3.1":
+    if w.updates.manager.staged() == "0.3.1" and on_top:
         print("DRIVER OK")
     w.updates.dialog.restartClicked.emit()
     spin(1.0)

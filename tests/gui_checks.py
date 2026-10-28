@@ -112,7 +112,7 @@ def check_update(out: Path) -> bool:
     result = subprocess.run([sys.executable, str(HERE / "update_e2e.py"), str(out / "update")], env=ENV,
                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     (out / "update.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
-    print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("CHECKS", "update found", "staged"))))
+    print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("CHECKS", "update found", "staged", "update window"))))
     if result.returncode != 0:
         print("update check failed; end of its output:")
         print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-60:]))
