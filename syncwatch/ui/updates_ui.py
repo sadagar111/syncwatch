@@ -10,7 +10,9 @@ import threading
 import time
 from typing import Optional
 
-from PySide6.QtCore import QObject, QTimer, Signal
+import shiboken6
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtWidgets import QApplication
 
 from .. import __version__, errors
 from ..update import github, install
@@ -118,8 +120,16 @@ class UpdateController(QObject):
     def open_dialog(self) -> None:
         if self.result is None or self.result.status != "update":
             return
+        # Opened from the Settings window (which blocks the main window while it's open), the
+        # update window must belong to Settings and block it in turn. Otherwise it opens behind
+        # Settings and can't be clicked until Settings is closed.
+        owner = QApplication.activeModalWidget() or self.window
+        if self.dialog is not None and not shiboken6.isValid(self.dialog):
+            self.dialog = None  # it belonged to a Settings window that's gone
         if self.dialog is not None and self.dialog.isVisible():
-            self.dialog.raise_()
+            if self.dialog.parentWidget() is not owner:
+                self._attach(owner)
+            self._bring_to_front()
             return
         peer = self.window.controller.peer
         self.dialog = UpdateDialog(self.result, peer.name if peer and self.window.controller.connected else "",
@@ -130,7 +140,26 @@ class UpdateController(QObject):
         self.dialog.restartClicked.connect(self.window.request_restart)
         if self.manager.staged() == str(self.result.manifest.version):
             self.dialog.show_ready()
+        self._attach(owner)
+        self._bring_to_front()
+
+    def _dialog_alive(self) -> bool:
+        return self.dialog is not None and shiboken6.isValid(self.dialog)
+
+    def _attach(self, owner) -> None:
+        flags = self.dialog.windowFlags()
+        was_visible = self.dialog.isVisible()
+        self.dialog.hide()
+        self.dialog.setParent(owner, flags)  # setParent drops the window flags unless given again
+        self.dialog.setWindowModality(Qt.WindowModality.ApplicationModal if owner is not self.window
+                                      else Qt.WindowModality.NonModal)
+        if was_visible:
+            self.dialog.show()
+
+    def _bring_to_front(self) -> None:
         self.dialog.show()
+        self.dialog.raise_()
+        self.dialog.activateWindow()
 
     def _skip(self) -> None:
         if self.result is not None:
@@ -159,7 +188,7 @@ class UpdateController(QObject):
             self.cancel_event.set()
 
     def _on_progress(self, done: int, total: int, speed: float, eta) -> None:
-        if self.dialog is not None:
+        if self._dialog_alive():
             self.dialog.set_progress(done, total, speed, eta)
 
     def _on_prepared(self, outcome) -> None:
@@ -167,10 +196,10 @@ class UpdateController(QObject):
         if outcome is None:
             self.window.activity(f"SyncWatch {self.result.manifest.version} is downloaded and ready", "you")
             self.window.sidebar.show_update(str(self.result.manifest.version), ready=True)
-            if self.dialog is not None:
+            if self._dialog_alive():
                 self.dialog.show_ready()
             return
-        if self.dialog is not None:
+        if self._dialog_alive():
             self.dialog.show_info()
         if isinstance(outcome, github.Cancelled):
             self.window.activity("Update download cancelled. It continues where it stopped next time.", "info")

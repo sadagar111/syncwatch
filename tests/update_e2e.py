@@ -157,15 +157,24 @@ def scripted(self):
     print("update found:", ok, w.updates.result and str(w.updates.result.manifest.version))
     spin(0.3)
     w.grab().save(str(OUT / "e2e_1_banner.png"))
-    w.updates.open_dialog()
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog
+    settings = QDialog(w)          # stands in for the Settings window, which blocks the main window
+    settings.setWindowModality(Qt.WindowModality.ApplicationModal)
+    settings.show()
+    spin(0.3)
+    w.updates.open_dialog()        # "What's new…" pressed inside Settings
     spin(0.5)
+    on_top = (w.updates.dialog.parentWidget() is settings and w.updates.dialog.isVisible()
+              and QApplication.activeModalWidget() is w.updates.dialog)
+    print("update window usable above Settings:", on_top)
     w.updates.dialog.grab().save(str(OUT / "e2e_2_whats_new.png"))
     w.updates.dialog.updateClicked.emit()
     spin(30, lambda: w.updates.dialog.pages.currentIndex() == 2)
     w.updates.dialog.grab().save(str(OUT / "e2e_3_ready.png"))
     print("staged:", w.updates.manager.staged())
     w.grab().save(str(OUT / "e2e_4_banner_ready.png"))
-    if w.updates.manager.staged() == "0.3.1":
+    if w.updates.manager.staged() == "0.3.1" and on_top:
         print("DRIVER OK")
     w.updates.dialog.restartClicked.emit()
     spin(1.0)
