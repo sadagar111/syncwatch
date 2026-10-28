@@ -13,5 +13,5 @@ While the list is empty, updates are switched off (SW-711).
 """
 
 TRUSTED_KEYS = [
-    # "base64 of the 32-byte Ed25519 public key",
+    "HVFNGmaGKe/OmDNY3rvNeoMnLsWolkvMXYbIs0R8kQw=",
 ]
