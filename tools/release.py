@@ -7,6 +7,8 @@ Run from the project folder (or use tools\\release.bat):
     python tools/release.py restore         rebuild the key file from your 24 words (new PC, lost file)
     python tools/release.py show-words      show your 24 words again (needs the passphrase; lost paper)
     python tools/release.py set-repo OWNER/NAME
+    python tools/release.py set-relay https://syncwatch-relay.<you>.workers.dev
+        --no-check      don't check that the relay answers
     python tools/release.py publish         publish the version in syncwatch/__init__.py
         --test          as a test version (version must look like 0.3.1-test.1)
         --dry-run       build and sign everything into dist/, but don't publish
@@ -54,6 +56,7 @@ from syncwatch.update.version import Version  # noqa: E402
 
 KEYS_FILE = ROOT / "syncwatch" / "update" / "keys.py"
 SOURCE_FILE = ROOT / "syncwatch" / "update" / "source.py"
+RELAY_FILE = ROOT / "syncwatch" / "net" / "relay_url.py"
 FIXED_DATE = (2020, 1, 1, 0, 0, 0)
 MIN_PASSPHRASE = 10
 
@@ -61,7 +64,7 @@ MIN_PASSPHRASE = 10
 APP_PREFIXES = ("syncwatch/", "assets/", "tools/")
 APP_FILES = ("CHANGELOG.md",)
 NOT_FOR_FRIENDS = ("tools/release.py", "tools/release.bat", "tools/build_runtime.py", "tools/keywords.py",
-                   "tools/bip39_english.txt")
+                   "tools/bip39_english.txt", "tools/local_relay.py")
 ROOT_FILES = {"boot.py": "boot.py", "SyncWatch.bat": "SyncWatch.bat", "packaging/README.txt": "README.txt"}
 EXTRA_FULL_FILES = {"packaging/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt"}
 
@@ -251,6 +254,27 @@ def cmd_set_repo(args) -> None:
     SOURCE_FILE.write_text(re.sub(r'^GITHUB_REPO = "[^"]*"', f'GITHUB_REPO = "{repo}"', text, flags=re.MULTILINE),
                            encoding="utf-8")
     say(f"syncwatch/update/source.py now says {repo}. Commit that change.")
+
+
+def cmd_set_relay(args) -> None:
+    from syncwatch.net.relay import Relay, RelayError
+    try:
+        relay = Relay(args.url)
+    except ValueError as exc:
+        raise Stop(f"{exc}. Use the address the relay deploy printed, like "
+                   "https://syncwatch-relay.<you>.workers.dev") from None
+    if not args.no_check:
+        say(f"Checking {relay.address}/v1/health …")
+        try:
+            relay.health()
+        except RelayError as exc:
+            raise Stop(f"the relay didn't answer correctly ({exc.code}: {exc.technical}). Check the address, "
+                       "or add --no-check to set it anyway.") from None
+        say("  it answers: it's a SyncWatch relay.")
+    text = RELAY_FILE.read_text(encoding="utf-8")
+    RELAY_FILE.write_text(re.sub(r'^RELAY_URL = "[^"]*"', f'RELAY_URL = "{relay.address}"', text, flags=re.MULTILINE),
+                          encoding="utf-8")
+    say(f"syncwatch/net/relay_url.py now says {relay.address}. Commit that change.")
 
 
 # =============================================================== building
@@ -523,6 +547,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_parser("show-words", help="show your 24 words again (needs the passphrase)")
     set_repo = sub.add_parser("set-repo", help="set the GitHub repository (OWNER/NAME)")
     set_repo.add_argument("repo")
+    set_relay = sub.add_parser("set-relay", help="set the relay server address (https://...)")
+    set_relay.add_argument("url")
+    set_relay.add_argument("--no-check", action="store_true", help="don't check that the relay answers")
     publish = sub.add_parser("publish", help="publish the current version")
     publish.add_argument("--test", action="store_true")
     publish.add_argument("--dry-run", action="store_true")
@@ -531,7 +558,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     publish.add_argument("--no-full-zip", dest="full_zip", action="store_false")
     args = parser.parse_args(argv)
     handlers = {"keygen": cmd_keygen, "check-backup": cmd_check_backup, "restore": cmd_restore,
-                "show-words": cmd_show_words, "set-repo": cmd_set_repo, "publish": cmd_publish}
+                "show-words": cmd_show_words, "set-repo": cmd_set_repo, "set-relay": cmd_set_relay,
+                "publish": cmd_publish}
     try:
         handlers[args.command](args)
     except Stop as stop:

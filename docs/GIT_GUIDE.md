@@ -193,6 +193,75 @@ On the release page (repo → **Releases**), download `SyncWatch-0.3.0-windows.z
 
 Then follow TESTING.md: I'll send a small test update (0.3.1-test.1) as the next pull request, so you can see the whole update cycle.
 
+---
+
+## Lesson 5: your own relay server on Cloudflare (for rooms, version 0.4)
+
+**Goal:** put the relay (the `relay` folder) online, so friends can join rooms
+from anywhere. GitHub deploys it for you; you only set up the accounts once.
+
+*Why your own:* free, private (only SyncWatch uses it), and it runs on
+port 443 like any website, so it works on every network. Everything that passes
+through it is encrypted by the apps, so even Cloudflare can't read it.
+
+### 1. Cloudflare account (free, no card)
+Sign up at **dash.cloudflare.com/sign-up** and confirm your email.
+
+### 2. Your workers.dev name
+In the dashboard, open **Workers & Pages** (Ctrl+K and type it, if you can't see it).
+If it asks you to choose a **workers.dev subdomain**, pick one, e.g. your
+nickname. Your relay's address will be `https://syncwatch-relay.<that name>.workers.dev`.
+On the same page, under **Account details**, click the copy button next to
+**Account ID** and paste it somewhere for step 4.
+
+### 3. A key for GitHub ("API token")
+Ctrl+K → **API Tokens** → **Create Token** → template **Edit Cloudflare Workers**
+→ **Use template**. Under *Account Resources* choose your account; under
+*Zone Resources* leave **All zones** (you have none). → **Continue to summary**
+→ **Create Token**. Copy the token now: Cloudflare shows it only once.
+
+*Why:* this token lets GitHub deploy the relay to your account and nothing else.
+
+### 4. Give both to GitHub as secrets
+GitHub → your repo → **Settings** → **Secrets and variables** → **Actions** →
+**New repository secret**, twice:
+- Name `CLOUDFLARE_API_TOKEN`, value: the token from step 3
+- Name `CLOUDFLARE_ACCOUNT_ID`, value: the Account ID from step 2
+
+*Why secrets:* GitHub stores them encrypted, never shows them again (not even
+to you), hides them in logs, and gives them only to workflows in your own repo.
+They never go into the code.
+
+### 5. Deploy
+GitHub → **Actions** → **relay** (left list) → **Run workflow** → branch `main` → **Run workflow**.
+After a minute or two, open the run: the **Summary** shows *"The relay is online"*
+and its address.
+
+### 6. Tell SyncWatch the address (your own pull request, like lesson 3)
+```
+git switch main
+git pull
+git switch -c set-relay
+tools\release.bat set-relay https://syncwatch-relay.<your name>.workers.dev
+git add syncwatch/net/relay_url.py
+git commit -m "Use my relay"
+git push -u origin set-relay
+gh pr create --fill
+```
+`set-relay` first checks that the address really answers as a SyncWatch relay.
+Merge when the checks are green.
+
+From now on GitHub redeploys the relay by itself whenever a pull request
+changes the `relay` folder.
+
+### If something goes wrong
+| Message | What to do |
+|---|---|
+| *Cloudflare isn't set up yet, so the relay wasn't deployed* | The secrets from step 4 are missing or misspelled. |
+| `You need to register a workers.dev subdomain` | Do step 2, then run the workflow again. |
+| `Authentication error` / `10000` | The token is wrong or expired: make a new one (step 3) and update the secret. |
+| `set-relay` says the relay didn't answer | Check the address in the run's summary; wait a minute after deploying. |
+
 ### Commands so far
 | Command | What it does |
 |---|---|
@@ -203,4 +272,4 @@ Then follow TESTING.md: I'll send a small test update (0.3.1-test.1) as the next
 | `git switch <branch>` / `git switch -c <new>` | Change branch / create one and move onto it |
 | `git log --oneline` | The history, one line per commit |
 | `gh pr create --fill` | Open a pull request for your branch |
-| `tools\release.bat ...` | Signing key and publishing (docs/RELEASING.md) |
+| `tools\release.bat ...` | Signing key, publishing, relay address (docs/RELEASING.md) |
