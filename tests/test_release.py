@@ -7,10 +7,8 @@ Uses a temporary copy of the project as a Git repo with a local "origin", a fake
 import builtins
 import importlib
 import io
-import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -243,7 +241,7 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("_root/boot.py", app)
         self.assertIn("_root/README.txt", app)
         self.assertIn("syncwatch/__main__.py", app)
-        self.assertIn("tools/allow_firewall.bat", app)
+        self.assertIn("tools/remove_firewall.bat", app)
         self.assertNotIn("tools/release.py", app)
         self.assertNotIn("tools/local_relay.py", app)
         self.assertFalse(any(n.startswith("relay/") for n in app))
@@ -274,6 +272,20 @@ class ReleaseToolTests(unittest.TestCase):
         (self.work / "uncommitted.txt").unlink()
         code, out = self.answers(lambda: self.release.main(["publish", "--test", "--skip-tests"]))
         self.assertIn("is not a test version", out)
+        # Rooms without a relay address: refused (friends' rooms would be off).
+        relay_file = self.work / "syncwatch" / "net" / "relay_url.py"
+        kept = relay_file.read_text()
+        relay_file.write_text('RELAY_URL = ""\n')
+        git("commit", "-am", "no relay", cwd=self.work)
+        try:
+            with mock.patch.object(self.release.build_runtime, "build", self.fake_runtime):
+                code, out = self.answers(lambda: self.release.main(["publish", "--skip-tests"]))
+            self.assertEqual(code, 1)
+            self.assertIn("Rooms need a relay server", out)
+        finally:
+            relay_file.write_text(kept)
+            git("commit", "-am", "relay back", cwd=self.work)
+            git("push", cwd=self.work)
 
     def test_6_publish_and_app_accepts_it(self):
         with mock.patch.object(self.release.build_runtime, "build", self.fake_runtime):

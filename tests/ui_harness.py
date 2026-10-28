@@ -21,12 +21,15 @@ OUT.mkdir(parents=True, exist_ok=True)
 
 data_dir = Path(tempfile.mkdtemp(prefix="sw-ui-"))
 os.environ["SYNCWATCH_DATA_DIR"] = str(data_dir)
+from tools.local_relay import LocalRelay  # noqa: E402
+
+RELAY = LocalRelay().start()           # so "Host my room" works without internet
+os.environ["SYNCWATCH_RELAY"] = RELAY.url
 profile_dir = data_dir / "profiles" / "default"
 profile_dir.mkdir(parents=True)
 if SCRIPT != "first_launch":
     (profile_dir / "settings.json").write_text(json.dumps(
-        {"_version": 1, "values": {"profile.name": "Alex", "ui.startup_checks": "always",
-                                   "sync.port": 50631}}), encoding="utf-8")
+        {"_version": 1, "values": {"profile.name": "Alex", "ui.startup_checks": "always"}}), encoding="utf-8")
 
 from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtGui import QPainter, QPixmap  # noqa: E402
@@ -159,9 +162,13 @@ def run_script(errors_seen):
         window._build_subs_menu()
         print("subtitle sources:", [s.label for s in window.subtitles.sources],
               "current:", window.subtitles.current_id, "status:", window.subtitles.status)
-    window.sidebar.connection.hostClicked.emit()
-    spin(0.8)
+    window.sidebar.room.hostClicked.emit()
+    spin(1.0)
     shot("05_hosting")
+    checks = {"hosting": window.controller.session.is_host,
+              "room code shown": window.sidebar.room.code_label.text().startswith("Room code: SW-")}
+    print("ROOM CHECKS:", checks)
+    FAILED.extend(name for name, ok in checks.items() if not ok)
     from syncwatch.ui.dialogs.settings_dialog import SettingsDialog
     dialog = SettingsDialog(window.settings)
     dialog.resize(680, 600)
@@ -174,10 +181,10 @@ def run_script(errors_seen):
     shot_widget(dialog, "07_settings_advanced_sync")
     dialog.close()
     from syncwatch import errors
-    errors.report("SW-304", "connect 100.64.1.2:50505: TimeoutError: timed out", address="100.64.1.2:50505")
+    errors.report("SW-403", "SSLCertVerificationError: certificate verify failed")
     spin(0.5)
     for widget in QApplication.topLevelWidgets():
-        if widget.isVisible() and "SW-304" in widget.windowTitle():
+        if widget.isVisible() and "SW-403" in widget.windowTitle():
             shot_widget(widget, "08_error_popup")
 
 

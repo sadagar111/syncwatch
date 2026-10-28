@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.4.0 (step 3: rooms, friends and security)
+**Rooms for up to 10 people (or 20)**
+- **Host my room** opens your room; **Copy code** gives you its code (`SW-…`). Friends paste it under *Join a room*. No addresses, no Tailscale, no firewall settings: everything goes through your relay server.
+- Your room keeps its code. **New code** makes a new one: the old code stops working, and people in the room follow by themselves.
+- Everyone who asks to join waits for you: **Let in**, **Not now**, or **Block** (*When someone asks to join my room* in Settings: ask every time, friends join directly, only friends, or anyone).
+- After a dropped connection or a restart, people who were just in your room get back in by themselves (within 10 minutes; can be turned off). Closing your room on purpose ends that.
+- The **People** list shows everyone with their picture, whether they're playing, paused, loading or watching on their own, how far apart they are, and whether someone has a different film. Right-click someone: Add friend, Remove, Remove and block, Copy their ID.
+- Watching together works as before, for the whole room: play, pause, jumps, **Sync up** (waits for everyone, names whoever was too slow), **Sync me**, host-only control, cooldowns per person.
+- Gaps are measured on the host's clock, so they're right even when the PCs' clocks differ.
+- *Compare my position with* (advanced): the host, or the median or average of everyone else.
+
+**Friends**
+- In a room, **Add friend**; the other person accepts. Friends see when you host (**Hosting · Join**), and rooms that are already open show up when SyncWatch starts. Joining still needs the host's OK.
+- *Tell friends when I'm hosting* and *Show friends' rooms* can be switched off.
+
+**Security** (docs/ROOMS.md explains the design)
+- Every PC has its own keys; people see your name with a short ID like `K7QF-2M9X`, so nobody can pass as you by using your name.
+- Every message is encrypted and signed. The relay only passes on scrambled data.
+- A room code alone only lets someone ask. The room key changes whenever someone joins or leaves, so a leaked code or someone who left can't read along.
+- Only the host's app can send commands for everyone; a member's modified app can't.
+
+**For testing**
+- `tools\bots.bat <room code> --count 9` fills your room with fake viewers (`--lag-ms`, `--drift`, `--chaos`).
+- The automatic tests now run three real apps in one room.
+
+**Removed**
+- The direct connection (host address, port 50505, Tailscale). It may come back later as an option.
+- `allow_firewall.bat`: SyncWatch only makes outgoing connections now. If you ran it once, `remove_firewall.bat` (in `app\tools` in the zip version) removes the rule it made.
+
 ## 0.3.1 (fixes)
 - **Unzipping works with Windows Explorer.** It used to fail with "Path too long" (0x80010135) in folders with long names. The bundled Python leaves out parts of Qt that SyncWatch never uses, so it's also 73 MB smaller once unzipped and downloads faster.
 - **The update window opens on top.** Pressing *What's new…* in Settings opened it behind the Settings window, so you had to close Settings first.

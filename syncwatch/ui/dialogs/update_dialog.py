@@ -97,8 +97,8 @@ class UpdateDialog(QDialog):
         ready_layout = QVBoxLayout(ready)
         ready_text = f"<b>SyncWatch {found.version} is ready.</b><br>Restart SyncWatch to finish updating."
         if connected_to:
-            ready_text += (f"<br><br>You're watching with {connected_to}. Restarting disconnects you for a "
-                           "moment; join again afterwards.")
+            ready_text += (f"<br><br>You're in {connected_to}. Restarting takes you out for a moment; "
+                           "you get straight back in afterwards.")
         ready_label = QLabel(ready_text)
         ready_label.setWordWrap(True)
         restart = QPushButton("Restart now")

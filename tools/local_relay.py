@@ -188,6 +188,7 @@ class LocalRelay:
                           f"Sec-WebSocket-Accept: {accept_key(key)}\r\n\r\n").encode("ascii"))
             sock.settimeout(None)
             ws = WebSocket(sock, rest, max_message=MAX_MESSAGE, mask_outgoing=False, expect_masked=True)
+            ws.linger = 1.0  # so a refused client still reads why (1009, 1003) instead of a reset
             self._member_loop(ws, channel)
         except (OSError, ProtocolError, ValueError):
             pass

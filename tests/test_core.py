@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 from syncwatch import errors, theme  # noqa: E402
 from syncwatch.filmstate import FilmMemory, film_key  # noqa: E402
 from syncwatch.net import protocol  # noqa: E402
-from syncwatch.settings import BY_KEY, SCHEMA, SECTIONS, Settings  # noqa: E402
+from syncwatch.settings import SCHEMA, SECTIONS, Settings  # noqa: E402
 
 
 class SettingsTests(unittest.TestCase):
@@ -51,35 +51,37 @@ class SettingsTests(unittest.TestCase):
 
     def test_invalid_values_are_cleaned(self):
         self.path.write_text(json.dumps({"_version": 1, "values": {
-            "subs.size_pct": 999, "sync.port": "abc", "subs.color": "red", "subs.encoding": "klingon",
+            "subs.size_pct": 999, "room.max_people": "abc", "subs.color": "red", "subs.encoding": "klingon",
             "profile.name": "x" * 100, "ui.toasts": "yes"}}))
         settings = Settings(self.path)
         settings.load()
         self.assertEqual(settings.get("subs.size_pct"), 15.0)          # clamped
-        self.assertEqual(settings.get("sync.port"), 50505)              # default
+        self.assertEqual(settings.get("room.max_people"), 10)           # default
         self.assertEqual(settings.get("subs.color"), "#FFFFFF")
         self.assertEqual(settings.get("subs.encoding"), "auto")
         self.assertEqual(len(settings.get("profile.name")), 32)
         self.assertTrue(settings.get("ui.toasts"))
-        self.assertFalse(settings.set("sync.port", "nope"))
+        self.assertFalse(settings.set("room.max_people", "nope"))
+        self.assertTrue(settings.set("room.max_people", 99))
+        self.assertEqual(settings.get("room.max_people"), 20)           # clamped
 
     def test_damaged_file(self):
         self.path.write_text("{ this is not json")
         settings = Settings(self.path)
         self.assertEqual(settings.load(), ["SW-106"])
         self.assertTrue((self.dir / "settings.json.damaged").exists())
-        self.assertEqual(settings.get("sync.port"), 50505)
+        self.assertEqual(settings.get("room.policy"), "ask")
 
     def test_listeners_and_advanced_hint(self):
         settings = Settings(None)
         seen = []
         settings.subscribe("subs.", lambda k, v: seen.append((k, v)))
         settings.set("subs.box", True)
-        settings.set("sync.port", 6000)
+        settings.set("room.max_people", 6)
         self.assertEqual(seen, [("subs.box", True)])
-        self.assertIn("sync.port", settings.changed_advanced())
-        settings.reset("sync.port")
-        self.assertNotIn("sync.port", settings.changed_advanced())
+        self.assertIn("room.max_people", settings.changed_advanced())
+        settings.reset("room.max_people")
+        self.assertNotIn("room.max_people", settings.changed_advanced())
 
     def test_languages(self):
         settings = Settings(None)
@@ -103,8 +105,8 @@ class ErrorCatalogTests(unittest.TestCase):
             self.assertIn(problem.severity, (errors.ERROR, errors.WARNING, errors.INFO), code)
 
     def test_report_never_breaks(self):
-        rep = errors.build("SW-304")  # placeholder {address} missing: text stays readable
-        self.assertIn("{address}", rep.explanation)
+        rep = errors.build("SW-407")  # placeholder {reason} missing: text stays readable
+        self.assertIn("{reason}", rep.explanation)
         rep = errors.build("SW-999", "x")
         self.assertEqual(rep.code, errors.UNKNOWN_CODE)
         try:
@@ -171,19 +173,36 @@ class ThemeTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
-    def test_valid_and_invalid(self):
-        good = protocol.decode(b'{"t":"state","pos":1000,"playing":true,"rules":{"host_only":false}}')
-        self.assertEqual(good["pos"], 1000)
-        self.assertIsNone(protocol.decode(b'{"t":"newer_feature"}'))
-        for bad in (b"[]", b'{"t":1}', b'{"t":"state","pos":-5,"playing":true}', b'{"t":"state","pos":1}',
-                    b'{"t":"req","action":"format_c_drive"}', b'{"t":"hello","v":2,"app":"x","name":"' + b"a" * 40 + b'"}',
-                    b'{"t":"state","pos":NaN,"playing":true}', b"\xff\xfe"):
-            with self.assertRaises(protocol.BadMessage, msg=bad):
-                protocol.decode(bad)
+    HEAD = {"s": "0123456789abcdef", "n": 1}
 
-    def test_encode_limits(self):
-        with self.assertRaises(protocol.BadMessage):
-            protocol.encode({"t": "profile", "name": "x", "avatar": "a" * 300_000})
+    def test_valid_and_invalid(self):
+        good = protocol.validate(protocol.ROOM, {"t": "state", **self.HEAD, "pos": 1000.0, "playing": True, "at": 5,
+                                                 "rules": {"host_only": False}, "extra": "ignored"})
+        self.assertEqual((good["pos"], type(good["pos"]), "extra" in good), (1000, int, False))
+        self.assertIsNone(protocol.validate(protocol.ROOM, {"t": "newer_feature", **self.HEAD}))
+        member = {"id": "A" * 43 + "=", "dh": "A" * 43 + "=", "name": "Marek"}
+        self.assertEqual(protocol.validate(protocol.ROOM, {"t": "members", **self.HEAD, "no": 1, "list": [member]})
+                         ["list"][0]["id"], bytes(32))
+        bad_bodies = [
+            {"t": "state", **self.HEAD, "pos": -5, "playing": True, "at": 1, "rules": {"host_only": False}},
+            {"t": "state", **self.HEAD, "pos": 1},                                  # missing fields
+            {"t": "req", **self.HEAD, "action": "format_c_drive"},
+            {"t": "profile", **self.HEAD, "name": "a" * 40},
+            {"t": "state", **self.HEAD, "pos": float("nan"), "playing": True, "at": 1, "rules": {"host_only": False}},
+            {"t": "bye", "s": "not hex!", "n": 1},
+            {"t": "bye", "s": "0123456789abcdef", "n": -1},
+            {"t": "members", **self.HEAD, "no": 1, "list": [dict(member, id="short")]},
+            {"t": "members", **self.HEAD, "no": 1, "list": [member] * 65},          # too many people
+            {"t": "profile", **self.HEAD, "name": "x", "avatar": "a" * 300_000},
+            {"t": "card", **self.HEAD},                                             # lobby message in a room envelope
+        ]
+        for body in bad_bodies:
+            with self.assertRaises(protocol.BadMessage, msg=str(body)[:80]):
+                protocol.validate(protocol.ROOM, body)
+
+    def test_text_is_cleaned(self):
+        body = protocol.validate(protocol.ROOM, {"t": "profile", **self.HEAD, "name": "Ma\nrek\x00\x1b[31m"})
+        self.assertEqual(body["name"], "Marek[31m")
 
 
 class CodeHealthTests(unittest.TestCase):
@@ -193,7 +212,8 @@ class CodeHealthTests(unittest.TestCase):
 
     def test_logic_modules_do_not_need_qt(self):
         code = ("import sys; import syncwatch.settings, syncwatch.errors, syncwatch.subtitles.parsers, "
-                "syncwatch.subtitles.mkv, syncwatch.sync.controller, syncwatch.net.link, syncwatch.theme, "
+                "syncwatch.subtitles.mkv, syncwatch.sync.controller, syncwatch.net.relay, syncwatch.theme, "
+                "syncwatch.room.session, syncwatch.room.friends, syncwatch.room.context, "
                 "syncwatch.filmstate, syncwatch.log; print('PySide6' in sys.modules)")
         out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, check=True)
         self.assertEqual(out.stdout.strip(), "False")

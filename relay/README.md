@@ -10,9 +10,14 @@ encrypted and signed by the apps (docs/ROOMS.md), so it can't read or fake any.
 
 ## Deploying
 
-Normally GitHub does it: `.github/workflows/relay.yml` deploys whenever `relay/`
-changes on `main`, once the secrets are set up (docs/GIT_GUIDE.md, lesson 5).
-It prints the address in the run's summary.
+Two ways, both in docs/GIT_GUIDE.md, lesson 5:
+
+- **Cloudflare builds it from the repository** (Workers Builds): Worker name
+  `syncwatch-relay` (must match `wrangler.jsonc`), root directory `relay`,
+  deploy command `npx wrangler deploy`.
+- **GitHub deploys it**: `.github/workflows/relay.yml` deploys whenever `relay/`
+  changes on `main`, once the secrets are set up, and prints the address in the
+  run's summary.
 
 ## Running it on your PC
 

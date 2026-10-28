@@ -5,7 +5,8 @@
        exit; hard crashes inside Qt/video code are written to a file and
        reported (SW-990) the next time you start
     3. One window per profile (SW-108)
-    4. Settings, film memory, theme (damaged files fall back to defaults)
+    4. Settings, film memory, theme (damaged files fall back to defaults), this PC's
+       identity and the rooms file (room code, friends)
     5. Startup checks (app files, video, network) and the invisible video test
     6. First-time setup (your name and picture), then the main window
 """
@@ -40,6 +41,7 @@ class AppContext:
     data_ok: bool
     data_error: str
     startup_problems: List[str]
+    rooms: object = None
     check_results: list = field(default_factory=list)
     restart: bool = False
     rerun_checks: Callable[[], None] = lambda: None
@@ -156,7 +158,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if profile.avatar_file.is_file() and profile.avatar_file.stat().st_size <= MAX_AVATAR_FILE:
         avatar = profile.avatar_file.read_bytes()
 
-    context = AppContext(profile, settings, films, theme, avatar, data_ok, data_error, problems)
+    from .room.context import make_rooms
+    rooms = make_rooms(profile.dir if data_ok else None, settings)
+    problems += rooms.problems
+    context = AppContext(profile, settings, films, theme, avatar, data_ok, data_error, problems, rooms=rooms)
 
     # ---- 5. startup checks ------------------------------------------------------------
     from .ui import checks
@@ -164,7 +169,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     def run_checks() -> None:
         context.check_results = (checks.app_checks(data_ok, data_error, problems) + checks.video_checks()
-                                 + checks.network_checks(int(settings.get("sync.port"))))
+                                 + checks.network_checks(rooms.default_relay()))
 
     run_checks()
 
@@ -172,10 +177,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         sections = [("Startup checks", "\n".join(r.line() for r in context.check_results))]
         if window is not None:
             c = window.controller
-            peer = c.peer
-            sections.append(("Connection", f"connected={c.connected} host={c.is_host} attached={c.attached} "
-                                           f"rtt={c.link.rtt * 1000:.0f}ms gap={c.gap_ms()} "
-                                           f"peer={(peer.name if peer else '-')} rules={c.effective_rules()}"))
+            s = c.session
+            people = ", ".join(f"{p.name}{' (host)' if p.is_host else ''}" for p in c.people()) or "-"
+            sections.append(("Room", f"role={s.role} phase={s.phase or '-'} relay={s.relay_address or rooms.default_relay() or '-'} "
+                                     f"channel={s.channel_state or '-'} attached={c.attached} "
+                                     f"rtt={s.rtt_ms():.0f}ms gap={c.gap_ms()} people=[{people}] "
+                                     f"rules={c.effective_rules()} id={rooms.identity.public.short_id} "
+                                     f"friends={len(rooms.store.friends)}"))
             player = window.player
             sections.append(("Film", f"{player.path.name if player.path else '-'} duration={player.duration()} "
                                      f"position={int(player.position())} playing={player.is_playing()} "

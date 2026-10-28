@@ -1,6 +1,6 @@
 """Every problem SyncWatch can report, written for people who aren't technical.
 
-Each problem has a code like ``SW-304``. The popup shows the plain-language
+Each problem has a code like ``SW-402``. The popup shows the plain-language
 title, explanation and tips first; the code and technical details come
 underneath, with a "Copy details" button, so friends can send you the code
 instead of you having to explain every time what went wrong.
@@ -8,7 +8,7 @@ instead of you having to explain every time what went wrong.
 Code ranges:
     1xx  installation, files, settings
     2xx  video, sound, subtitles (25x)
-    3xx  network / connecting to friends
+    3xx  the network
     4xx  rooms and the relay server
     5xx  watching in sync
     6xx  film sources such as Real-Debrid / Stremio (later)
@@ -19,7 +19,7 @@ Code ranges:
 To report a problem anywhere in the code::
 
     from syncwatch import errors
-    errors.report("SW-304", technical=f"{type(e).__name__}: {e}", address=addr)
+    errors.report("SW-407", technical=f"{type(e).__name__}: {e}", reason="it is too short")
 
 Extra keyword arguments fill ``{placeholders}`` in the texts. The UI registers
 a handler that shows the popup; without one (tests, early startup) problems are
@@ -51,8 +51,6 @@ class Problem:
     severity: str = ERROR
     popup: bool = True  # False = only log it (and show a short toast if the UI wants)
 
-
-_FIREWALL_TIP = "The host should run allow_firewall.bat (in the tools folder) once."
 
 CATALOG: Dict[str, Problem] = {
     # ---- 1xx: installation, files, settings ---------------------------------
@@ -186,68 +184,13 @@ CATALOG: Dict[str, Problem] = {
         ["Download an .srt subtitle file for this film and put it next to the film with the "
          "same name, or load it with Subtitles > Load file."], INFO),
 
-    # ---- 3xx: connecting to friends -----------------------------------------
-    "SW-301": Problem(
-        "Can't start hosting",
-        "Another program, maybe another SyncWatch window, is already using port {port}.",
-        ["Close other SyncWatch windows and try again.",
-         "Or change the port in Settings > Watching together (advanced). Your friend then "
-         "joins with address:port."]),
-    "SW-302": Problem(
-        "Can't start hosting",
-        "Windows didn't allow SyncWatch to accept connections on port {port}.",
-        [_FIREWALL_TIP,
-         "Windows sometimes reserves ports for other features. Try another port in Settings > "
-         "Watching together (advanced). Your friend then joins with address:port."]),
-    "SW-303": Problem(
-        "That address doesn't look right",
-        "Type your friend's address like 100.101.102.103 or 192.168.1.20, optionally with "
-        ":port at the end.",
-        ["Ask your friend to click \"Copy\" next to their address and send it to you."]),
-    "SW-304": Problem(
-        "Can't reach your friend's PC",
-        "There was no answer from {address}. Usually this means your PCs aren't on the same "
-        "network, or the host's firewall is blocking SyncWatch.",
-        ["If you're not on the same home network, both of you use Tailscale and join the "
-         "host's 100.x.x.x address.",
-         _FIREWALL_TIP,
-         "Check that your friend has clicked Host."]),
-    "SW-305": Problem(
-        "Your friend isn't hosting",
-        "{address} answered, but SyncWatch isn't hosting there.",
-        ["Ask your friend to click Host, then try again.",
-         "Check that you both use the same port (default 50505)."]),
-    "SW-306": Problem(
-        "Address not found",
-        "The name {address} couldn't be found on the network.",
-        ["Check the spelling, or use the number address (like 100.101.102.103) instead."]),
-    "SW-307": Problem(
-        "Connection lost",
-        "The connection to your friend dropped. Your film keeps playing.",
-        ["Click Join again, or if you're hosting, wait for your friend to rejoin."],
-        WARNING, popup=False),
-    "SW-308": Problem(
-        "You have different SyncWatch versions",
-        "Your friend's SyncWatch (version {theirs}) can't work with yours (version {mine}).",
-        ["Both of you need the same version. Whoever has the older one should get the newer one."]),
-    "SW-309": Problem(
-        "Received something unexpected",
-        "Your friend's app sent data SyncWatch didn't understand, so the connection was closed "
-        "to be safe.",
-        ["Make sure you both use the same SyncWatch version."], WARNING),
-    "SW-310": Problem(
-        "Your friend is already watching with someone",
-        "This version supports two people at a time, and the host is already connected to "
-        "someone else.",
-        ["Watching with more people comes with rooms in a later version."]),
+    # ---- 3xx: the network --------------------------------------------------
+    # Numbers 301 to 310 and 312 belonged to the direct connection (up to 0.3.1).
+    # They're retired: don't reuse them, old reports may still mention them.
     "SW-311": Problem(
         "No network connection",
         "This PC doesn't seem to be connected to a network.",
         ["Check your Wi-Fi or cable, then try again."]),
-    "SW-312": Problem(
-        "Network problem",
-        "Something went wrong with the connection.",
-        ["Try again in a moment.", "If it keeps happening, restart SyncWatch on both PCs."]),
 
     # ---- 4xx: rooms and the relay server -------------------------------------
     "SW-401": Problem(
@@ -284,6 +227,60 @@ CATALOG: Dict[str, Problem] = {
         "Slow down",
         "Too many messages were sent in a short time, so the relay server dropped some.",
         [], INFO, popup=False),
+    "SW-407": Problem(
+        "That room code doesn't work",
+        "SyncWatch couldn't read it: {reason}.",
+        ["Ask for the code again and paste it with Ctrl+V. The host's Copy code button copies it exactly."]),
+    "SW-408": Problem(
+        "Someone pretended to be the host",
+        "A message in this room claimed to come from the host but wasn't signed with the host's key. "
+        "SyncWatch ignored it.",
+        ["If it keeps happening, ask the host to press New code and send you the new one."],
+        WARNING, popup=False),
+    "SW-409": Problem(
+        "The host didn't let you in",
+        "The host turned down your request to join.",
+        ["Ask the host, then try again."], INFO),
+    "SW-410": Problem(
+        "The room is full",
+        "The room already has as many people as the host allows.",
+        ["The host can raise the limit in Settings > Watching together > Room size limit (advanced)."], INFO),
+    "SW-411": Problem(
+        "You were removed from the room",
+        "The host removed you from the room.",
+        [], INFO),
+    "SW-412": Problem(
+        "{host} closed the room",
+        "Your film keeps playing on its own.",
+        [], INFO, popup=False),
+    "SW-413": Problem(
+        "You have different SyncWatch versions",
+        "This room runs a different version of SyncWatch than yours, and they can't work together.",
+        ["Everyone needs the newest version: Settings > Updates > Check now."]),
+    "SW-414": Problem(
+        "Your SyncWatch identity was renewed",
+        "The file with your keys was damaged, so SyncWatch made new ones. Friends will see you as a new "
+        "person with a new ID.",
+        ["Add your friends again (in a room, People list > Add friend).",
+         "The damaged file is kept in your profile folder, in case you want to look at it."], WARNING),
+    "SW-415": Problem(
+        "Nobody is hosting this room right now",
+        "SyncWatch keeps waiting and asks to join as soon as the host opens the room.",
+        [], INFO, popup=False),
+    "SW-416": Problem(
+        "This room is for friends only",
+        "The host only lets friends join.",
+        ["Ask the host to allow everyone to ask (Settings > Watching together), or to add you as a "
+         "friend the next time you're in a room together."], INFO),
+    "SW-417": Problem(
+        "The host is busy",
+        "Too many people are waiting to be let in right now.",
+        ["Try again in a minute."], INFO),
+    "SW-419": Problem(
+        "Your friend list was reset",
+        "The file with your room code, friends and blocked people was damaged, so SyncWatch started fresh.",
+        ["Your room has a new code: send it to your friends again.",
+         "Add friends again when you're in a room together."], WARNING),
 
     # ---- 5xx: watching in sync ----------------------------------------------
     "SW-501": Problem(

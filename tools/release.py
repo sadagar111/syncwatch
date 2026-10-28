@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import ast
 import getpass
-import hashlib
 import io
 import json
 import os
@@ -64,7 +63,7 @@ MIN_PASSPHRASE = 10
 APP_PREFIXES = ("syncwatch/", "assets/", "tools/")
 APP_FILES = ("CHANGELOG.md",)
 NOT_FOR_FRIENDS = ("tools/release.py", "tools/release.bat", "tools/build_runtime.py", "tools/keywords.py",
-                   "tools/bip39_english.txt", "tools/local_relay.py")
+                   "tools/bip39_english.txt", "tools/local_relay.py", "tools/bots.py", "tools/bots.bat")
 ROOT_FILES = {"boot.py": "boot.py", "SyncWatch.bat": "SyncWatch.bat", "packaging/README.txt": "README.txt"}
 EXTRA_FULL_FILES = {"packaging/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt"}
 
@@ -416,6 +415,12 @@ def cmd_publish(args) -> None:
     trusted = read_trusted_keys(files.get("syncwatch/update/keys.py", b"").decode())
     if not trusted:
         raise Stop("No public key in the committed syncwatch/update/keys.py. Run 'release keygen' and commit.")
+    relay_file = files.get("syncwatch/net/relay_url.py", b"").decode()
+    if "syncwatch/room/session.py" in files and not re.search(r'^RELAY_URL = "https://[^"]+"', relay_file,
+                                                                  flags=re.MULTILINE):
+        raise Stop("Rooms need a relay server, and the committed syncwatch/net/relay_url.py has none. Put the "
+                   "relay online and run: release set-relay https://syncwatch-relay.<you>.workers.dev, then "
+                   "commit that change (docs/GIT_GUIDE.md, lesson 5).")
     version_text = re.search(r'__version__ = "([^"]+)"', files["syncwatch/__init__.py"].decode()).group(1)
     version = Version(version_text)
     if version.is_test != args.test:

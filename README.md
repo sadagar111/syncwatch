@@ -17,7 +17,7 @@ the Python installed on your PC and installs the two libraries it needs once
 | `assets/` | Design files: logo, background, icons, colours. See `assets/README.txt` |
 | `boot.py` | Starter for the installed version: swaps in updates, goes back if one fails |
 | `SyncWatch.bat` | Starts SyncWatch (installed version: its own Python; source folder: your Python) |
-| `tools/` | Firewall helpers, "Test with two windows", the release tools, a relay for testing (`local_relay.py`) |
+| `tools/` | "Test with two windows", fake viewers for big rooms (`bots.bat`), the release tools, a relay for testing (`local_relay.py`) |
 | `relay/` | The relay server rooms go through (runs on Cloudflare; see `relay/README.md`) |
 | `tests/` | Automatic tests (`tests/media` has a small demo film) |
 | `docs/` | `GIT_GUIDE.md` (the Git lessons), `RELEASING.md` (publishing, signing key), `ROOMS.md` (how rooms work and why they're safe) |
@@ -32,10 +32,12 @@ the Python installed on your PC and installs the two libraries it needs once
 | `app.py` | Startup in stages: logging, crash catcher, one-window lock, settings, checks, window, restart |
 | `errors.py` | Every SW error code with its plain-language text |
 | `settings.py` | All settings in one table; the settings window builds itself from it |
-| `sync/controller.py` | The rules of watching together (no Qt; tested with fake players) |
-| `net/link.py`, `net/protocol.py` | The two-person connection and strict checking of every message |
+| `sync/controller.py` | The rules of watching together: who may do what, Sync up, gaps (no Qt; tested with fake players) |
+| `room/session.py` | Hosting and joining a room: asking to join, letting in, room keys, who's in |
+| `room/friends.py`, `room/store.py` | The friend list and friends' rooms; what's remembered (friends, blocked, your room's code) |
+| `room/identity.py`, `codes.py`, `crypto.py` | Your keys, room codes, encryption and signatures of every message |
 | `net/websocket.py`, `net/relay.py` | Connection to the relay server (reconnects by itself) |
-| `room/` | Identities, room codes, encryption and signatures of every room message (no Qt) |
+| `net/protocol.py` | Strict checking of every message (allowed fields, sizes, ranges) |
 | `subtitles/` | Reading .srt/.vtt/.ass and tracks inside MKV files (no Qt) |
 | `update/` | Finding, verifying (signatures), downloading and staging updates (no Qt) |
 | `ui/` | Everything you see: main window, player, overlay, dialogs |
@@ -44,8 +46,8 @@ Everything outside `ui/` and `app.py` works without Qt, which keeps the logic te
 
 ## Tests
 ```
-python -m unittest discover -s tests -p "test_*.py"     # logic, network, updates, release tool
-python tests/gui_checks.py all                          # the real app, offscreen: window, two apps, update cycle
+python -m unittest discover -s tests -p "test_*.py"     # logic, rooms (up to 10 people), relay, updates, release tool
+python tests/gui_checks.py all                          # the real app, offscreen: window, a room of three apps, update cycle
 ```
 GitHub runs both on Windows and Linux for every pull request, and also builds the portable
 runtime and runs the real app with it.

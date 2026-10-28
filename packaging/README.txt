@@ -10,9 +10,14 @@ FILMS
   Put films into the "movies" folder, or open them from anywhere with the Open button.
 
 WATCHING TOGETHER
-  One person clicks Host and sends their address; the others type it and click Join.
-  If you're not on the same home network, all of you install Tailscale
-  (tailscale.com) and use the 100.x.x.x address.
+  One person clicks "Host my room" and sends the room code (Copy code).
+  The others paste it under "Join a room" and click Join; the host clicks "Let in".
+  Nothing else is needed: no addresses, no Tailscale, no firewall settings.
+  Everything is encrypted, and only people the host lets in can see the room.
+
+FRIENDS
+  In a room, right-click someone in the People list and choose Add friend.
+  Friends see when you host and can ask to join with one click.
 
 UPDATES
   SyncWatch tells you when a new version is out. Click Update; it downloads,
@@ -20,7 +25,7 @@ UPDATES
   version doesn't start properly, SyncWatch goes back to the previous one by itself.
 
 PROBLEMS
-  Every problem shows a code like SW-304 with an explanation. Click "Copy details"
+  Every problem shows a code like SW-402 with an explanation. Click "Copy details"
   and send that to whoever gave you SyncWatch.
 
   Your settings and picture are kept separately, in %APPDATA%\SyncWatch, so you

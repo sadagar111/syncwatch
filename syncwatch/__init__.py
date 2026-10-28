@@ -5,12 +5,13 @@ The package is split so that everything except ``syncwatch.ui`` and
 subtitles, sync) testable on any machine and easy to reuse.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 APP_NAME = "SyncWatch"
 
-# Bumped whenever the messages two SyncWatch apps send each other change in
-# an incompatible way. Apps with different numbers refuse to connect (SW-308).
-PROTOCOL_VERSION = 2
+# Bumped whenever the messages SyncWatch apps send each other change in an
+# incompatible way. A room only lets in apps with the same number (SW-413).
+# 3 = rooms through the relay (0.4); 2 was the direct two-person connection.
+PROTOCOL_VERSION = 3
 
 # Oldest Qt for Python version that has the FFmpeg-based video backend.
 MIN_PYSIDE6 = (6, 5)

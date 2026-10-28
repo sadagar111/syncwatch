@@ -1,6 +1,6 @@
 # Rooms: how they work and why they're safe
 
-This is the design behind watching together with several people (version 0.4).
+This is the design behind watching together with several people (since version 0.4).
 It's written for anyone who wants to check it, including people trying to break it.
 Report weaknesses as described in SECURITY.md.
 
@@ -13,6 +13,10 @@ Report weaknesses as described in SECURITY.md.
 | Room codes | `syncwatch/room/codes.py` | What the host shares. |
 | Envelopes | `syncwatch/room/crypto.py` | Every message is encrypted and signed before it reaches the relay. |
 | WebSocket client, channels | `syncwatch/net/websocket.py`, `syncwatch/net/relay.py` | The connection to the relay; reconnects by itself. |
+| Room session | `syncwatch/room/session.py` | Hosting, asking to join, letting in, room keys, who's in. |
+| Friends | `syncwatch/room/friends.py`, `syncwatch/room/store.py` | Friend list, mailboxes, what's remembered. |
+| Message rules | `syncwatch/net/protocol.py` | Every message type with its allowed fields, sizes and ranges. |
+| Watching rules | `syncwatch/sync/controller.py` | What each message does to playback; cooldowns and permissions. |
 
 ## Goals
 
@@ -93,11 +97,23 @@ sender and session (`ReplayGuard`).
 3. The joiner sends `knock` as a direct message to the host: their name, keys,
    app version, the `challenge`, and a random `nonce`. Without the current
    challenge a recorded knock is useless.
-4. The host decides by the setting *When someone asks to join*:
-   **Ask every time** (default), *Friends join directly, ask the rest*,
-   *Only friends* (others are turned away without asking), or (advanced)
-   *Anyone with the code*. Blocked people are always turned away. Waiting
-   requests are capped, so spam can't bury the host in popups.
+4. The host's app decides, in this order:
+   - blocked → turned away (`denied`);
+   - already in the room (their SyncWatch restarted) → in;
+   - room full (*Most people in my room*, 10 by default, 2–20) → `full`;
+   - in this room within the last 10 minutes → in, without asking (*Let people
+     who just dropped out back in*, on by default; recognised by their full
+     fingerprint);
+   - otherwise the setting *When someone asks to join* (`room.policy`):
+     **Ask every time** (`ask`, default), *Friends join directly, ask the rest*
+     (`friends_direct`), *Only friends* (`friends_only`; others get
+     `friends_only` without asking), or (advanced) *Anyone with the code* (`open`).
+
+   A different protocol version gets `version`. At most 25 requests wait at once
+   (more get `busy`), each identity can knock at most 6 times a minute, and a
+   request nobody answers expires after 5 minutes. A waiting joiner knocks again
+   every minute so it doesn't expire, and says `hello` every 10 seconds so it
+   notices a restarted host (new challenge).
 5. Approved: the host makes a **new epoch key** and sends it
    - to the newcomer in `welcome` (direct; includes their `nonce`, so only the
      answer to *their* knock counts), with the member list;
@@ -105,15 +121,42 @@ sender and session (`ReplayGuard`).
    Turned away: `deny` (direct) with the reason.
 
 The host rekeys on every join and every departure (left, timed out, removed).
-The previous key is accepted for a few seconds so messages in flight still
+The previous key is accepted for 5 seconds so messages in flight still
 arrive, then forgotten. So whoever has a code but wasn't let in, and whoever
-left, can't read the room.
+left, can't read the room. Everyone let in at the same moment (*Let all in*)
+shares one new key.
 
-Room messages from members are accepted only from people on the host's signed
-member list. Commands that change playback for everyone (`cmd`, `state`, the Sync
-up steps, the member list, the rules) are accepted only from the host. Members
-send *requests*; the host's app checks cooldowns and permissions and then
-broadcasts. Editing your own copy of the app doesn't get around that.
+**Coming back.** The host remembers who was in the room for 10 minutes (in
+`rooms.json`), so after a dropped connection, a restart of either app, or a
+**New code** (`moved`, sent directly to each member with the new code) people
+get straight back in. People who left on purpose, were removed or were blocked
+are forgotten at once, and closing the room on purpose forgets everyone.
+
+## In the room
+
+Room messages are accepted only from people on the host's member list (sent
+with every new room key, and as `members` every 30 seconds). By kind:
+
+| Who sends | Kinds | Who acts on them |
+|---|---|---|
+| host only | `members`, `close`, `state` (heartbeat with the rules), `cmd` (play/pause/jump for everyone), `reject`, `sync_prepare`, `sync_go`, `sync_abort`, `pong` | members (anything of these from a member is dropped) |
+| members | `req` (please play/pause/jump), `sync_ready`, `ping`, `bye` | only the host |
+| everyone | `profile` (name, picture ≤ 40 KB PNG/JPEG), `status` (heartbeat: position, playing, film) | everyone |
+
+Members send *requests*; the host's app checks the rules (host-only control,
+cooldowns per person, how often someone may jump) and then broadcasts the
+command, or answers with `reject`. Editing your own copy of the app doesn't get
+around that, because everyone else's app only follows commands from the host.
+
+**Clock.** Each member pings the host; from the quickest round trips it
+estimates the difference between its clock and the host's. Positions in `state`,
+`status` and `cmd` carry the time on the host's clock, and Sync up starts
+everyone at the same moment on the host's clock, so gaps are right even when
+PC clocks differ.
+
+**Liveness.** The host removes a member it hasn't heard from for 20 seconds
+(they get back in without asking, see above); members show *Lost contact with
+the host* after 15 seconds of silence and carry on when it's back.
 
 ## Friends
 
@@ -121,19 +164,28 @@ Each person has a **mailbox**: a relay channel derived from their mailbox secret
 (HKDF, salt `SyncWatch mailbox v1`). Their app listens there while it runs.
 Only friends learn the mailbox channel.
 
-- **Becoming friends** happens in a room: *Add friend* sends a request as a
-  direct message; the other person accepts or declines. Both then store each
-  other's keys and mailbox.
+- **Becoming friends** happens in a room: *Add friend* sends `friend_req` (your
+  name and mailbox) as a direct message; the other person answers `friend_ok`
+  (theirs) or `friend_no`. If they answer after you've left the room, the
+  `friend_ok` goes to your mailbox with their encryption key, and is accepted
+  only if you really asked that exact person (requests expire after 10 minutes).
+  Both then store each other's keys and mailbox.
 - **Hosting**: when you host, your app posts a signed, sealed `hosting` message
   (your room code and name) into each friend's mailbox (`POST /v1/ch/<mailbox>`),
-  repeats it every few minutes, and posts `hosting_end` when you stop.
-- **On start**, your app asks each friend's mailbox *anyone hosting?*; friends
-  who host answer the same way. Nothing else is shared: friends don't see when
-  you're merely online (that's how you set it up).
-- Messages in a mailbox from anyone who isn't a friend, or not signed by them, are
-  dropped unread. Joining from the friend list still goes through the host's
+  repeats it every 5 minutes, and posts `hosting_end` when you stop (also when
+  SyncWatch closes). A friend's room that isn't repeated disappears after
+  12 minutes. A `hosting` message only counts if the code's host commitment is
+  the sender's own: friends can only point to their own room.
+- **On start** (and every 10 minutes), your app posts `who_hosts` to each
+  friend's mailbox; friends who host answer with `hosting`. Nothing else is
+  shared: friends don't see when you're merely online.
+- Mailbox messages must be signed by a friend and carry a time within 10 minutes
+  of the receiver's clock (`ts`), plus the usual replay counters. Anything else
+  is dropped unread. Joining from the friend list still goes through the host's
   approval like any other join.
-- Removing a friend tells their app to forget you too.
+- Removing a friend posts `unfriend`, so their app forgets you too.
+- *Tell friends when I'm hosting* (`friends.announce`) and *Show friends' rooms*
+  (`friends.show_rooms`) switch the two halves off.
 
 ## The relay
 
