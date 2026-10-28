@@ -3,5 +3,20 @@
   "python_version": "3.13.17",
   "python_tag": "313",
   "embed_url": "https://www.python.org/ftp/python/3.13.17/python-3.13.17-embed-amd64.zip",
-  "embed_sha256": "9e35319bffedab8b36ad44d8f377cb4f1733bcec257a0b6d04d94f01486ddb38"
+  "embed_sha256": "9e35319bffedab8b36ad44d8f377cb4f1733bcec257a0b6d04d94f01486ddb38",
+  "remove": [
+    "Lib/site-packages/PySide6/qml/*",
+    "Lib/site-packages/PySide6/translations/*",
+    "Lib/site-packages/PySide6/metatypes/*",
+    "Lib/site-packages/PySide6/include/*",
+    "Lib/site-packages/PySide6/typesystems/*",
+    "Lib/site-packages/PySide6/glue/*",
+    "Lib/site-packages/PySide6/scripts/*",
+    "Lib/site-packages/PySide6/*.exe",
+    "*/objects-*/*",
+    "*.pyi"
+  ],
+  "_remove_help": "Files SyncWatch never uses, taken out after installing: QML, Qt's own translations, build files (metatypes, include, typesystems, glue, objects-*), Qt developer tools (*.exe) and type hints (*.pyi). Patterns are matched against paths inside the runtime ('*' also matches '/').",
+  "max_path": 100,
+  "_max_path_help": "Longest allowed path inside the runtime, in characters. Windows Explorer can't unzip paths over 260 characters, including the folder people unzip to, so this keeps plenty of room."
 }
