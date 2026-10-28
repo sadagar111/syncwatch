@@ -5,6 +5,16 @@ terminal** (menu *Terminal → New Terminal*, or Ctrl+\`). Everything shown in
 `code style` is typed exactly as written, except the parts in `<angle brackets>`,
 which you replace.
 
+**Before typing any command, check two things:**
+- **The terminal is PowerShell.** The prompt starts with `PS`, e.g. `PS D:\Projects\syncwatch>`.
+  If it ends in `$`, it's Git Bash, where `tools\release.bat` doesn't work (Bash eats the `\`). Switch with the
+  **˅** next to the **+** in the terminal panel → **PowerShell**.
+- **You're in the repo folder.** Open it with *File → Open Folder* before opening the terminal, and
+  `git status` answers *"On branch …"*. *"not a git repository"* means you're in another folder.
+
+The repo is whichever folder holds the hidden `.git` folder. Its name and drive don't matter, and you can
+move it like any folder (close VS Code first).
+
 **Words you'll meet**
 - **Repository (repo):** a project folder plus its full history. There's one copy on GitHub and one on your PC.
 - **Commit:** a saved snapshot of the project with a short message saying what changed. Commits are the history you can go back to.
@@ -105,7 +115,7 @@ On GitHub, open your repo → **Pull requests** → *"SyncWatch 0.3.0: updates, 
 *Why:* nothing reaches `main` without a person reading it and the tests passing. That's also what keeps your signed releases trustworthy.
 
 ### 3. Merge
-Click **Squash and merge** → **Confirm**. "Squash" turns all my small commits into one tidy commit on `main`, so the history reads one step at a time. Then click **Delete branch**: the branch has done its job.
+Click **Squash and merge** → **Confirm**. (If the green button says *Merge pull request*, open the **˅** next to it and pick *Squash and merge*.) "Squash" turns all my small commits into one tidy commit on `main`, so the history reads one step at a time. Then click **Delete branch**: the branch has done its job.
 
 ### 4. Bring it to your PC
 ```
