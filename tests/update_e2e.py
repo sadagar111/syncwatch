@@ -82,7 +82,7 @@ def main() -> int:
     env = dict(os.environ, SYNCWATCH_DATA_DIR=str(data), SYNCWATCH_UPDATE_SERVER=fake.base,
                QT_QPA_PLATFORM="offscreen", PYTHONPATH="", SYNCWATCH_TEST_EXIT_AFTER="40")
     driver = work / "driver.py"
-    driver.write_text(DRIVER.replace('"@OUT@"', repr(str(OUT))))  # repr: Windows backslashes stay intact
+    driver.write_text(DRIVER.replace('"@OUT@"', repr(str(OUT))), encoding="utf-8")  # repr: Windows backslashes stay intact
     first = subprocess.run([sys.executable, str(driver)], cwd=install, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                            timeout=180)
     print(first.stdout)
