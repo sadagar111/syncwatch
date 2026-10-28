@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1-test.1 (test update)
+A small test version, to try the whole update cycle once before friends rely on it.
+- The version number in the sidebar says 0.3.1-test.1, so you can see the update worked.
+- docs/GIT_GUIDE.md: how to tell PowerShell from Git Bash, and how to check you're in the repo folder.
+
 ## 0.3.0 (step 2: updates and easy install)
 **Updates with one click**
 - SyncWatch checks GitHub for new versions when it starts: at most every 6 hours, adjustable, and never more often than needed.
