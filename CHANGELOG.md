@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1-test.2 (test update: smaller runtime)
+- **Fix:** unzipping `SyncWatch-…-windows.zip` with Windows Explorer failed with "Path too long" (0x80010135) when the target folder had a long name. Files SyncWatch never uses are now left out of the bundled Python (Qt's QML, translations, developer tools and build files), so the longest path inside is 91 characters instead of 169.
+- The bundled Python is about 73 MB smaller once unzipped, and 3,400 files fewer.
+- This update downloads the new bundled Python once, then switches to it. That tests the runtime switch too.
+
 ## 0.3.1-test.1 (test update)
 A small test version, to try the whole update cycle once before friends rely on it.
 - The version number in the sidebar says 0.3.1-test.1, so you can see the update worked.

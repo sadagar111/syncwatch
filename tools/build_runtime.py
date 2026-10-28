@@ -8,8 +8,10 @@ Steps (each checked; downloads are cached, so running it again doesn't download 
   2. Install the exact library files from runtime-spec/requirements-win.lock
      (pip checks each file's SHA-256).
   3. Tell that Python where the libraries are (the python3XX._pth file).
-  4. On Windows: start it once and import the video library and cryptography.
-  5. Zip it as SyncWatch-runtime-<id>.zip with a fixed file order and dates,
+  4. Remove what SyncWatch never uses (the "remove" list in runtime.json) and
+     check that no path is longer than "max_path".
+  5. On Windows: start it once and import the video library and cryptography.
+  6. Zip it as SyncWatch-runtime-<id>.zip with a fixed file order and dates,
      so the same spec always gives the same zip.
 
 The id comes from the spec files: same spec, same id. tools/release.py only
@@ -20,6 +22,7 @@ on Windows.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -49,6 +52,30 @@ def runtime_id() -> str:
     for name in ("runtime.json", "requirements-win.lock"):
         digest.update((SPEC / name).read_bytes().replace(b"\r\n", b"\n"))
     return "rt-" + digest.hexdigest()[:10]
+
+
+def prune(work: Path, patterns: list) -> tuple:
+    """Delete the files matching any pattern (matched against the path inside the runtime)."""
+    removed = saved = 0
+    for path in sorted(p for p in work.rglob("*") if p.is_file()):
+        relative = path.relative_to(work).as_posix()
+        if any(fnmatch.fnmatchcase(relative, pattern) for pattern in patterns):
+            saved += path.stat().st_size
+            path.unlink()
+            removed += 1
+    for folder in sorted((p for p in work.rglob("*") if p.is_dir()), key=lambda p: -len(p.parts)):
+        if not any(folder.iterdir()):
+            folder.rmdir()  # leave no empty folders behind
+    return removed, saved
+
+
+def check_path_lengths(work: Path, limit: int) -> None:
+    longest = max((p.relative_to(work).as_posix() for p in work.rglob("*") if p.is_file()), key=len)
+    print(f"  longest path: {len(longest)} characters (limit {limit})")
+    if len(longest) > limit:
+        raise BuildError(f"'{longest}' is {len(longest)} characters long, over the limit of {limit}. Windows "
+                         "can't unzip such long paths into most folders. Add it to \"remove\" in runtime.json "
+                         "if SyncWatch doesn't need it.")
 
 
 def cache_dir() -> Path:
@@ -109,12 +136,12 @@ def build(out_dir: Path) -> Path:
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
 
-    print("1/5 Official Windows embeddable Python")
+    print("1/6 Official Windows embeddable Python")
     embed = download(info["embed_url"], cache_dir() / Path(info["embed_url"]).name, info["embed_sha256"])
     with zipfile.ZipFile(embed) as archive:
         archive.extractall(work)
 
-    print("2/5 Libraries (each file checked against requirements-win.lock)")
+    print("2/6 Libraries (each file checked against requirements-win.lock)")
     site_packages = work / "Lib" / "site-packages"
     site_packages.mkdir(parents=True)
     tag = info["python_tag"]
@@ -128,7 +155,7 @@ def build(out_dir: Path) -> Path:
     if result.returncode != 0:
         raise BuildError("pip couldn't install the pinned libraries (see the messages above).")
 
-    print("3/5 Library path (python._pth)")
+    print("3/6 Library path (python._pth)")
     pth = work / f"python{tag}._pth"
     if not pth.exists():
         raise BuildError(f"{pth.name} not found in the embeddable Python")
@@ -138,7 +165,12 @@ def build(out_dir: Path) -> Path:
         print("  note: msvcp140.dll isn't bundled; SyncWatch then relies on the Microsoft "
               "Visual C++ runtime installed on the PC (almost always present).")
 
-    print("4/5 Test start")
+    print("4/6 Remove what SyncWatch doesn't use")
+    removed, saved = prune(work, info.get("remove", []))
+    print(f"  {removed} files, {saved / 1e6:.0f} MB")
+    check_path_lengths(work, int(info.get("max_path", 100)))
+
+    print("5/6 Test start")
     if sys.platform == "win32":
         check = subprocess.run([str(work / "python.exe"), "-c",
                                 "import PySide6.QtMultimedia, PySide6.QtMultimediaWidgets, cryptography; "
@@ -149,7 +181,7 @@ def build(out_dir: Path) -> Path:
     else:
         print("  skipped (only possible on Windows)")
 
-    print("5/5 Zip")
+    print("6/6 Zip")
     files = sorted(p for p in work.rglob("*") if p.is_file())
     part = final_zip.with_name(final_zip.name + ".part")
     started = time.monotonic()
