@@ -1,0 +1,16 @@
+// Cloudflare settings for the SyncWatch relay. See relay/README.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "syncwatch-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  // Reachable at https://syncwatch-relay.<your-subdomain>.workers.dev
+  "workers_dev": true,
+  // One "Channel" object per room or mailbox (Durable Objects; the free plan needs the SQLite kind).
+  "durable_objects": {
+    "bindings": [{ "name": "CHANNELS", "class_name": "Channel" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Channel"] }],
+  // Nothing is logged: no request logs, no message contents (they're encrypted anyway).
+  "observability": { "enabled": false }
+}

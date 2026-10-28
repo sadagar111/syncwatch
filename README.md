@@ -17,12 +17,13 @@ the Python installed on your PC and installs the two libraries it needs once
 | `assets/` | Design files: logo, background, icons, colours. See `assets/README.txt` |
 | `boot.py` | Starter for the installed version: swaps in updates, goes back if one fails |
 | `SyncWatch.bat` | Starts SyncWatch (installed version: its own Python; source folder: your Python) |
-| `tools/` | Firewall helpers, "Test with two windows", and the release tools |
+| `tools/` | Firewall helpers, "Test with two windows", the release tools, a relay for testing (`local_relay.py`) |
+| `relay/` | The relay server rooms go through (runs on Cloudflare; see `relay/README.md`) |
 | `tests/` | Automatic tests (`tests/media` has a small demo film) |
-| `docs/` | `GIT_GUIDE.md` (the Git lessons), `RELEASING.md` (publishing, signing key) |
+| `docs/` | `GIT_GUIDE.md` (the Git lessons), `RELEASING.md` (publishing, signing key), `ROOMS.md` (how rooms work and why they're safe) |
 | `packaging/` | Files that go into the friends' zip (README, licence notices) |
 | `runtime-spec/` | Exactly which Python and libraries the portable runtime contains (with fingerprints) |
-| `.github/workflows/` | The automatic tests GitHub runs for every change |
+| `.github/workflows/` | The automatic tests GitHub runs for every change, and the relay's deploy |
 | `%APPDATA%\SyncWatch\` | **Your** settings, picture, logs, and the signing key. Never in this folder, never uploaded |
 
 ## Code map
@@ -32,7 +33,9 @@ the Python installed on your PC and installs the two libraries it needs once
 | `errors.py` | Every SW error code with its plain-language text |
 | `settings.py` | All settings in one table; the settings window builds itself from it |
 | `sync/controller.py` | The rules of watching together (no Qt; tested with fake players) |
-| `net/link.py`, `net/protocol.py` | The connection and strict checking of every message |
+| `net/link.py`, `net/protocol.py` | The two-person connection and strict checking of every message |
+| `net/websocket.py`, `net/relay.py` | Connection to the relay server (reconnects by itself) |
+| `room/` | Identities, room codes, encryption and signatures of every room message (no Qt) |
 | `subtitles/` | Reading .srt/.vtt/.ass and tracks inside MKV files (no Qt) |
 | `update/` | Finding, verifying (signatures), downloading and staging updates (no Qt) |
 | `ui/` | Everything you see: main window, player, overlay, dialogs |

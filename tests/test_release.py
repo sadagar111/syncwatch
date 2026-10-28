@@ -78,7 +78,8 @@ class ReleaseToolTests(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = Path(tempfile.mkdtemp(prefix="sw-release-"))
         cls.work = cls.tmp / "repo"
-        shutil.copytree(SOURCE, cls.work, ignore=shutil.ignore_patterns("dist", "__pycache__", ".git"))
+        shutil.copytree(SOURCE, cls.work, ignore=shutil.ignore_patterns("dist", "__pycache__", ".git",
+                                                                         "node_modules", ".wrangler"))
         init = cls.work / "syncwatch" / "__init__.py"
         text = init.read_text()
         current = text.split('__version__ = "')[1].split('"')[0]
@@ -208,6 +209,27 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertEqual(code, 1)
         code, out = self.answers(lambda: self.release.main(["set-repo", "alex/syncwatch"]))
         self.assertEqual(code, 0)
+        # The relay address: checked against a running relay, refused when it's not one.
+        sys.path.insert(0, str(SOURCE))
+        from tools.local_relay import LocalRelay
+        relay = LocalRelay().start()
+        try:
+            code, out = self.answers(lambda: self.release.main(["set-relay", "ftp://relay.example.org"]))
+            self.assertEqual(code, 1)
+            code, out = self.answers(lambda: self.release.main(["set-relay", "http://relay.example.org"]))
+            self.assertEqual(code, 1)  # only https (http only for this PC, for testing)
+            code, out = self.answers(lambda: self.release.main(["set-relay", relay.url]))
+            self.assertEqual(code, 0, out)
+            self.assertIn(f'RELAY_URL = "{relay.url}"', (self.work / "syncwatch" / "net" / "relay_url.py").read_text())
+        finally:
+            relay.stop()
+        code, out = self.answers(lambda: self.release.main(["set-relay", "https://relay.example.invalid"]))
+        self.assertEqual(code, 1)  # doesn't answer
+        code, out = self.answers(lambda: self.release.main(["set-relay", "https://relay.example.invalid/",
+                                                            "--no-check"]))
+        self.assertEqual(code, 0)
+        self.assertIn('RELAY_URL = "https://relay.example.invalid"',
+                      (self.work / "syncwatch" / "net" / "relay_url.py").read_text())
         git("add", ".", cwd=self.work)
         git("commit", "-m", "key and repo", cwd=self.work)
         git("push", cwd=self.work)
@@ -223,6 +245,8 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("syncwatch/__main__.py", app)
         self.assertIn("tools/allow_firewall.bat", app)
         self.assertNotIn("tools/release.py", app)
+        self.assertNotIn("tools/local_relay.py", app)
+        self.assertFalse(any(n.startswith("relay/") for n in app))
         self.assertFalse(any(n.startswith("tests/") for n in app))
         full = zipfile.ZipFile(out_dir / "SyncWatch-0.3.0-windows.zip").namelist()
         rid = self.release.build_runtime.runtime_id()

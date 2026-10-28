@@ -1,0 +1,14 @@
+{
+  "name": "syncwatch-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The relay server for SyncWatch rooms: passes encrypted messages between people in the same room. Runs on Cloudflare Workers.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.150.0"
+  }
+}

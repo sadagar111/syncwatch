@@ -1,0 +1,118 @@
+# The relay server (relay/): tested on every change, deployed to Cloudflare from main.
+#
+# - "Relay works": runs the real relay code in Cloudflare's local runtime (wrangler dev)
+#   and checks it with the same tests as tools/local_relay.py (tests/test_relay.py).
+# - "Deploy relay": on main (or when started by hand under Actions), puts it online.
+#   Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
+#   (docs/GIT_GUIDE.md, lesson 5). Without them it only prints a note.
+name: relay
+
+on:
+  pull_request:
+    paths: ["relay/**", "tools/local_relay.py", "tests/test_relay.py", "syncwatch/net/**",
+            ".github/workflows/relay.yml"]
+  push:
+    branches: [main]
+    paths: ["relay/**", ".github/workflows/relay.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Relay works
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install the relay's tools (exact versions from package-lock.json)
+        working-directory: relay
+        run: npm ci --no-audit --no-fund
+      - name: Install cryptography for the tests
+        run: python -m pip install "cryptography>=42"
+      - name: Start the relay locally
+        working-directory: relay
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          npx wrangler dev --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8787/v1/health; then echo; echo "relay is up"; exit 0; fi
+            sleep 1
+          done
+          echo "::error::the relay didn't start"; tail -50 ../wrangler.log; exit 1
+      - name: Relay tests against the real relay code
+        env:
+          SYNCWATCH_TEST_RELAY: http://127.0.0.1:8787
+        run: python tests/ci_run.py python -m unittest tests.test_relay.RelayConformance -v
+      - name: Relay log (if something failed)
+        if: failure()
+        run: tail -100 wrangler.log || true
+
+  deploy:
+    name: Deploy relay
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - name: Is Cloudflare set up?
+        id: setup
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice::Cloudflare isn't set up yet, so the relay wasn't deployed. See docs/GIT_GUIDE.md, lesson 5."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.setup.outputs.ready == 'true'
+      - uses: actions/setup-node@v7
+        if: steps.setup.outputs.ready == 'true'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - name: Deploy
+        if: steps.setup.outputs.ready == 'true'
+        working-directory: relay
+        run: |
+          npm ci --no-audit --no-fund
+          npx wrangler deploy 2>&1 | tee deploy.log
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          if [ -z "$url" ]; then echo "::error::couldn't find the relay address in wrangler's output"; exit 1; fi
+          echo "Checking $url/v1/health"
+          for i in $(seq 1 20); do
+            if curl -fsS "$url/v1/health"; then echo; break; fi
+            sleep 3
+          done
+          curl -fsS "$url/v1/health" > /dev/null
+          {
+            echo "## The relay is online"
+            echo
+            echo "Address: **$url**"
+            echo
+            echo "If SyncWatch doesn't use it yet, run this on a new branch and open a pull request:"
+            echo
+            echo '```'
+            echo "tools\\release.bat set-relay $url"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::Relay online at $url"

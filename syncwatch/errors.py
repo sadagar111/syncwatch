@@ -9,7 +9,7 @@ Code ranges:
     1xx  installation, files, settings
     2xx  video, sound, subtitles (25x)
     3xx  network / connecting to friends
-    4xx  rooms (later)
+    4xx  rooms and the relay server
     5xx  watching in sync
     6xx  film sources such as Real-Debrid / Stremio (later)
     7xx  updates
@@ -248,6 +248,42 @@ CATALOG: Dict[str, Problem] = {
         "Network problem",
         "Something went wrong with the connection.",
         ["Try again in a moment.", "If it keeps happening, restart SyncWatch on both PCs."]),
+
+    # ---- 4xx: rooms and the relay server -------------------------------------
+    "SW-401": Problem(
+        "Rooms aren't set up yet",
+        "This copy of SyncWatch doesn't know which relay server rooms go through.",
+        ["Update SyncWatch (Settings > Updates > Check now).",
+         "If you publish SyncWatch yourself: put the relay online and run tools\\release.bat "
+         "set-relay (docs/GIT_GUIDE.md, lesson 5)."]),
+    "SW-402": Problem(
+        "Can't reach the relay server",
+        "SyncWatch couldn't connect to the server rooms go through. It keeps trying by itself.",
+        ["Check that this PC is online (open any website).",
+         "A firewall or antivirus may be blocking SyncWatch. Allow SyncWatch (or pythonw.exe in "
+         "its runtime folder) to use the internet."], WARNING, popup=False),
+    "SW-403": Problem(
+        "Secure connection to the relay failed",
+        "The relay server's certificate couldn't be checked, so SyncWatch didn't connect. "
+        "This protects you from someone pretending to be the relay.",
+        ["Check that the date and time on this PC are correct.",
+         "Some antivirus programs and school or work networks inspect secure connections. "
+         "Try another network, or turn off \"HTTPS scanning\" in the antivirus."]),
+    "SW-404": Problem(
+        "Too many connections to this room",
+        "The relay server allows a limited number of connections per room, and they're all in use.",
+        ["Wait a moment; SyncWatch keeps trying.",
+         "If it keeps happening, the host can press New code (someone may be abusing the old one)."],
+        WARNING, popup=False),
+    "SW-405": Problem(
+        "The relay server answered strangely",
+        "The address for the relay server may be wrong, or the relay is a different version.",
+        ["Check Settings > Watching together > Relay server (advanced). Empty means the built-in one.",
+         "Update SyncWatch (Settings > Updates > Check now)."]),
+    "SW-406": Problem(
+        "Slow down",
+        "Too many messages were sent in a short time, so the relay server dropped some.",
+        [], INFO, popup=False),
 
     # ---- 5xx: watching in sync ----------------------------------------------
     "SW-501": Problem(

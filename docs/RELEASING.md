@@ -11,6 +11,9 @@ Everything here runs from the project folder in the VS Code terminal.
    - Your **public** key is written into `syncwatch/update/keys.py`. That one is meant to be public.
 3. `tools\release.bat check-backup`: type the words from your paper to prove the paper is right.
 4. Commit `keys.py` and `source.py` through a pull request (GIT_GUIDE lesson 3).
+5. For rooms (0.4 and later): put the relay online and run
+   `tools\release.bat set-relay https://syncwatch-relay.<you>.workers.dev`, then commit
+   `syncwatch/net/relay_url.py` the same way (GIT_GUIDE lesson 5).
 
 ## Every release
 1. The version number is in `syncwatch/__init__.py` (`__version__ = "0.3.1"`), and
