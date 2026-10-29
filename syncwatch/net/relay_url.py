@@ -8,4 +8,4 @@ It's only the default: Settings can point to another relay (advanced), and a
 room code carries its relay's address when it isn't this one.
 """
 
-RELAY_URL = ""
+RELAY_URL = "https://syncwatch-relay.sadagar1928.workers.dev"
