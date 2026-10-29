@@ -447,7 +447,9 @@ def rooms_extras(controller):
             blocked_box.addWidget(title)
             for key_id, blocked in sorted(store.blocked.items(), key=lambda item: item[1].name.lower()):
                 row = QHBoxLayout()
-                row.addWidget(QLabel(f"{blocked.name} ({blocked.key.short_id})"))
+                name = QLabel(f"{blocked.name} ({blocked.key.short_id})")
+                name.setTextFormat(Qt.TextFormat.PlainText)   # whatever name they gave: never as HTML
+                row.addWidget(name)
                 unblock = QPushButton("Unblock")
                 unblock.clicked.connect(lambda _=False, k=key_id: (store.unblock(k), refresh()))
                 row.addWidget(unblock)

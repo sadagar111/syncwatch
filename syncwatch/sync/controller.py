@@ -54,6 +54,7 @@ HEARTBEAT_HOST_S = 1.0
 HEARTBEAT_MEMBER_S = 2.0
 GAP_SAMPLES = 5
 SEEK_RATE_PER_S = 5          # the host accepts at most this many seek requests per second per person
+REJECT_GAP_S = 1.0           # "please wait" / "only the host" answers: at most one per second per person
 PAUSE_ALIGN_MS = 150         # on pause, jump to the exact frame if further apart than this
 PLAY_ALIGN_MS = 300          # on play, jump first if further apart than this
 READY_TOLERANCE_MS = 500
@@ -141,6 +142,7 @@ class Controller(RoomListener):
         self._my_cooldown_until: Dict[str, float] = {"pp": 0.0, "sync": 0.0}
         self._member_last: Dict[bytes, Dict[str, float]] = {}
         self._seek_times: Dict[bytes, Deque[float]] = {}
+        self._last_reject: Dict[bytes, float] = {}
         self._host_sync: Optional[_HostSync] = None
         self._client_sync: Optional[Dict] = None
         self._play_at: Optional[float] = None
@@ -319,6 +321,7 @@ class Controller(RoomListener):
         self.attached = True
         self._member_last.clear()
         self._seek_times.clear()
+        self._last_reject.clear()
         self._warned_films.clear()
         self.rules = Rules()
 
@@ -636,6 +639,7 @@ class Controller(RoomListener):
                 del self.peers[key_id]
                 self._member_last.pop(key_id, None)
                 self._seek_times.pop(key_id, None)
+                self._last_reject.pop(key_id, None)
         for key_id, member in members.items():
             peer = self.peers.get(key_id)
             if peer is None:
@@ -737,6 +741,10 @@ class Controller(RoomListener):
             self._start_host_sync(by=peer.name)
 
     def _reject(self, peer: Peer, action: str, reason: str, wait: float = 0.0) -> None:
+        now = self.clock()
+        if now - self._last_reject.get(peer.id, -1e9) < REJECT_GAP_S:
+            return  # someone pressing (or sending) far too often doesn't get an answer each time
+        self._last_reject[peer.id] = now
         fields = {"to": b64(peer.id), "action": action, "reason": reason}
         if wait:
             fields["wait"] = round(wait, 2)

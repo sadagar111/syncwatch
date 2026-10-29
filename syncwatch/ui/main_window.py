@@ -300,6 +300,7 @@ class MainWindow(QMainWindow):
     # ================================================================ rooms
     def _confirm(self, title: str, text: str, yes: str = "Yes") -> bool:
         box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=self)
+        box.setTextFormat(Qt.TextFormat.PlainText)   # names come from other people: never as HTML
         ok = box.addButton(yes, QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
         box.exec()
@@ -519,7 +520,10 @@ class MainWindow(QMainWindow):
                 message = self.inbox.get_nowait()
             except queue.Empty:
                 break
-            self.controller.handle(message)
+            try:
+                self.controller.handle(message)
+            except Exception as exc:  # one bad message mustn't stop the others (or the clock)
+                errors.report("SW-901", exc=exc)
         try:
             self.controller.tick()
         except Exception as exc:  # keep the app alive; the error is shown and logged
