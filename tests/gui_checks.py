@@ -64,8 +64,8 @@ def check_room(out: Path) -> bool:
     roles = ("host", "marek", "kuba")
     logs = {role: out / f"room-{role}.jsonl" for role in roles}
     code_file = out / "room-code.txt"
-    if code_file.exists():
-        code_file.unlink()
+    for stale in [code_file, *out.glob("room-ready-*")]:
+        stale.unlink(missing_ok=True)
     procs = {}
     try:
         for role in roles:
@@ -85,6 +85,10 @@ def check_room(out: Path) -> bool:
         return False
     data = {role: _load(logs[role]) for role in roles}
     start = min(t for role in roles for t, _ in data[role][1])
+    began = {role: data[role][0][0][0] for role in roles if data[role][0]}
+    if began:
+        spread = max(began.values()) - min(began.values())
+        print(f"room: the three scripts started within {spread * 1000:.0f} ms of each other")
     events = {}
     for t, name in sorted(e for role in roles for e in data[role][1]):
         events.setdefault(name, t - start)  # first time each event happened
@@ -110,7 +114,8 @@ def check_room(out: Path) -> bool:
         "playing together": ((events["play"] + 1.0, events["pause"] - 0.2), 400),
         "paused together": ((events["pause"] + 0.5, events["seek5"] - 0.2), 150),
         "after a jump": ((events["play2"] + 1.0, events["marek:drift"] - 0.2), 400),
-        "after Sync up": ((events["syncup"] + 4.5, events["marek:friend_pause"] - 0.2), 250),
+        "after Sync up": ((events["syncup"] + 4.5, min(events["marek:friend_pause"],
+                                                       events.get("skipspam", float("inf"))) - 0.2), 250),
     }
     ok = True
     host_people = [n for t, n in data["host"][2] if t - start > events["play"]]

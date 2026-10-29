@@ -2,6 +2,7 @@
 
     python tests/room_gui_harness.py host|marek|kuba <film> <log file> <relay url> <code file> [<screenshots dir>]
 
+The three apps wait for each other, then start their scripts at the same moment.
 The host opens its room, writes the room code to <code file> and lets in
 whoever asks; the others wait for that file and join with the code. Every
 50 ms each app logs (wall clock, film position, playing) as JSON lines, so
@@ -65,9 +66,38 @@ SCRIPTS = {
 }
 
 
+def wait_for_the_others() -> None:
+    """Start all three scripts at the same moment, however long each app took to open.
+
+    The scripts' times only line up if they start together; on a slow PC one app can be
+    ready seconds after another (then, say, Marek's "friend_pause" at 40 s would come after
+    the host's jumps at 44 s)."""
+    folder = CODE_FILE.parent
+    mine = folder / f"room-ready-{ROLE}"
+    tmp = folder / f"room-ready-{ROLE}.tmp"
+    tmp.write_text(repr(time.time()), encoding="utf-8")
+    os.replace(tmp, mine)   # all at once, so nobody reads half a number
+    everyone = [folder / f"room-ready-{role}" for role in NAMES]
+    deadline = time.monotonic() + 120
+    while not all(p.exists() for p in everyone) and time.monotonic() < deadline:
+        QApplication.processEvents()
+        time.sleep(0.05)
+    times = []
+    for path in everyone:
+        try:
+            times.append(float(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+    go = max(times, default=time.time()) + 1.0   # the same moment for all three (same PC clock)
+    while time.time() < go:
+        QApplication.processEvents()
+        time.sleep(0.01)
+
+
 def scripted_exec(self):
     w = window()
     w.open_film(FILM)
+    wait_for_the_others()
     script = list(SCRIPTS[ROLE])
     start = time.monotonic()
     out = LOG.open("w")
