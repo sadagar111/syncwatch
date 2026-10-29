@@ -1,6 +1,6 @@
 """Which relay server rooms use by default.
 
-Set once with ``tools\\release.bat set-relay https://syncwatch-relay.<you>.workers.dev``
+Set once with ``tools\\release.bat set-relay https://syncwatch-relay.sadagar1928.workers.dev``
 after deploying the relay (docs/GIT_GUIDE.md, lesson 5). While it's empty,
 rooms are switched off (SW-401).
 
