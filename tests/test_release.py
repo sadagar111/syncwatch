@@ -243,6 +243,7 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("syncwatch/__main__.py", app)
         self.assertIn("tools/remove_firewall.bat", app)
         self.assertIn("tools/Test with two windows.bat", app)
+        self.assertIn("tools/measure_jumps.bat", app)       # friends can measure their PCs too
         self.assertIn("syncwatch/room/session.py", app)
         self.assertIn("syncwatch/net/relay_url.py", app)
         self.assertNotIn("tools/release.py", app)

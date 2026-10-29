@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 (jumps together)
+- **Jumping while the film plays keeps everyone together.** Everyone waits at the new spot until every PC shows it, then all play at the same moment, so nobody misses the first seconds after a jump. Slow PCs no longer end up behind.
+- Or choose *Keep playing* (Settings → Watching together → *When someone jumps while the film plays*): everyone jumps straight away, and each PC learns how long its own jumps take and jumps that much further ahead. The host's choice counts for the whole room.
+- **Fix:** pausing during a Sync up countdown (or while the room waited after a jump) now stops everyone. Before, the others started playing anyway.
+- **Fix:** whoever jumped while the film played no longer ends up about 0.3 s ahead of everyone.
+- `tools\measure_jumps.bat`: drag a film onto it to see how long jumps take on your PC.
+
 ## 0.4.0 (step 3: rooms, friends and security)
 **Rooms for up to 10 people (or 20)**
 - **Host my room** opens your room; **Copy code** gives you its code (`SW-…`). Friends paste it under *Join a room*. No addresses, no Tailscale, no firewall settings: everything goes through your relay server.

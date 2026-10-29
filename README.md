@@ -17,7 +17,7 @@ the Python installed on your PC and installs the two libraries it needs once
 | `assets/` | Design files: logo, background, icons, colours. See `assets/README.txt` |
 | `boot.py` | Starter for the installed version: swaps in updates, goes back if one fails |
 | `SyncWatch.bat` | Starts SyncWatch (installed version: its own Python; source folder: your Python) |
-| `tools/` | "Test with two windows", fake viewers for big rooms (`bots.bat`), the release tools, a relay for testing (`local_relay.py`) |
+| `tools/` | "Test with two windows", fake viewers for big rooms (`bots.bat`), how long jumps take on a PC (`measure_jumps.bat`), the release tools, a relay for testing (`local_relay.py`) |
 | `relay/` | The relay server rooms go through (runs on Cloudflare; see `relay/README.md`) |
 | `tests/` | Automatic tests (`tests/media` has a small demo film) |
 | `docs/` | `GIT_GUIDE.md` (the Git lessons), `RELEASING.md` (publishing, signing key), `ROOMS.md` (how rooms work and why they're safe) |

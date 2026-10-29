@@ -148,6 +148,16 @@ cooldowns per person, how often someone may jump) and then broadcasts the
 command, or answers with `reject`. Editing your own copy of the app doesn't get
 around that, because everyone else's app only follows commands from the host.
 
+**Jumps while the film plays** (since 0.4.1, with *Pause and start together*, the
+default): the host turns a jump into a Sync up without the countdown. `sync_prepare`
+carries `jump: true` and who jumped (`by`, `by_id`); everyone pauses at the new spot,
+answers `sync_ready` once their film shows it, and `sync_go` starts everyone at the same
+moment on the host's clock (a few hundred milliseconds later). A newer jump, or any
+play/pause/jump command from the host, cancels one still waiting (`sync_abort`). Apps
+from 0.4.0 treat such a jump as an ordinary Sync up. The host's choice between this and
+*Keep playing* travels with its rules in `state` (`rules.jump`), so the whole room behaves
+the same way.
+
 **Clock.** Each member pings the host; from the quickest round trips it
 estimates the difference between its clock and the host's. Positions in `state`,
 `status` and `cmd` carry the time on the host's clock, and Sync up starts

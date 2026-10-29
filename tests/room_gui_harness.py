@@ -59,7 +59,7 @@ def shot(name):
 # Timed for the 40-second film in tests/media.
 SCRIPTS = {
     "host": [(1, "host"), (8, "play"), (12, "shot_playing"), (14, "pause"), (17, "seek5"), (19, "play2"),
-             (34, "syncup"), (44, "skipspam"), (52, "end")],
+             (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (52, "end")],
     "marek": [(3, "join"), (12, "shot_playing"), (24, "drift"), (29, "report_gap"), (30, "syncme"),
               (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (52, "end")],
     "kuba": [(3.5, "join"), (12, "shot_playing"), (52, "end")],
@@ -128,6 +128,8 @@ def scripted_exec(self):
                 c.pause()
             elif action == "seek5":
                 c.seek(5_000)
+            elif action == "jump_playing":
+                c.seek(9_000)  # while playing: everyone pauses there and starts together
             elif action == "drift":
                 w.player.seek(w.player.position() + 2500)  # behind the app's back: simulated drift
             elif action == "report_gap":

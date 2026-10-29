@@ -183,7 +183,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                                      f"channel={s.channel_state or '-'} attached={c.attached} "
                                      f"rtt={s.rtt_ms():.0f}ms gap={c.gap_ms()} people=[{people}] "
                                      f"rules={c.effective_rules()} id={rooms.identity.public.short_id} "
-                                     f"friends={len(rooms.store.friends)}"))
+                                     f"friends={len(rooms.store.friends)} jumps={c.jump_mode} "
+                                     f"jump_time={c.learned_jump_ms:.0f}ms"))
             player = window.player
             sections.append(("Film", f"{player.path.name if player.path else '-'} duration={player.duration()} "
                                      f"position={int(player.position())} playing={player.is_playing()} "

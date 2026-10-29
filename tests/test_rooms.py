@@ -335,6 +335,146 @@ class SecurityTests(RoomTestCase):
         self.assertTrue(self.alex.rooms.store.is_blocked(kuba.rooms.identity.public))
 
 
+class JumpTests(RoomTestCase):
+    """Jumps while the film plays: "Pause and start together" (the default) and "Keep playing"."""
+
+    def room_of(self, *slowness, **settings):
+        self.alex = self.room.person("Alex", **settings)
+        self.guests = [self.room.person(f"Guest {i + 1}", seek_delay=delay, **settings)
+                       for i, delay in enumerate(slowness)]
+        self.room.let_in(self.alex, *self.guests)
+        self.pump(until=lambda: all(g.c.session.clock_ready for g in self.guests))
+        self.alex.c.play()
+        self.assertTrue(self.pump(until=lambda: all(g.player.playing for g in self.guests)))
+        self.pump(0.5)
+
+    def everyone(self):
+        return [self.alex] + self.guests
+
+    def spread(self):
+        positions = [p.player.position() for p in self.everyone()]
+        return max(positions) - min(positions)
+
+    def all_playing(self):
+        return all(p.player.playing and p.player.is_ready() for p in self.everyone())
+
+    def test_together_waits_for_the_slowest_pc(self):
+        self.room_of(0.8, 0.05)
+        self.alex.c.seek(600_000)
+        self.assertFalse(self.alex.player.playing)   # waits at the new spot
+        self.assertTrue(self.pump(until=lambda: all(not g.player.playing for g in self.guests)))
+        self.assertTrue(self.pump(until=self.all_playing, timeout=10))
+        self.pump(0.5)
+        self.assertLess(self.spread(), 100)
+        self.assertLess(abs(self.alex.player.position() - 600_500), 600)
+        for person in self.everyone():
+            self.assertEqual(person.ui.countdowns, [], person.name)   # no 3-2-1 for a jump
+        self.assertTrue(any("Alex jumped to 10:00" in a or "Alex jumped to 0:10:00" in a
+                            for a in self.guests[0].ui.activities()), self.guests[0].ui.activities())
+
+    def test_together_a_members_jump(self):
+        self.room_of(0.05, 0.8)
+        kuba = self.guests[0]
+        kuba.c.seek(900_000)
+        self.assertFalse(kuba.player.playing)       # Kuba waits at the new spot right away
+        self.assertTrue(self.pump(until=lambda: not self.alex.player.playing))
+        self.assertTrue(self.pump(until=self.all_playing, timeout=10))
+        self.pump(0.5)
+        self.assertLess(self.spread(), 100)
+        self.assertLess(abs(self.alex.player.position() - 900_500), 600)
+        self.assertTrue(any("Guest 1 jumped to" in a for a in self.alex.ui.activities()))
+        self.assertTrue(any("You jumped to" in a for a in kuba.ui.activities()))
+
+    def test_together_a_newer_jump_replaces_one_still_waiting(self):
+        self.room_of(1.5)
+        self.alex.c.seek(300_000)
+        self.alex.c.seek(310_000)            # still skipping: one jump at the end
+        self.pump(0.7)                       # the first jump is waiting for the slow guest
+        self.assertIsNotNone(self.alex.c._host_sync)
+        self.alex.c.seek(1_200_000)
+        self.assertTrue(self.pump(until=self.all_playing, timeout=10))
+        self.pump(0.5)
+        self.assertLess(self.spread(), 100)
+        self.assertLess(abs(self.alex.player.position() - 1_200_500), 700)
+
+    def test_pause_while_waiting_stops_everyone(self):
+        """Pausing while a jump or Sync up hasn't started yet: nobody starts afterwards."""
+        self.room_of(1.0, 0.05)
+        self.alex.c.seek(500_000)
+        self.pump(0.3)
+        self.alex.c.pause()
+        self.pump(3.0)
+        self.assertFalse(any(p.player.playing for p in self.everyone()))
+        self.alex.c.play()
+        self.assertTrue(self.pump(until=self.all_playing, timeout=10))
+        self.alex.c.sync_up()
+        self.assertTrue(self.pump(until=lambda: self.alex.c._play_at is not None, timeout=10))  # counting down
+        self.alex.c.pause()
+        self.pump(2.5)
+        self.assertFalse(any(p.player.playing for p in self.everyone()))
+
+    def test_a_member_plays_on_if_the_host_never_answers(self):
+        self.room_of(0.05, sync__ready_timeout_s=1.0)
+        guest = self.guests[0]
+        self.alex.c._on_req = lambda peer, body: None      # a host that ignores requests
+        guest.c.seek(400_000)
+        self.assertFalse(guest.player.playing)
+        self.assertTrue(self.pump(until=lambda: guest.player.playing, timeout=8))
+        self.assertTrue(any("didn't start everyone again" in a for a in guest.ui.activities()))
+
+    def test_keep_playing_learns_how_long_jumps_take(self):
+        """A player that starts late by its loading time: after a few jumps, it jumps that much
+        further ahead and lands with everyone."""
+        self.room_of(0.6, sync__jump_mode="ahead")
+        slow = self.guests[0]
+        gaps = []
+        for i in range(6):
+            self.alex.c.seek(1_000_000 + i * 600_000)
+            self.pump(2.6)                      # (measured 2 s after each jump)
+            gaps.append(abs(slow.player.position() - self.alex.player.position()))
+        self.assertTrue(all(p.player.playing for p in self.everyone()))
+        self.assertGreater(slow.c.learned_jump_ms, 400)
+        self.assertLess(self.alex.c.learned_jump_ms, 100)
+        self.assertGreater(gaps[0], 450)        # the first jump: no idea yet
+        self.assertLess(gaps[-1], 200, gaps)    # later: lands with everyone
+
+    def test_keep_playing_with_a_player_that_catches_up_by_itself(self):
+        """Qt's player keeps its clock running while it loads: nothing to make up for."""
+        self.alex = self.room.person("Alex", sync__jump_mode="ahead")
+        slow = self.room.person("Slow", seek_delay=0.6, clock_runs=True, sync__jump_mode="ahead")
+        self.guests = [slow]
+        self.room.let_in(self.alex, slow)
+        self.alex.c.play()
+        self.assertTrue(self.pump(until=lambda: slow.player.playing))
+        for i in range(3):
+            self.alex.c.seek(1_000_000 + i * 600_000)
+            self.pump(2.6)
+        self.assertLess(slow.c.learned_jump_ms, 100)
+        self.assertLess(abs(slow.player.position() - self.alex.player.position()), 200)
+
+    def test_the_hosts_choice_counts(self):
+        self.alex = self.room.person("Alex", sync__jump_mode="ahead")
+        guest = self.room.person("Guest")                      # (would pause and wait)
+        self.guests = [guest]
+        self.room.let_in(self.alex, guest)
+        self.alex.c.play()
+        self.assertTrue(self.pump(until=lambda: guest.player.playing and guest.c.rules.jump == "ahead"))
+        guest.c.seek(700_000)
+        self.assertTrue(guest.player.playing)                  # keeps playing, like the host chose
+        self.assertTrue(self.pump(until=lambda: abs(self.alex.player.position() - 700_000) < 3000))
+        self.alex.settings.set("sync.jump_mode", "together")
+        self.assertTrue(self.pump(until=lambda: guest.c.rules.jump == "together"))
+        guest.c.seek(1_500_000)
+        self.assertFalse(guest.player.playing)                 # now waits for everyone
+
+    def test_alone_in_the_room_a_jump_doesnt_pause(self):
+        alex = self.room.person("Alex")
+        self.assertTrue(alex.c.host_room())
+        alex.c.play()
+        alex.c.seek(100_000)
+        self.assertTrue(alex.player.playing)
+
+
 class ResilienceTests(RoomTestCase):
     def test_host_closes_and_member_leaves(self):
         alex, marek, kuba = self.room.person("Alex"), self.room.person("Marek"), self.room.person("Kuba")
