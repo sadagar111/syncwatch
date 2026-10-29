@@ -26,6 +26,12 @@ except ImportError:  # the converter tests need PyAV
 CONVERTER = ROOT / "syncwatch" / "library" / "convert.py"
 
 
+class InstalledTests(unittest.TestCase):
+    @unittest.skipUnless(os.environ.get("GITHUB_ACTIONS"), "only on GitHub's machines")
+    def test_pyav_is_installed_on_github(self):
+        self.assertTrue(HAVE_AV, "PyAV should be installed there (requirements.txt)")
+
+
 class LibraryFolderTests(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp())

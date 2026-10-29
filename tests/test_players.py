@@ -30,6 +30,7 @@ try:
     HAVE_MPV = True
 except mpvlib.Unavailable:
     HAVE_MPV = False
+ON_GITHUB = bool(os.environ.get("GITHUB_ACTIONS"))   # there mpv must be installed: never skip silently
 
 
 def spin(seconds, until=None):
@@ -59,6 +60,12 @@ class Reports:
 
     def __exit__(self, *exc):
         self._patch.stop()
+
+
+class InstalledTests(unittest.TestCase):
+    @unittest.skipUnless(ON_GITHUB, "only on GitHub's machines")
+    def test_mpv_is_installed_on_github(self):
+        self.assertTrue(HAVE_MPV, "libmpv should be installed there (apt libmpv2 / tools/get_libmpv.py)")
 
 
 class ChoosingTests(unittest.TestCase):

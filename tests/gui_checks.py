@@ -32,6 +32,10 @@ def check_ui(out: Path) -> bool:
     print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("KEY CHECKS", "UI HARNESS",
                                                                                      "ROOM CHECKS", "PLAYER",
                                                                                      "subtitle sources"))))
+    player = next((line[len("PLAYER:"):].strip() for line in result.stdout.splitlines()
+                   if line.startswith("PLAYER:")), "")
+    if player and os.environ.get("GITHUB_ACTIONS"):   # shown on the pull request page
+        print(f"::notice title=Video player in the app check ({sys.platform})::{player}", flush=True)
     return result.returncode == 0
 
 
