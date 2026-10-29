@@ -16,7 +16,7 @@ from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import (QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QImage, QKeySequence,
                            QPainter, QShortcut)
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
                                QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import errors, log as log_module, paths
@@ -74,28 +74,48 @@ class Background(QWidget):
 
 
 class IdleScreen(QWidget):
-    """What you see before a film is open: your films (the library)."""
+    """What you see before a film is open: your films (the library), on a card in the middle."""
+    CARD_WIDTH = 720
+    LIST_ROWS = 10      # the list grows with the films up to this many rows, then scrolls
 
     def __init__(self, parent=None):
         super().__init__(parent)
         logo = QLabel()
         pixmap = asset_pixmap("logo.png")
         if pixmap is not None:
-            logo.setPixmap(pixmap.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation))
+            ratio = self.devicePixelRatioF()
+            scaled = pixmap.scaled(round(56 * ratio), round(56 * ratio), Qt.AspectRatioMode.KeepAspectRatio,
+                                   Qt.TransformationMode.SmoothTransformation)
+            scaled.setDevicePixelRatio(ratio)
+            logo.setPixmap(scaled)
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.library = LibraryPanel()
+        card = QFrame()
+        card.setObjectName("Card")
+        self.library = LibraryPanel(fit_rows=self.LIST_ROWS)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 16, 18, 14)
+        card_layout.addWidget(self.library)
         self.hint = QLabel("Tip: drop a film file here to play it straight away, without adding it to the library.")
         self.hint.setObjectName("Hint")
         self.hint.setWordWrap(True)
+        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         column = QWidget()
-        column.setMaximumWidth(760)
+        column.setMaximumWidth(self.CARD_WIDTH)
         column_layout = QVBoxLayout(column)
+        column_layout.setContentsMargins(0, 0, 0, 0)
+        column_layout.setSpacing(14)
         column_layout.addWidget(logo)
-        column_layout.addWidget(self.library, 1)
+        column_layout.addWidget(card)
         column_layout.addWidget(self.hint)
-        layout = QHBoxLayout(self)
-        layout.addWidget(column, 1)
+        row = QHBoxLayout()   # the column as wide as it may be, the rest split evenly on both sides
+        row.addStretch(1)
+        row.addWidget(column, 30)
+        row.addStretch(1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.addStretch(2)
+        layout.addLayout(row)
+        layout.addStretch(3)   # a little above the middle looks centred to the eye
 
 
 class MainWindow(QMainWindow):
@@ -954,11 +974,25 @@ class MainWindow(QMainWindow):
 
     def _restore_geometry(self) -> None:
         geometry = self.settings.get("ui.window_geometry")
-        if geometry:
-            self.restoreGeometry(QByteArray.fromBase64(geometry.encode("ascii")))
+        if not (geometry and self.restoreGeometry(QByteArray.fromBase64(geometry.encode("ascii")))):
+            self._first_geometry()
         splitter = self.settings.get("ui.splitter")
         if splitter:
             self.splitter.restoreState(QByteArray.fromBase64(splitter.encode("ascii")))
+
+    def _first_geometry(self) -> None:
+        """First start (nothing saved yet): 1280×760, or less on a smaller screen (a laptop at 150 %
+        has only 1280×720 to share with the taskbar), in the middle of the screen."""
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        frame = 40   # the title bar and borders Windows adds around the window
+        width = max(self.minimumSizeHint().width(), min(1280, int(area.width() * 0.94)))
+        height = max(self.minimumSizeHint().height(), min(760, int(area.height() * 0.94) - frame))
+        self.resize(width, height)
+        self.move(area.x() + max(0, (area.width() - width) // 2),
+                  area.y() + max(0, (area.height() - height - frame) // 2))
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self._save_resume(force=True)

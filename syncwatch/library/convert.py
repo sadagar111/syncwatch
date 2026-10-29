@@ -34,12 +34,23 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 KEEP_AUDIO = {"aac", "mp3", "opus", "vorbis", "flac"}          # plus every pcm_* format
 MKV_SUBTITLES = {"subrip", "srt", "ass", "ssa", "webvtt", "text", "hdmv_pgs_subtitle", "pgssub",
                  "dvd_subtitle", "dvdsub", "dvb_subtitle", "dvbsub"}
 DECODE_TEST_PACKETS = 400   # packets read per track when checking that it decodes
 PROGRESS_EVERY_S = 0.5
+
+
+def command(*arguments: str) -> list:
+    """How SyncWatch starts this file: with its own Python, ignoring PYTHON* environment
+    variables (-E) and, on Python 3.11+, without putting this folder on the import path (-P).
+
+    Not -I ("isolated"): that also hides libraries installed with "pip install --user", which
+    is where the Microsoft Store's Python puts them, so PyAV would look missing (SW-225)."""
+    flags = ["-E"] + (["-P"] if sys.version_info >= (3, 11) else [])
+    return [sys.executable, *flags, str(Path(__file__).resolve()), *map(str, arguments)]
 
 
 def say(**message) -> None:

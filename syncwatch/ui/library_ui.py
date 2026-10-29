@@ -29,22 +29,23 @@ import threading
 from pathlib import Path
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import QFile, QFileSystemWatcher, QObject, QProcess, QStandardPaths, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import (QFile, QFileSystemWatcher, QObject, QProcess, QSize, QStandardPaths, Qt, QTimer, QUrl,
+                            Signal)
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QFileDialog, QHBoxLayout, QHeaderView, QLabel, QMenu,
-                               QMessageBox, QProgressBar, QPushButton, QToolButton, QTreeWidget, QTreeWidgetItem,
-                               QVBoxLayout, QWidget)
+                               QMessageBox, QProgressBar, QPushButton, QSizePolicy, QToolButton, QTreeWidget,
+                               QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .. import errors, paths
 from ..filmstate import film_key
 from ..library import films as library
+from ..library.convert import command as converter_command
 from ..sync.controller import fmt_time
 from ..units import Eta, human_size, human_time
 from .players import PlayabilityTest
 
 log = logging.getLogger("syncwatch.library")
 
-CONVERTER = Path(__file__).resolve().parent.parent / "library" / "convert.py"
 FILM_PATTERNS = " ".join(f"*{ext}" for ext in library.VIDEO_EXTENSIONS)
 PROBE_LIMIT_MS = 120_000        # reading a film's tracks never takes this long; something hangs
 REMOVE_AFTER_CLOSE_MS = 800     # removing the film that was just open: wait until it's let go of
@@ -53,7 +54,58 @@ SOUND_CODECS = {"ac3": "AC3 (Dolby Digital)", "eac3": "E-AC3 (Dolby Digital Plus
 
 
 # =============================================================== the list of films
+class ElidedLabel(QLabel):
+    """One line of text that's shortened with … in the middle when there's no room (all of it as tooltip)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full = ""
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(60)
+
+    def full_text(self) -> str:
+        return self._full
+
+    def set_full_text(self, text: str) -> None:
+        self._full = text
+        self.setToolTip(text)
+        self._elide()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._elide()
+
+    def _elide(self) -> None:
+        self.setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideMiddle, max(20, self.width())))
+
+
+class FilmList(QTreeWidget):
+    """The films. With ``fit(...)`` it asks for just the height the films need, but can shrink to a few
+    rows when the window is short, instead of pushing the window past the bottom of a small screen."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._wanted = 0
+        self._least = 0
+
+    def fit(self, wanted: int, least: int) -> None:
+        self._wanted, self._least = wanted, least
+        self.setMaximumHeight(wanted)
+        self.updateGeometry()
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        hint = super().sizeHint()
+        return QSize(hint.width(), self._wanted) if self._wanted else hint
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        hint = super().minimumSizeHint()
+        return QSize(hint.width(), self._least) if self._least else hint
+
+
 class LibraryPanel(QWidget):
+    """The list of films. ``fit_rows``: as tall as the films need, up to that many rows (the start
+    screen); without it the list fills the space it gets (the Library window)."""
     playRequested = Signal(object)        # Path
     addRequested = Signal()
     openFileRequested = Signal()
@@ -61,10 +113,11 @@ class LibraryPanel(QWidget):
     convertRequested = Signal(object)     # Path
     removeRequested = Signal(object)      # Path
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, fit_rows: int = 0):
         super().__init__(parent)
+        self.fit_rows = fit_rows
         title = QLabel("Your films")
-        title.setObjectName("PanelTitle")
+        title.setObjectName("LibraryTitle")
         self.add_button = QPushButton("➕  Add film…")
         self.add_button.setObjectName("Accent")
         self.add_button.setToolTip("Pick a film from Downloads or anywhere on this PC. SyncWatch checks that it "
@@ -75,11 +128,12 @@ class LibraryPanel(QWidget):
         top.addStretch(1)
         top.addWidget(self.add_button)
 
-        self.tree = QTreeWidget()
+        self.tree = FilmList()
         self.tree.setColumnCount(3)
-        self.tree.setHeaderLabels(["Film", "Size", "Watched"])
+        self.tree.setHeaderLabels(["Film", "Size", "Stopped at"])
         self.tree.setRootIsDecorated(False)
         self.tree.setUniformRowHeights(True)
+        self.tree.setAlternatingRowColors(False)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
@@ -90,11 +144,34 @@ class LibraryPanel(QWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.empty = QLabel("No films yet. Click <b>Add film</b> and pick one from Downloads or anywhere on this "
-                            "PC: SyncWatch checks that it plays and copies it here. The original stays where it was.")
-        self.empty.setWordWrap(True)
-        self.empty.setObjectName("Dim")
-        self.empty.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        # No films yet: a short explanation and one big button, in the middle
+        self.empty = QWidget()
+        icon = QLabel("🎬")
+        icon.setObjectName("LibraryEmptyIcon")
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        headline = QLabel("No films yet")
+        headline.setObjectName("LibraryEmptyTitle")
+        headline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        explanation = QLabel("Pick a film from Downloads or anywhere on this PC. SyncWatch checks that it plays "
+                             "and copies it into your library. The original stays where it was.")
+        explanation.setObjectName("Dim")
+        explanation.setWordWrap(True)
+        explanation.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_add = QPushButton("➕  Add your first film…")
+        self.empty_add.setObjectName("Accent")
+        self.empty_add.clicked.connect(self.addRequested)
+        empty_layout = QVBoxLayout(self.empty)
+        empty_layout.setContentsMargins(12, 18, 12, 18)
+        empty_layout.setSpacing(8)
+        empty_layout.addStretch(1)   # kept together in the middle when there's more room (Library window)
+        empty_layout.addWidget(icon)
+        empty_layout.addWidget(headline)
+        empty_layout.addWidget(explanation)
+        empty_layout.addSpacing(6)
+        empty_layout.addWidget(self.empty_add, alignment=Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addStretch(1)
 
         self.play_button = QPushButton("▶  Play")
         self.play_button.clicked.connect(lambda: self.playRequested.emit(self.selected()))
@@ -104,44 +181,60 @@ class LibraryPanel(QWidget):
         self.more_menu = QMenu(self.more)
         self.more_menu.aboutToShow.connect(self._fill_more_menu)
         self.more.setMenu(self.more_menu)
-        self.folder_label = QLabel()
+        self.folder_label = ElidedLabel()
         self.folder_label.setObjectName("Hint")
-        self.folder_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.folder_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         bottom = QHBoxLayout()
         bottom.addWidget(self.play_button)
         bottom.addWidget(self.more)
-        bottom.addStretch(1)
-        bottom.addWidget(self.folder_label)
+        bottom.addSpacing(12)
+        bottom.addWidget(self.folder_label, 1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
         layout.addLayout(top)
-        layout.addWidget(self.tree, 1)
-        layout.addWidget(self.empty, 1)
+        layout.addWidget(self.tree, 0 if fit_rows else 1)
+        layout.addWidget(self.empty, 0 if fit_rows else 1)
         layout.addLayout(bottom)
         self._selection_changed()
 
     def set_films(self, films: List[library.Film], folder: Path, watched: Callable[[library.Film], str]) -> None:
         rows = [(film.path, film.size, watched(film)) for film in films]
-        if rows == getattr(self, "_rows", None) and self.folder_label.text().endswith(str(folder)):
+        if rows == getattr(self, "_rows", None) and self.folder_label.full_text().endswith(str(folder)):
             return   # nothing changed (e.g. a copy in progress touched the folder): keep scroll and selection
         self._rows = rows
         current = self.selected()
         self.tree.clear()
-        for film in films:
-            item = QTreeWidgetItem([film.name, human_size(film.size), watched(film)])
+        for film, (_path, _size, stopped) in zip(films, rows):
+            item = QTreeWidgetItem([film.name, human_size(film.size), stopped])
             item.setData(0, Qt.ItemDataRole.UserRole, str(film.path))
             item.setToolTip(0, str(film.path))
+            item.setTextAlignment(1, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.tree.addTopLevelItem(item)
             if current is not None and film.path == current:
                 item.setSelected(True)
         if self.tree.topLevelItemCount() and not self.tree.selectedItems():
             self.tree.topLevelItem(0).setSelected(True)
+        self.tree.setColumnHidden(2, not any(stopped for _p, _s, stopped in rows))   # nothing started yet
         self.tree.setVisible(bool(films))
         self.empty.setVisible(not films)
+        self.add_button.setVisible(bool(films))      # when empty, the big button in the middle does it
         self.play_button.setVisible(bool(films))
-        self.folder_label.setText(f"Library folder: {folder}")
+        self.folder_label.set_full_text(f"Library: {folder}")
+        if self.fit_rows:
+            self._fit_height(len(films))
         self._selection_changed()
+
+    def _fit_height(self, count: int) -> None:
+        """Just tall enough for the films (up to fit_rows of them; more scroll). On a short window it
+        may shrink down to 3 rows."""
+        row = self.tree.sizeHintForRow(0) if count else 0
+        row = row if row > 0 else self.fontMetrics().height() + 10
+        header = self.tree.header().sizeHint().height()
+        frame = 2 * self.tree.frameWidth() + 8   # border, plus the stylesheet's padding
+        rows = max(1, min(count, self.fit_rows))
+        self.tree.fit(header + row * rows + frame, header + row * min(rows, 3) + frame)
 
     def selected(self) -> Optional[Path]:
         items = self.tree.selectedItems()
@@ -273,8 +366,10 @@ class ConverterProcess(QObject):
     def __init__(self, arguments: List[str], parent=None):
         super().__init__(parent)
         self.process = QProcess(self)
-        self.process.setProgram(sys.executable)
-        self.process.setArguments(["-I", str(CONVERTER), *arguments])
+        program, *options = converter_command(*arguments)
+        self.process.setProgram(program)
+        self.process.setArguments(options)
+        self._arguments = arguments
         self.process.readyReadStandardOutput.connect(self._read)
         self.process.finished.connect(self._finished)
         self.process.errorOccurred.connect(self._error)
@@ -282,7 +377,7 @@ class ConverterProcess(QObject):
         self._done = False
 
     def start(self) -> None:
-        log.info("converter: %s", " ".join(self.process.arguments()[2:]))
+        log.info("converter: %s", " ".join(self._arguments))
         self.process.start()
 
     def kill(self) -> None:
@@ -690,11 +785,11 @@ class LibraryController(QObject):
         folder = self.folder()
         films = library.list_films(folder)
         for panel in self.panels:
-            panel.set_films(films, folder, self._watched)
+            panel.set_films(films, folder, self._stopped_at)
 
-    def _watched(self, film: library.Film) -> str:
+    def _stopped_at(self, film: library.Film) -> str:
         position = int(self.window.films.get(film_key(film.name, film.size)).get("pos_ms", 0))
-        return f"stopped at {fmt_time(position)}" if position > 0 else ""
+        return fmt_time(position) if position > 0 else ""
 
     # ---- actions
     def open_dialog(self) -> None:

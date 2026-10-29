@@ -105,8 +105,19 @@ def run_script(errors_seen):
         if widget.isVisible() and widget is not window and widget.windowTitle():
             print("open window:", widget.windowTitle())
             shot_widget(widget, "dialog_" + widget.windowTitle().replace(" ", "_").replace(":", "")[:40])
+    area = QApplication.primaryScreen().availableGeometry()
+    widest = max(min(1280, area.width()), window.minimumSizeHint().width())
+    checks = {"window opens no wider than asked": window.width() <= widest,
+              "room buttons hidden outside a room": not window.controls.sync_up.isVisible()}
     window.resize(1280, 760)
     spin(0.3)
+    idle = window.idle
+    card = idle.library.parentWidget()
+    middle = card.mapTo(idle, QPoint(card.width() // 2, 0)).x()
+    checks["library card in the middle"] = abs(middle - idle.width() / 2) <= 2
+    print("WINDOW CHECKS:", checks, f"(window {window.width()} px, screen {area.width()} px, "
+          f"card middle {middle} of {idle.width()})")
+    FAILED.extend(name for name, ok in checks.items() if not ok)
     print("PLAYER:", window.player.describe())
     shot("01_start")
     if FILM:
@@ -168,7 +179,8 @@ def run_script(errors_seen):
     spin(1.0)
     shot("05_hosting")
     checks = {"hosting": window.controller.session.is_host,
-              "room code shown": window.sidebar.room.code_label.text().startswith("Room code: SW-")}
+              "room code shown": window.sidebar.room.code_label.text().startswith("Room code: SW-"),
+              "Sync up shown in a room": window.controls.sync_up.isVisible()}
     print("ROOM CHECKS:", checks)
     FAILED.extend(name for name, ok in checks.items() if not ok)
     from syncwatch.ui.dialogs.settings_dialog import SettingsDialog

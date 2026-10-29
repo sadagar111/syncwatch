@@ -29,7 +29,11 @@ only a real Windows PC can show is section 1: the picture, the mouse and fullscr
 - [ ] `tools\measure_jumps.bat` with one of your real films: send me the SUMMARY line
 
 ## 2. The library
-- [ ] The start screen lists the films in `movies\`; double-click plays one
+- [ ] The start screen lists the films in `movies\`, on a card in the middle; double-click plays one
+- [ ] The card stays in the middle when you make the window bigger, smaller, or maximise it
+- [ ] A first start fits your screen, in the middle: `SyncWatch.bat --profile screentest` (a new, empty
+      profile; your own settings aren't touched. Afterwards you can delete
+      `%APPDATA%\SyncWatch\profiles\screentest`)
 - [ ] **Add film…** → a film in Downloads: *Checking…*, then *Copying…* with MB, speed and time left; then it
       opens, it's in the list and in `movies\`, and the original is still in Downloads
 - [ ] **Add film…** with the same film again: "already in your library", no second copy

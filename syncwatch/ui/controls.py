@@ -103,6 +103,10 @@ class ControlBar(QFrame):
         layout.addLayout(row1)
         layout.addLayout(row2)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Room-only buttons start hidden (set_sync / set_following show them in a room). Visible at the
+        # start, they made the window open about 90 px wider than asked, past the edge of small screens.
+        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label):
+            widget.hide()
 
     # ------------------------------------------------------------ updates from the main window
     def _follow_toggled(self, on: bool, emit: bool = True) -> None:
