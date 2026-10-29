@@ -13,7 +13,10 @@ Add film, step by step (one film at a time, each step can be cancelled):
    progress bar and the time left.
    If only the sound doesn't play: SyncWatch offers to convert the sound (the picture is
    copied untouched) and puts the converted copy into the library instead.
-   If the picture doesn't play: there's nothing to convert quickly, so it says so (SW-223).
+   If the player can't play the file at all, although the converter could read its
+   picture: often the file's packaging is the problem, so SyncWatch offers a fresh copy
+   made the same way, and keeps it only if that one plays (otherwise SW-223).
+   If not even the converter can read a picture: it's damaged or no film (SW-223).
 5. The film opens.
 """
 from __future__ import annotations
@@ -331,6 +334,8 @@ class AddFilmJob(QObject):
         self.eta: Optional[Eta] = None
         self._convert_error = ""
         self._all_audio = False
+        self._reason = ""
+        self._player_detail = ""
         self._finished = False
 
     # ---- steps
@@ -391,7 +396,7 @@ class AddFilmJob(QObject):
                             "downloaded, or a format no player here supports.", json.dumps(probe)[:1500])
             return
         if self.convert_only:
-            self._offer_conversion(manual=True)
+            self._offer_conversion("manual")
             return
         self.dialog.set_step(f"Checking that {self.source.name} plays…", busy=True,
                              hint="Playing it invisibly for a moment with SyncWatch's video player.")
@@ -408,10 +413,12 @@ class AddFilmJob(QObject):
             log.info("the test playback of %s ran out of time; adding it anyway", self.source.name)
             self._copy()
         elif not result.get("picture"):
-            self._cant_play("SyncWatch's video player can't show this film's picture, and converting the sound "
-                            "wouldn't change that.", result.get("detail", ""))
+            # The converter could read the picture, the player couldn't play the file: often the
+            # file's packaging (container) is the problem, and a fresh copy fixes it.
+            self._player_detail = result.get("detail", "")
+            self._offer_conversion("player")
         elif result.get("sound") is False:
-            self._offer_conversion(manual=False, detail=result.get("detail", ""))
+            self._offer_conversion("sound")
         else:
             self._copy()
 
@@ -455,9 +462,13 @@ class AddFilmJob(QObject):
             errors.report("SW-221", errors.describe_exception(problem))
             self._finish(None)
 
-    def _offer_conversion(self, manual: bool, detail: str = "") -> None:
+    def _offer_conversion(self, reason: str) -> None:
+        """reason: "manual" (Convert the sound…), "sound" (the picture plays, the sound doesn't),
+        or "player" (the player can't play the file as it is, although its picture can be read)."""
+        self._reason = reason
         tracks = [t for t in self.probe.get("tracks", []) if t.get("type") == "audio"]
         to_convert = [t for t in tracks if not _keeps_audio(str(t.get("codec", "")))]
+        manual = reason == "manual"
         if manual and not to_convert:
             self.dialog.hide()
             _message(self.window, "Convert the sound",
@@ -465,23 +476,28 @@ class AddFilmJob(QObject):
                      "Vorbis, FLAC or PCM). Converting wouldn't change anything.")
             self._finish(None)
             return
-        if not tracks:
+        if not tracks and reason == "sound":
             self._copy()   # no sound track at all: nothing to convert, the picture plays
             return
-        # The player can't play a sound that's already AAC (or similar)? Then re-encode that too.
-        self._all_audio = not to_convert
+        # The player can't play a sound that's already AAC (or similar), or the file at all? Then
+        # every sound track is converted.
+        self._all_audio = reason == "player" or not to_convert
         names = ", ".join(sorted({_sound_name(str(t.get("codec", ""))) for t in (to_convert or tracks)}))
         minutes = max(1, round(float(self.probe.get("duration") or 0) / 60 / 25))
-        if manual:
+        if reason == "manual":
             first = f"The sound of {self.source.name} is {names}."
-        else:
+        elif reason == "sound":
             first = f"This film's picture plays, but SyncWatch can't play its sound ({names})."
-        question = (f"{first}\n\nSyncWatch can make a copy whose sound plays everywhere: the picture is copied "
+        else:
+            first = (f"SyncWatch's video player can't play {self.source.name} as it is. A fresh copy often "
+                     "fixes that.")
+        question = (f"{first}\n\nSyncWatch can make a copy that plays everywhere: the picture is copied "
                     "exactly as it is, only the sound is converted (to AAC). Subtitles inside the film are kept, "
                     f"and the original file stays as it is.\n\nThis takes roughly {minutes} "
                     f"minute{'s' if minutes > 1 else ''} (it depends on the PC). Convert it?")
         self.dialog.hide()
-        box = QMessageBox(QMessageBox.Icon.Question, "Convert the sound", question, parent=self.window)
+        title = "Make a playable copy" if reason == "player" else "Convert the sound"
+        box = QMessageBox(QMessageBox.Icon.Question, title, question, parent=self.window)
         box.setTextFormat(Qt.TextFormat.PlainText)
         yes = box.addButton("Convert", QMessageBox.ButtonRole.AcceptRole)
         box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
@@ -524,6 +540,9 @@ class AddFilmJob(QObject):
         if self._finished:
             return
         if code == 0 and self.target is not None and self.target.is_file():
+            if self._reason == "player":
+                self._retest()   # does the fresh copy play? Otherwise it's not kept
+                return
             self.window.activity(f"Converted the sound: {self.target.name} is in your library", "you")
             self._finish(self.target)
             return
@@ -535,6 +554,27 @@ class AddFilmJob(QObject):
                 errors.report("SW-222", detail)
         self._cleanup_part()
         self._finish(None)
+
+    def _retest(self) -> None:
+        self.dialog.set_step(f"Checking that {self.target.name} plays…", busy=True)
+        test = PlayabilityTest(self.window.player.engine, self.target, self)
+        test.finished.connect(self._retested)
+        self.worker = test
+        test.start()
+
+    def _retested(self, result: dict) -> None:
+        if self._finished:
+            return
+        if result.get("picture"):
+            self.window.activity(f"Made a playable copy: {self.target.name} is in your library", "you")
+            self._finish(self.target)
+            return
+        try:
+            self.target.unlink()
+        except OSError:
+            pass
+        self._cant_play("SyncWatch's video player can't play this film, not even a fresh copy of it.",
+                        f"{self._player_detail} / copy: {result.get('detail', '')}")
 
     # ---- helpers
     def _space_for(self, size: int) -> bool:

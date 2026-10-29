@@ -105,6 +105,45 @@ class ChoosingTests(unittest.TestCase):
         self.assertEqual(reports.codes, ["SW-209"])
 
 
+class WinfixTests(unittest.TestCase):
+    def test_nothing_happens_elsewhere(self):
+        from syncwatch.ui import winfix
+        if sys.platform != "win32":
+            self.assertEqual(winfix.disable_child_windows(12345), 0)
+            winfix.set_border(12345, True)   # no error
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows only")
+    def test_on_real_windows(self):
+        """With plain Win32 windows (the test machines have no screen for Qt's own)."""
+        import ctypes
+        from ctypes import wintypes
+        from syncwatch.ui import winfix
+        user32 = ctypes.WinDLL("user32")
+        user32.CreateWindowExW.restype = wintypes.HWND
+        user32.CreateWindowExW.argtypes = [wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+                                           ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.HWND,
+                                           wintypes.HMENU, wintypes.HINSTANCE, wintypes.LPVOID]
+        user32.IsWindowEnabled.argtypes = [wintypes.HWND]
+        user32.DestroyWindow.argtypes = [wintypes.HWND]
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+        parent = user32.CreateWindowExW(0, "STATIC", "parent", 0, 0, 0, 200, 200, None, None, None, None)
+        child = user32.CreateWindowExW(0, "STATIC", "child", 0x40000000, 0, 0, 50, 50, parent, None, None, None)
+        self.assertTrue(parent and child)
+        try:
+            self.assertEqual(winfix.disable_child_windows(parent), 1)
+            self.assertFalse(user32.IsWindowEnabled(child))
+            self.assertTrue(user32.IsWindowEnabled(parent))
+            self.assertEqual(winfix.disable_child_windows(parent), 0)   # already done
+            winfix.set_border(parent, True)
+            self.assertTrue(user32.GetWindowLongPtrW(parent, winfix.GWL_STYLE) & winfix.WS_BORDER)
+            winfix.set_border(parent, False)
+            self.assertFalse(user32.GetWindowLongPtrW(parent, winfix.GWL_STYLE) & winfix.WS_BORDER)
+        finally:
+            user32.DestroyWindow(child)
+            user32.DestroyWindow(parent)
+
+
 class LibmpvSearchTests(unittest.TestCase):
     def test_own_folders_only_and_override_first(self):
         folder = Path(tempfile.mkdtemp())

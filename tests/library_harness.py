@@ -137,6 +137,24 @@ def run_script():
     CHECKS["no .part files left"] = not list(library_dir.glob("*.part"))
     spin(3, lambda: window.player.is_ready())
     shot(window, "03_converted_playing")
+
+    # 3b. a file the player "can't play at all" (only the one in Downloads): a fresh copy is
+    # offered, made, tested again (it plays) and kept
+    odd = downloads / "Odd Packaging.mkv"
+    make_film(odd, seconds=3, audio_codec="aac", channels=2)
+
+    def odd_fails(self, picture, sound, detail):
+        if self.path == odd:
+            picture, sound, detail = False, None, "simulated: the player can't open it"
+        return original_finish(self, picture, sound, detail)
+
+    players_module.PlayabilityTest._finish = odd_fails
+    questions.clear()
+    answer_boxes("Convert", questions)
+    lib.start_job(odd)
+    spin(60, lambda: lib.job is None)
+    CHECKS["fresh copy offered"] = any("can't play Odd Packaging.mkv as it is" in q for q in questions)
+    CHECKS["fresh copy kept because it plays"] = (library_dir / "Odd Packaging.mkv").is_file()
     players_module.PlayabilityTest._finish = original_finish
 
     # 4. Convert the sound by hand (AC3 film added directly), then remove it

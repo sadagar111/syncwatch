@@ -18,6 +18,32 @@ GWL_STYLE = -16
 WS_BORDER = 0x00800000
 SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020  # NOSIZE|NOMOVE|NOZORDER|NOACTIVATE|FRAMECHANGED
 
+_user32 = None
+
+
+def _api():
+    """user32 with exact argument types (a private copy, so nothing else's ctypes setup changes)."""
+    global _user32
+    if _user32 is None:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.WinDLL("user32")
+        user32.EnumChildWindows.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.LPARAM]
+        user32.EnumChildWindows.restype = wintypes.BOOL
+        user32.IsWindowEnabled.argtypes = [wintypes.HWND]
+        user32.IsWindowEnabled.restype = wintypes.BOOL
+        user32.EnableWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
+        user32.EnableWindow.restype = wintypes.BOOL
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+        user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
+        user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, wintypes.UINT]
+        user32.SetWindowPos.restype = wintypes.BOOL
+        _user32 = user32
+    return _user32
+
 
 def disable_child_windows(parent_hwnd: int) -> int:
     """Disable every enabled child window of ``parent_hwnd``. Returns how many were changed."""
@@ -25,7 +51,7 @@ def disable_child_windows(parent_hwnd: int) -> int:
         return 0
     import ctypes
     from ctypes import wintypes
-    user32 = ctypes.windll.user32
+    user32 = _api()
     children = []
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -33,10 +59,11 @@ def disable_child_windows(parent_hwnd: int) -> int:
         children.append(hwnd)
         return True
 
-    user32.EnumChildWindows(wintypes.HWND(parent_hwnd), callback_type(collect), 0)
+    callback = callback_type(collect)   # kept in a variable until EnumChildWindows returns
+    user32.EnumChildWindows(parent_hwnd, ctypes.cast(callback, ctypes.c_void_p), 0)
     changed = 0
     for hwnd in children:
-        if user32.IsWindowEnabled(hwnd):
+        if hwnd and user32.IsWindowEnabled(hwnd):
             user32.EnableWindow(hwnd, False)
             changed += 1
     return changed
@@ -46,17 +73,9 @@ def set_border(hwnd: int, on: bool) -> None:
     """Add or remove the thin WS_BORDER frame of a top-level window."""
     if sys.platform != "win32" or not hwnd:
         return
-    import ctypes
-    from ctypes import wintypes
-    user32 = ctypes.windll.user32
-    get_style = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
-    set_style = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
-    get_style.restype = ctypes.c_ssize_t
-    get_style.argtypes = [wintypes.HWND, ctypes.c_int]
-    set_style.restype = ctypes.c_ssize_t
-    set_style.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
-    style = get_style(hwnd, GWL_STYLE)
+    user32 = _api()
+    style = user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
     wanted = style | WS_BORDER if on else style & ~WS_BORDER
     if wanted != style:
-        set_style(hwnd, GWL_STYLE, wanted)
-        user32.SetWindowPos(wintypes.HWND(hwnd), None, 0, 0, 0, 0, SWP_FLAGS)
+        user32.SetWindowLongPtrW(hwnd, GWL_STYLE, wanted)
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_FLAGS)
