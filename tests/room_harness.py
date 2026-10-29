@@ -32,12 +32,18 @@ from tools.local_relay import LocalRelay  # noqa: E402
 
 
 class FakePlayer:
-    """Plays an imaginary film in real time. ``seek_delay`` = how long a jump takes to show a picture."""
+    """Plays an imaginary film in real time. ``seek_delay`` = how long a jump takes to show a picture.
 
-    def __init__(self, seek_delay: float = 0.05, duration: int = 7_200_000, media: bool = True):
+    ``clock_runs``: during that time the film's clock keeps running and the picture catches up
+    afterwards (Qt's player does that); otherwise playback starts late by the whole delay (mpv,
+    or a player that waits for the picture)."""
+
+    def __init__(self, seek_delay: float = 0.05, duration: int = 7_200_000, media: bool = True,
+                 clock_runs: bool = False):
         self.base, self.base_time, self.ready_at = 0.0, time.monotonic(), 0.0
         self.playing = False
         self.seek_delay = seek_delay
+        self.clock_runs = clock_runs
         self.dur = duration
         self.seeks = 0
         self.media = media
@@ -47,7 +53,8 @@ class FakePlayer:
         if not self.playing:
             return self.base
         now = time.monotonic()
-        return self.base + max(0.0, now - max(self.base_time, self.ready_at)) * 1000 * self.rate
+        start = self.base_time if self.clock_runs else max(self.base_time, self.ready_at)
+        return self.base + max(0.0, now - start) * 1000 * self.rate
 
     def duration(self):
         return self.dur
@@ -117,7 +124,7 @@ class RecorderUI:
 
 class Person:
     def __init__(self, room: "Room", name: str, clock_offset: float = 0.0, seek_delay: float = 0.05,
-                 media: bool = True, echo: bool = False, **settings):
+                 media: bool = True, echo: bool = False, clock_runs: bool = False, **settings):
         self.name = name
         self.room = room
         self.settings = Settings(None)
@@ -129,7 +136,7 @@ class Person:
         self.dir.mkdir(parents=True, exist_ok=True)
         self.rooms = make_rooms(self.dir, self.settings)
         self.inbox: "queue.Queue[dict]" = queue.Queue()
-        self.player = FakePlayer(seek_delay=seek_delay, media=media)
+        self.player = FakePlayer(seek_delay=seek_delay, media=media, clock_runs=clock_runs)
         self.ui = RecorderUI(name, echo)
         self.c = Controller(self.player, self.ui, self.settings, self.inbox.put, self.rooms,
                             clock=lambda: time.monotonic() + clock_offset)

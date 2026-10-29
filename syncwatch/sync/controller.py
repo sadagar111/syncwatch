@@ -7,6 +7,11 @@ Rules (agreed for step 1, now for any number of people):
     - "Sync me"   jumps only yourself to where the host is (no one else is disturbed);
     - "Sync up"   pauses everyone, lines everyone up on the host, then resumes together
                   after a short countdown.
+* Jumps while the film plays (setting "When someone jumps while the film plays"):
+    - "Pause and start together" (default): like Sync up without the countdown. Everyone
+      waits at the new spot until every PC shows it, then all play at the same moment.
+    - "Keep playing": everyone jumps straight away; each PC jumps a little further ahead
+      by how long its own jumps take, which it measures after every jump and remembers.
 * The host's app decides. Members' presses are *requests* that the host's app
   checks (cooldowns per person, "only the host controls") and then broadcasts.
   The host has no cooldowns. Because the check happens on the host's PC,
@@ -58,6 +63,12 @@ REJECT_GAP_S = 1.0           # "please wait" / "only the host" answers: at most 
 PAUSE_ALIGN_MS = 150         # on pause, jump to the exact frame if further apart than this
 PLAY_ALIGN_MS = 300          # on play, jump first if further apart than this
 READY_TOLERANCE_MS = 500
+SAME_SPOT_MS = 40            # already there: no need to jump again
+JUMP_MEASURE_AFTER_S = 2.0   # how a jump while playing turned out is measured this long after it
+JUMP_LEARN_RATE = 0.3        # how much one measured jump changes what this PC has learned
+MAX_JUMP_AHEAD_MS = 2000.0
+JUMP_ANSWER_WAIT_S = 3.0     # after my jump, I wait this long (plus "wait for slow PCs") for the host
+SEND_JUMP_WAIT_S = 2.0       # "Keep playing": a jump is sent once my film shows the new spot, but no later
 MATCH_TOLERANCE_MS = 1000    # films whose lengths differ by less than this count as the same
 
 REASONS_LEFT = {"left": "left", "timeout": "lost connection", "removed": "was removed by the host",
@@ -102,6 +113,7 @@ class Rules:
     host_only: bool = False
     cd_pp: float = 2.0
     cd_sync: float = 15.0
+    jump: str = "together"     # jumps while playing: "together" or "ahead" (the host decides)
 
 
 @dataclass
@@ -110,6 +122,8 @@ class _HostSync:
     pos: int
     deadline: float
     by: str
+    kind: str = "syncup"                              # or "jump"
+    by_id: Optional[bytes] = None
     waiting: Set[bytes] = field(default_factory=set)   # who still has to be ready
     go_at: Optional[float] = None
 
@@ -145,7 +159,12 @@ class Controller(RoomListener):
         self._host_sync: Optional[_HostSync] = None
         self._client_sync: Optional[Dict] = None
         self._play_at: Optional[float] = None
+        self._go_id: Optional[int] = None                 # the Sync up / jump whose start I'm waiting for
         self._sync_counter = 0
+        self._resume_after_jump = False                   # paused for a jump, to play again with everyone
+        self._jump_wait_until: Optional[float] = None     # (member) when to stop waiting for the host
+        self._jump_check: Optional[tuple] = None          # (when, where to, how far ahead) of my last jump
+        self._send_jump_by: Optional[float] = None
         self._align_on_next_state = False
         self._profile_due: Optional[float] = None
         self._warned_films: Set[bytes] = set()
@@ -208,7 +227,8 @@ class Controller(RoomListener):
     def my_rules(self) -> Rules:
         return Rules(bool(self.settings.get("sync.host_only")),
                      float(self.settings.get("sync.cooldown_playpause_s")),
-                     float(self.settings.get("sync.cooldown_syncup_s")))
+                     float(self.settings.get("sync.cooldown_syncup_s")),
+                     str(self.settings.get("sync.jump_mode")))
 
     def effective_rules(self) -> Rules:
         return self.my_rules() if self.is_host else self.rules
@@ -317,6 +337,10 @@ class Controller(RoomListener):
         self._host_sync = None
         self._client_sync = None
         self._play_at = None
+        self._go_id = None
+        self._resume_after_jump = False
+        self._jump_wait_until = None
+        self._jump_check = None
         self.attached = True
         self._member_last.clear()
         self._seek_times.clear()
@@ -336,6 +360,8 @@ class Controller(RoomListener):
 
     def _play_pause(self, action: str) -> None:
         self._cancel_countdown_if_local()
+        self._resume_after_jump = False
+        self._jump_wait_until = None
         if not self.connected:
             self._local(action)
             return
@@ -361,16 +387,27 @@ class Controller(RoomListener):
 
     def seek(self, ms: float) -> None:
         """Jump locally at once; tell the others once the skipping stops (debounced)."""
+        resuming = self._will_play()
         self._cancel_countdown_if_local()
         target = self._clamp(ms)
-        self.p.seek(target)
-        if not self.connected:
+        if not self.connected or not self.controls_room():
+            self.p.seek(target)
+            if self.connected:
+                self._go_separate("seek")
             return
-        if not self.controls_room():
-            self._go_separate("seek")
-            return
+        if resuming and self.jump_mode == "together" and self._others_follow():
+            # Wait right here: everyone starts again together once every PC shows the new spot.
+            self._client_sync = None
+            self._play_at = None
+            self.p.pause()
+            self.p.seek(target)
+            self._resume_after_jump = True
+            self._jump_check = None
+        else:
+            self._jump_to(target)
         debounce = int(self.settings.get("sync.seek_debounce_ms")) / 1000.0
         self._pending_seek_at = self.clock() + debounce
+        self._send_jump_by = None
 
     def sync_up(self) -> None:
         if not self.connected or not self.peers:
@@ -400,11 +437,16 @@ class Controller(RoomListener):
             return
         before = self.p.position()
         target = self._clamp(target)
-        self.p.seek(target)
-        if host.playing and not self.p.is_playing():
-            self.p.play()
-        elif not host.playing and self.p.is_playing():
-            self.p.pause()
+        self._resume_after_jump = False
+        self._jump_wait_until = None
+        if host.playing:
+            self._jump_to(target, playing=True)
+            if not self.p.is_playing():
+                self.p.play()
+        else:
+            if self.p.is_playing():
+                self.p.pause()
+            self.p.seek(target)
         was_separate = not self.attached
         self.attached = True
         self.gaps.clear()
@@ -449,9 +491,18 @@ class Controller(RoomListener):
         now = self.clock()
         self.session.tick()
         self.friends.tick(self.session)
-        if self._pending_seek_at is not None and now >= self._pending_seek_at:
+        if self._pending_seek_at is not None and now >= self._pending_seek_at and self._jump_settled(now):
             self._pending_seek_at = None
+            self._send_jump_by = None
             self._send_seek()
+        self._check_jump(now)
+        if self._jump_wait_until is not None and now >= self._jump_wait_until:
+            self._jump_wait_until = None
+            if self._resume_after_jump and not self.p.is_playing():
+                self._resume_after_jump = False
+                self.p.play()
+                self.ui.activity("The host didn't start everyone again after your jump, so your film plays on",
+                                 "warn")
         self._advance_host_sync(now)
         self._advance_client_sync(now)
         if self._play_at is not None and now >= self._play_at:
@@ -689,7 +740,8 @@ class Controller(RoomListener):
         peer.separate = False
         rules = body["rules"]
         old = self.rules.host_only
-        self.rules = Rules(rules["host_only"], rules.get("cd_pp", 2.0), rules.get("cd_sync", 15.0))
+        self.rules = Rules(rules["host_only"], rules.get("cd_pp", 2.0), rules.get("cd_sync", 15.0),
+                           rules.get("jump", "together"))
         if self.rules.host_only != old:
             self.ui.activity("The host now controls playback alone" if self.rules.host_only
                              else "Everyone can control playback again", "friend")
@@ -724,9 +776,13 @@ class Controller(RoomListener):
             times.append(now)
             if "pos" not in body:
                 return
-            self.p.seek(self._clamp(body["pos"]))
-            self._broadcast_cmd("seek", by=peer, position=body["pos"])
-            self.ui.activity(f"{peer.name} jumped to {fmt_time(body['pos'])}", "friend")
+            pos = self._clamp(body["pos"])
+            if self.jump_mode == "together" and self._will_play():
+                self._start_host_sync(by=peer.name, kind="jump", pos=pos, by_id=peer.id)
+            else:
+                self._jump_to(pos)
+                self._broadcast_cmd("seek", by=peer, position=pos)
+            self.ui.activity(f"{peer.name} jumped to {fmt_time(pos)}", "friend")
         elif action == "syncup":
             if self._host_sync is not None:
                 self._reject(peer, action, "busy")
@@ -765,26 +821,41 @@ class Controller(RoomListener):
             return
         target = self.estimate(peer)
         target = float(pos) if target is None else target
+        # A command replaces any Sync up or jump still waiting to start.
+        self._client_sync = None
+        self._play_at = None
+        self._jump_wait_until = None
         if self._pending_seek_at is not None:
             # I'm jumping somewhere myself right now: keep my spot, my jump follows in a moment.
-            self._local("play" if body["playing"] else "pause")
+            if not body["playing"]:
+                self._resume_after_jump = False
+                self._local("pause")
+            elif not self._resume_after_jump:
+                self._local("play")
             return
+        self._resume_after_jump = False
+        self._jump_check = None
         if action == "pause":
             self.p.pause()
             if abs(self.p.position() - pos) > PAUSE_ALIGN_MS:
                 self.p.seek(pos)
         elif action == "play":
             if abs(self.p.position() - target) > PLAY_ALIGN_MS:
-                self.p.seek(self._clamp(target))
-            self.p.play()
+                self._jump_to(target, playing=True)
+            if not self.p.is_playing():
+                self.p.play()
         else:
             target = self._clamp(target)
-            if abs(self.p.position() - target) > PLAY_ALIGN_MS:
-                self.p.seek(target)  # (my own skip comes back here: no second jump)
-            if body["playing"] and not self.p.is_playing():
-                self.p.play()
-            elif not body["playing"] and self.p.is_playing():
-                self.p.pause()
+            if body["playing"]:
+                if abs(self.p.position() - target) > PLAY_ALIGN_MS:
+                    self._jump_to(target, playing=True)  # (my own skip comes back here: no second jump)
+                if not self.p.is_playing():
+                    self.p.play()
+            else:
+                if self.p.is_playing():
+                    self.p.pause()
+                if abs(self.p.position() - target) > PAUSE_ALIGN_MS:
+                    self.p.seek(target)
         self.gaps.clear()
         self.ui.activity(f"{who} {_verb(action)} {'to' if action == 'seek' else 'at'} {fmt_time(pos)}",
                          "you" if mine else "friend")
@@ -805,15 +876,28 @@ class Controller(RoomListener):
     def _on_sync_prepare(self, peer: Peer, body: Dict) -> None:
         if self.is_host or not peer.is_host:
             return
-        who = body.get("by") or peer.name
+        kind = "jump" if body.get("jump") else "syncup"
+        mine = body.get("by_id") == self.rooms.identity.public.key_id
+        who = "You" if mine else (body.get("by") or peer.name)
+        pos = body["pos"]
         if not self.attached:
-            self.ui.activity(f"{who} synced everyone up (you're watching on your own)", "friend")
+            what = f"{who} jumped to {fmt_time(pos)}" if kind == "jump" else f"{who} synced everyone up"
+            self.ui.activity(f"{what} (you're watching on your own)", "friend")
             return
         self._play_at = None
+        self._go_id = None
+        self._resume_after_jump = False
+        self._jump_wait_until = None
+        self._jump_check = None
         self.p.pause()
-        self.p.seek(body["pos"])
-        self._client_sync = {"id": body["id"], "pos": body["pos"], "sent": False}
-        self.ui.activity(f"{who} is syncing everyone up…", "friend")
+        if kind != "jump" or abs(self.p.position() - pos) > SAME_SPOT_MS:
+            self.p.seek(pos)
+        self._client_sync = {"id": body["id"], "pos": pos, "sent": False, "kind": kind}
+        if kind == "jump":
+            if not mine:
+                self.ui.activity(f"{who} jumped to {fmt_time(pos)}", "friend")
+        else:
+            self.ui.activity(f"{who} is syncing everyone up…", "friend")
 
     def _on_sync_ready(self, peer: Peer, body: Dict) -> None:
         sync = self._host_sync
@@ -825,21 +909,28 @@ class Controller(RoomListener):
         if self.is_host or not peer.is_host or client is None or body["id"] != client["id"]:
             return
         self._client_sync = None
+        self._go_id = client["id"]
         start = self.session.local_from_host(body["start"]) if self.session.clock_ready else None
         now = self.clock()
         if start is None:
-            start = now + float(self.settings.get("sync.countdown_s"))
+            start = now + (float(self.settings.get("sync.jump_start_ms")) / 1000.0 if client["kind"] == "jump"
+                           else float(self.settings.get("sync.countdown_s")))
         self._play_at = max(now, start)
-        self.ui.countdown(int(max(0.0, self._play_at - now) * 1000))
+        if client["kind"] != "jump":
+            self.ui.countdown(int(max(0.0, self._play_at - now) * 1000))
         self.gaps.clear()
 
     def _on_sync_abort(self, peer: Peer, body: Dict) -> None:
-        if self._client_sync is not None and body["id"] == self._client_sync["id"]:
+        if not peer.is_host:
+            return
+        if (self._client_sync is not None and body["id"] == self._client_sync["id"]) or body["id"] == self._go_id:
             self._client_sync = None
             self._play_at = None
+            self._go_id = None
 
     # ================================================================ helpers
     def _local(self, action: str) -> None:
+        self._jump_check = None
         if action == "play":
             self.p.play()
         else:
@@ -856,11 +947,22 @@ class Controller(RoomListener):
             self.ui.changed()
 
     def _cancel_countdown_if_local(self) -> None:
-        if self._play_at is not None and (self.is_host or not self.connected):
+        """Something I pressed replaces a Sync up or jump that hasn't started yet."""
+        if self.is_host:
+            self._abort_sync()
+        elif not self.connected:
             self._play_at = None
-            self._host_sync = None
+
+    def _abort_sync(self) -> None:
+        """(Host) Cancel a Sync up or jump that's still waiting or counting down, for everyone."""
+        sync = self._host_sync
+        if sync is not None and self.connected:
+            self.session.send_room("sync_abort", id=sync.id)
+        self._host_sync = None
+        self._play_at = None
 
     def _broadcast_cmd(self, action: str, by: Optional[Peer], position: Optional[float] = None) -> None:
+        self._abort_sync()  # a command replaces any Sync up or jump still waiting to start
         pos = int(self.p.position() if position is None else position)
         fields = {"action": action, "pos": max(0, pos), "playing": self.p.is_playing(),
                   "at": self.session.host_clock_ms()}
@@ -871,15 +973,89 @@ class Controller(RoomListener):
         self.gaps.clear()
 
     def _send_seek(self) -> None:
+        resume, self._resume_after_jump = self._resume_after_jump, False
         if not self.controls_room():
+            if resume:
+                self.p.play()
             return
+        pos = max(0, int(self.p.position()))
         if self.is_host:
-            self._broadcast_cmd("seek", by=None)
-            self.ui.activity(f"You jumped to {fmt_time(self.p.position())}", "you")
+            if resume and self._others_follow():
+                self._start_host_sync(by="", kind="jump", pos=pos)
+            else:
+                if resume:
+                    self.p.play()
+                self._broadcast_cmd("seek", by=None)
+            self.ui.activity(f"You jumped to {fmt_time(pos)}", "you")
+            return
+        # Where my film is now, not where I jumped to: if it's playing, it has moved on since
+        # (the debounce), and the others should land where I am.
+        self.session.send_room("req", action="seek", pos=pos)
+        if resume:
+            # I stay at the new spot until the host starts everyone (or doesn't answer).
+            self._resume_after_jump = True
+            self._jump_wait_until = (self.clock() + float(self.settings.get("sync.ready_timeout_s"))
+                                     + JUMP_ANSWER_WAIT_S)
+        self.ui.activity(f"You jumped to {fmt_time(pos)}", "you")
+
+    # ---------------------------------------------------------------- jumps while playing
+    @property
+    def jump_mode(self) -> str:
+        """In someone's room, theirs counts (it comes with the host's rules)."""
+        return self.effective_rules().jump if self.connected else str(self.settings.get("sync.jump_mode"))
+
+    @property
+    def learned_jump_ms(self) -> float:
+        """How long jumps take on this PC, as measured after earlier jumps while playing."""
+        return float(self.settings.get("sync.learned_jump_ms"))
+
+    def _will_play(self) -> bool:
+        """Playing, or paused only until a Sync up or jump starts everyone again."""
+        return (self.p.is_playing() or self._resume_after_jump or self._play_at is not None
+                or self._host_sync is not None or self._client_sync is not None)
+
+    def _others_follow(self) -> bool:
+        """Is there anyone to wait for after a jump?"""
+        return not self.is_host or any(not p.separate for p in self.peers.values())
+
+    def _jump_to(self, target: float, playing: Optional[bool] = None) -> None:
+        """Jump my own film. If it plays (or is about to), and the mode is "Keep playing", jump a
+        little further ahead by how long jumps take on this PC, so it arrives in step with
+        everyone; and measure afterwards how this jump went."""
+        if self.p.is_playing() if playing is None else playing:
+            ahead = self.learned_jump_ms if self.jump_mode == "ahead" else 0.0
+            self.p.seek(self._clamp(target + ahead))
+            self._jump_check = (self.clock(), float(target), ahead)
         else:
-            # Where my film is now, not where I jumped to: if it's playing, it has moved on since
-            # (the debounce), and the others should land where I am.
-            self.session.send_room("req", action="seek", pos=max(0, int(self.p.position())))
+            self.p.seek(self._clamp(target))
+            self._jump_check = None
+
+    def _jump_settled(self, now: float) -> bool:
+        """"Keep playing": send my jump once my film shows the new spot (else the others would
+        follow where my film will be only in a moment), but don't wait forever."""
+        if self.jump_mode != "ahead" or not self.p.is_playing() or self.p.is_ready():
+            return True
+        if self._send_jump_by is None:
+            self._send_jump_by = now + SEND_JUMP_WAIT_S
+        return now >= self._send_jump_by
+
+    def _check_jump(self, now: float) -> None:
+        """A while after a jump while playing: was my film where it should be? That's how long
+        the jump really took on this PC (players differ: some keep their clock running while they
+        load, so they're never behind; others start late by exactly the loading time)."""
+        check = self._jump_check
+        if check is None or now - check[0] < JUMP_MEASURE_AFTER_S:
+            return
+        self._jump_check = None
+        when, target, ahead = check
+        if not (self.p.is_playing() and self.p.is_ready()):
+            return
+        behind = target + (now - when) * 1000.0 - self.p.position()
+        if abs(behind) > 5000:
+            return  # something else happened meanwhile (a stall, a hiccup): don't learn from it
+        took = min(MAX_JUMP_AHEAD_MS, max(0.0, ahead + behind))
+        learned = self.learned_jump_ms
+        self.settings.set("sync.learned_jump_ms", round(learned + JUMP_LEARN_RATE * (took - learned), 1))
 
     def _send_heartbeat(self) -> None:
         fields = {"pos": max(0, int(self.p.position())), "playing": self.p.is_playing(),
@@ -889,7 +1065,8 @@ class Controller(RoomListener):
             fields["film"] = self.film
         if self.is_host:
             rules = self.my_rules()
-            fields["rules"] = {"host_only": rules.host_only, "cd_pp": rules.cd_pp, "cd_sync": rules.cd_sync}
+            fields["rules"] = {"host_only": rules.host_only, "cd_pp": rules.cd_pp, "cd_sync": rules.cd_sync,
+                               "jump": rules.jump}
             self.session.send_room("state", **fields)
         else:
             fields["separate"] = not self.attached
@@ -911,21 +1088,35 @@ class Controller(RoomListener):
                 data = None
         return data
 
-    def _start_host_sync(self, by: str) -> None:
+    def _start_host_sync(self, by: str, kind: str = "syncup", pos: Optional[float] = None,
+                         by_id: Optional[bytes] = None) -> None:
+        """Everyone pauses at ``pos``, says when their film shows it, then all start together
+        (Sync up: after a countdown; a jump: right away)."""
         if self._host_sync is not None:
-            return
+            if kind == "syncup":
+                return
+            self._abort_sync()  # a newer jump replaces whatever was still waiting
+        self._play_at = None
+        self._jump_check = None
+        self._resume_after_jump = False
         self._sync_counter += 1
-        pos = int(self.p.position())
+        pos = int(self.p.position() if pos is None else pos)
         self.p.pause()
-        self.p.seek(pos)
+        if kind != "jump" or abs(self.p.position() - pos) > SAME_SPOT_MS:
+            self.p.seek(pos)
         timeout = float(self.settings.get("sync.ready_timeout_s"))
         waiting = {p.id for p in self.peers.values() if not p.separate}  # those on their own aren't waited for
-        self._host_sync = _HostSync(self._sync_counter, pos, self.clock() + timeout, by, waiting)
+        self._host_sync = _HostSync(self._sync_counter, pos, self.clock() + timeout, by, kind, by_id, waiting)
         fields = {"id": self._sync_counter, "pos": pos}
+        if kind == "jump":
+            fields["jump"] = True
         if by:
             fields["by"] = by
+        if by_id is not None:
+            fields["by_id"] = b64(by_id)
         self.session.send_room("sync_prepare", **fields)
-        self.ui.activity(f"{by or 'You'} started Sync up at {fmt_time(pos)}", "friend" if by else "you")
+        if kind == "syncup":
+            self.ui.activity(f"{by or 'You'} started Sync up at {fmt_time(pos)}", "friend" if by else "you")
 
     def _advance_host_sync(self, now: float) -> None:
         sync = self._host_sync
@@ -944,12 +1135,16 @@ class Controller(RoomListener):
         if timed_out and sync.waiting:
             names = ", ".join(self.peers[k].name for k in sync.waiting if k in self.peers)
             self.ui.problem("SW-503", name=names or "Someone")
-        delay_ms = int(self.settings.get("sync.countdown_s")) * 1000
+        if sync.kind == "jump":
+            delay_ms = int(self.settings.get("sync.jump_start_ms"))
+        else:
+            delay_ms = int(self.settings.get("sync.countdown_s")) * 1000
         start = self.session.host_clock_ms(now) + delay_ms
         self.session.send_room("sync_go", id=sync.id, start=start)
         sync.go_at = now + delay_ms / 1000.0
         self._play_at = sync.go_at
-        self.ui.countdown(delay_ms)
+        if sync.kind != "jump":
+            self.ui.countdown(delay_ms)
         self.gaps.clear()
 
     def _advance_client_sync(self, now: float) -> None:

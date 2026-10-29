@@ -71,7 +71,8 @@ POS = (int, True, (0, MAX_POSITION_MS))
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS))}
 RULES: Spec = {"host_only": (bool, True, None), "cd_pp": (float, False, (0, 3600)),
-               "cd_sync": (float, False, (0, 3600))}
+               "cd_sync": (float, False, (0, 3600)),
+               "jump": (("together", "ahead"), False, None)}   # since 0.4.1
 MEMBER: Spec = {"id": KEY, "dh": KEY, "name": NAME, "host": (bool, False, None)}
 VERSION_FIELDS: Spec = {"app": (str, True, 20), "v": (int, True, (0, 10_000))}
 
@@ -122,7 +123,9 @@ ROOM: Dict[str, Spec] = {
             "at": CLOCK, "by": (str, False, 32), "by_id": (B64(8), False, None)},
     "reject": {"to": (B64(8), True, None), "action": (str, True, 20),
                "reason": (("cooldown", "host_only", "busy"), True, None), "wait": (float, False, (0, 3600))},
-    "sync_prepare": {"id": (int, True, (0, 1 << 31)), "pos": POS, "by": (str, False, 32)},
+    "sync_prepare": {"id": (int, True, (0, 1 << 31)), "pos": POS, "by": (str, False, 32),
+                     "by_id": (B64(8), False, None),
+                     "jump": (bool, False, None)},   # true: after a jump (0.4.1); missing: Sync up
     "sync_ready": {"id": (int, True, (0, 1 << 31))},
     "sync_go": {"id": (int, True, (0, 1 << 31)), "start": CLOCK},
     "sync_abort": {"id": (int, True, (0, 1 << 31))},

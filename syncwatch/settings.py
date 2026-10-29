@@ -147,11 +147,23 @@ SCHEMA: List[Setting] = [
        minimum=1, maximum=60, suffix=" s"),
     _s("sync.gap_warn_s", "float", 1.0, "Highlight Sync up when apart by more than", WT,
        advanced=True, minimum=0.2, maximum=10.0, step=0.1, decimals=1, suffix=" s"),
+    _s("sync.jump_mode", "choice", "together", "When someone jumps while the film plays", WT,
+       "Pause and start together: everyone waits at the new spot until every PC shows it, then all "
+       "play at the same moment (the tightest; adds a short pause to every jump). Keep playing: "
+       "everyone jumps straight away, and each PC jumps a little further ahead to make up for how "
+       "long its own jumps take (it learns that by itself). In someone else's room, their choice counts.",
+       choices=[("together", "Pause and start together"), ("ahead", "Keep playing")]),
+    _s("sync.jump_start_ms", "int", 300, "After a jump, start playing again", WT,
+       "How long after the last PC is ready everyone starts (so the start message reaches "
+       "everyone in time). Only for \"Pause and start together\".", advanced=True,
+       minimum=100, maximum=3000, suffix=" ms later"),
+    _s("sync.learned_jump_ms", "float", 0.0, "How long jumps take on this PC", WT, hidden=True,
+       minimum=0.0, maximum=3000.0),
     _s("sync.countdown_s", "int", 3, "Countdown before resuming after Sync up", WT,
        "0 = resume immediately.", advanced=True, minimum=0, maximum=10, suffix=" s"),
     _s("sync.ready_timeout_s", "float", 5.0, "Wait for slow PCs at most", WT,
-       "During Sync up, how long to wait for a friend whose film isn't ready yet before "
-       "starting without them.", advanced=True, minimum=1.0, maximum=60.0, step=0.5, decimals=1,
+       "During Sync up (and after jumps, when everyone pauses and starts together), how long to "
+       "wait for a friend whose film isn't ready yet before starting without them.", advanced=True, minimum=1.0, maximum=60.0, step=0.5, decimals=1,
        suffix=" s"),
     _s("sync.cooldown_playpause_s", "float", 2.0, "Others' play/pause cooldown", WT,
        "When you host: how often each person may pause or play. You (the host) have no cooldown.",

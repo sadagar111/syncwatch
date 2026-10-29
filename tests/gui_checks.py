@@ -92,7 +92,7 @@ def check_room(out: Path) -> bool:
     events = {}
     for t, name in sorted(e for role in roles for e in data[role][1]):
         events.setdefault(name, t - start)  # first time each event happened
-    needed = ("play", "pause", "seek5", "play2", "syncup", "marek:join", "kuba:join", "marek:drift",
+    needed = ("play", "pause", "seek5", "play2", "jump_playing", "syncup", "marek:join", "kuba:join", "marek:drift",
               "marek:report_gap", "marek:syncme", "marek:friend_pause")
     missing = [n for n in needed if n not in events]
     if missing:
@@ -113,7 +113,8 @@ def check_room(out: Path) -> bool:
         "joined, paused": ((joined + 3.0, events["play"] - 0.2), 150),
         "playing together": ((events["play"] + 1.0, events["pause"] - 0.2), 400),
         "paused together": ((events["pause"] + 0.5, events["seek5"] - 0.2), 150),
-        "after a jump": ((events["play2"] + 1.0, events["marek:drift"] - 0.2), 400),
+        "after a jump": ((events["play2"] + 1.0, events["jump_playing"] - 0.2), 400),
+        "jump while playing": ((events["jump_playing"] + 1.5, events["marek:drift"] - 0.2), 150),
         "after Sync up": ((events["syncup"] + 4.5, min(events["marek:friend_pause"],
                                                        events.get("skipspam", float("inf"))) - 0.2), 250),
     }

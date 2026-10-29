@@ -1,7 +1,18 @@
-# Test checklist for 0.4.0 (rooms, friends and security)
+# Test checklist for 0.4.1 (jumps together)
 
 Send me error codes with **Copy details**, or **Settings → Diagnostics → Copy report**.
-Older checklists: `docs/TESTING-0.3.md`, `docs/TESTING-0.2.md`.
+Older checklists: `docs/TESTING-0.3.md`, `docs/TESTING-0.2.md`. Sections A–E below are the
+0.4.0 checklist, still worth a quick run.
+
+## 0.4.1: jumps while the film plays (two windows, or bots)
+- [ ] Playing, A skips ahead: both pause at the new spot for a moment, then play together (no 3-2-1)
+- [ ] B skips while playing: B waits at the new spot at once, then both play together
+- [ ] Skip several times quickly: one wait at the end, not one per press
+- [ ] Skip, then pause before it starts again: nobody starts playing
+- [ ] **Sync up**, then pause during the 3-2-1: nobody starts playing
+- [ ] `tools\bots.bat <code> --count 9 --lag-ms 800`: after a jump everyone starts together (the bots wait ~1 s)
+- [ ] Settings → Watching together → *When someone jumps while the film plays* → **Keep playing**: jumps don't pause
+- [ ] `tools\measure_jumps.bat` with one of your real films: send me the SUMMARY line
 
 ## A. Before releasing (in your Git folder)
 - [ ] The relay is online (lesson 5) and `tools\release.bat set-relay <address>` is merged
