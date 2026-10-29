@@ -364,6 +364,8 @@ class ResilienceTests(RoomTestCase):
         self.assertTrue(self.pump(until=lambda: "SW-415" in late.ui.problems()))
 
     def test_relay_restart(self):
+        if not hasattr(self.room.relay, "drop_all"):
+            self.skipTest("restarting the relay needs the one on this PC (tools/local_relay.py)")
         alex, marek = self.room.person("Alex"), self.room.person("Marek")
         self.room.let_in(alex, marek)
         alex.c.play()

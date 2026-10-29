@@ -1,7 +1,8 @@
 # The relay server (relay/): tested on every change, deployed to Cloudflare from main.
 #
 # - "Relay works": runs the real relay code in Cloudflare's local runtime (wrangler dev)
-#   and checks it with the same tests as tools/local_relay.py (tests/test_relay.py).
+#   and checks it with the same tests as tools/local_relay.py (tests/test_relay.py), then
+#   runs whole rooms through it (tests/test_rooms.py, tests/test_fuzz.py).
 # - "Deploy relay": on main (or when started by hand under Actions), puts it online.
 #   Needs the repository secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 #   (docs/GIT_GUIDE.md, lesson 5, way B). Without them it only prints a note: that's
@@ -11,7 +12,8 @@ name: relay
 on:
   pull_request:
     paths: ["relay/**", "tools/local_relay.py", "tests/test_relay.py", "syncwatch/net/**",
-            ".github/workflows/relay.yml"]
+            "syncwatch/room/**", "syncwatch/sync/**", "tests/test_rooms.py", "tests/test_fuzz.py",
+            "tests/room_harness.py", ".github/workflows/relay.yml"]
   push:
     branches: [main]
     paths: ["relay/**", ".github/workflows/relay.yml"]
@@ -59,6 +61,10 @@ jobs:
         env:
           SYNCWATCH_TEST_RELAY: http://127.0.0.1:8787
         run: python tests/ci_run.py python -m unittest tests.test_relay.RelayConformance -v
+      - name: Rooms through the real relay code
+        env:
+          SYNCWATCH_TEST_RELAY: http://127.0.0.1:8787
+        run: python tests/ci_run.py python -m unittest tests.test_rooms tests.test_fuzz -v
       - name: Relay log (if something failed)
         if: failure()
         run: tail -100 wrangler.log || true

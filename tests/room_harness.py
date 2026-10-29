@@ -1,6 +1,7 @@
 """A room full of SyncWatch apps without windows: for tests, the GUI checks and the bots.
 
-    room = Room()                      # starts a relay on this PC (tools/local_relay.py)
+    room = Room()                      # starts a relay on this PC (tools/local_relay.py),
+                                       # or uses $SYNCWATCH_TEST_RELAY (see ExternalRelay)
     alex = room.person("Alex")
     marek = room.person("Marek")
     alex.c.host_room()
@@ -13,6 +14,7 @@ relay connection; only the video player and the window are stand-ins.
 """
 from __future__ import annotations
 
+import os
 import queue
 import shutil
 import sys
@@ -153,9 +155,26 @@ class Person:
         return self.c.peers.get(other.id)
 
 
+class ExternalRelay:
+    """A relay that's already running elsewhere, named by SYNCWATCH_TEST_RELAY: for example the real
+    relay code in Cloudflare's local runtime (``npx wrangler dev --port 8787`` in relay/), so the
+    room tests check it too. Tests that need to restart the relay are skipped then."""
+
+    def __init__(self, url: str):
+        self.url = url.rstrip("/")
+
+    def stop(self) -> None:
+        pass
+
+
+def relay_for_tests():
+    url = os.environ.get("SYNCWATCH_TEST_RELAY", "")
+    return ExternalRelay(url) if url else LocalRelay().start()
+
+
 class Room:
     def __init__(self, relay: Optional[LocalRelay] = None):
-        self.relay = relay or LocalRelay().start()
+        self.relay = relay or relay_for_tests()
         self._own_relay = relay is None
         self.relay_url = self.relay.url
         self.data = Path(tempfile.mkdtemp(prefix="sw-room-"))
