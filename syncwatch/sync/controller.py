@@ -138,7 +138,6 @@ class Controller(RoomListener):
         self._next_heartbeat = 0.0
         self._next_gap_sample = 0.0
         self._pending_seek_at: Optional[float] = None
-        self._pending_seek_target = 0.0
         self._my_cooldown_until: Dict[str, float] = {"pp": 0.0, "sync": 0.0}
         self._member_last: Dict[bytes, Dict[str, float]] = {}
         self._seek_times: Dict[bytes, Deque[float]] = {}
@@ -372,7 +371,6 @@ class Controller(RoomListener):
             return
         debounce = int(self.settings.get("sync.seek_debounce_ms")) / 1000.0
         self._pending_seek_at = self.clock() + debounce
-        self._pending_seek_target = target
 
     def sync_up(self) -> None:
         if not self.connected or not self.peers:
@@ -879,7 +877,9 @@ class Controller(RoomListener):
             self._broadcast_cmd("seek", by=None)
             self.ui.activity(f"You jumped to {fmt_time(self.p.position())}", "you")
         else:
-            self.session.send_room("req", action="seek", pos=max(0, int(self._pending_seek_target)))
+            # Where my film is now, not where I jumped to: if it's playing, it has moved on since
+            # (the debounce), and the others should land where I am.
+            self.session.send_room("req", action="seek", pos=max(0, int(self.p.position())))
 
     def _send_heartbeat(self) -> None:
         fields = {"pos": max(0, int(self.p.position())), "playing": self.p.is_playing(),
