@@ -20,6 +20,7 @@
 - Every message is encrypted and signed. The relay only passes on scrambled data.
 - A room code alone only lets someone ask. The room key changes whenever someone joins or leaves, so a leaked code or someone who left can't read along.
 - Only the host's app can send commands for everyone; a member's modified app can't.
+- Broken, random or flooding messages, from someone in the room or anyone with the code, can't crash anyone's app or make the host flood the room (`tests/test_fuzz.py` tries thousands of them).
 
 **For testing**
 - `tools\bots.bat <room code> --count 9` fills your room with fake viewers (`--lag-ms`, `--drift`, `--chaos`).
