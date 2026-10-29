@@ -87,7 +87,7 @@ The full room design, with message formats and keys, is in [docs/ROOMS.md](docs/
   Mitigation: keep the runtime updated (a new libmpv build comes with a release; see below).
 - **Adding a film to the library** reads it twice more before copying: the built-in converter's
   "probe" (PyAV/FFmpeg) and a hidden test playback. The probe and every conversion run in a
-  **separate process** (`syncwatch/library/convert.py`, started with `-I`, standard library + PyAV
+  **separate process** (`syncwatch/library/convert.py`, started with `-E -P`, standard library + PyAV
   only), so a decoder crash only ends that process. Files are only ever written into the library
   folder (as `*.part` until complete), and only films inside the library folder can be removed
   (to the Recycle Bin).

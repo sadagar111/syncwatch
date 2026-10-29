@@ -9,7 +9,7 @@
 - The audio track menu shows each track's format, e.g. *English · AC3 5.1*.
 
 **Your film library**
-- The start screen lists your films. Double-click one to play it; 📂 or Ctrl+O shows the list while a film is open.
+- The start screen lists your films, on a card in the middle of the window. Double-click one to play it; 📂 or Ctrl+O shows the list while a film is open.
 - **Add film…** picks a film from Downloads or anywhere on your PC. SyncWatch checks that it plays, then copies it into your library folder with a progress bar and the time left. The original stays where it was, and a film that's already in the library isn't copied twice.
 - If a film's picture plays but its sound doesn't, SyncWatch offers to **convert the sound** (to AAC). The picture is copied untouched, so it's quick, and the copy is exactly as long as the original: friends who have the original still line up with you.
 - Right-click a film (or *More*): Show in folder, Convert the sound…, Remove from library… (to the Recycle Bin).
@@ -17,6 +17,8 @@
 - *Films folder* is now *Library folder* (Settings → Playback). SyncWatch no longer opens a film by itself at startup: pick one from the list.
 
 **Other**
+- **Fix:** the window no longer opens wider than asked (it made room for the room buttons before you were in a room). The first time, it fits the screen and opens in the middle, also on a laptop with large display scaling.
+- Scroll bars match the dark look.
 - SyncWatch is now officially free software (GNU GPL 3 or later): `LICENSE.txt`. `THIRD_PARTY_NOTICES.txt` lists everything inside, with where its source code is.
 - `tools\measure_jumps.bat` measures mpv (or the previous player with `--player qt`).
 

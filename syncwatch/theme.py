@@ -94,6 +94,10 @@ def stylesheet(theme: Theme) -> str:
 QToolTip {{ background: {c('input')}; color: {c('text')}; border: 1px solid {c('panel_border')}; padding: 4px; }}
 #Panel, #ControlBar {{ background: {c('panel')}; border: 1px solid {c('panel_border')}; border-radius: {r}px; }}
 #PanelTitle {{ color: {c('text_dim')}; font-weight: bold; }}
+#Card {{ background: {c('panel')}; border: 1px solid {c('panel_border')}; border-radius: {r + 4}px; }}
+#LibraryTitle {{ font-size: {theme.font_size_pt + 4}pt; font-weight: bold; }}
+#LibraryEmptyIcon {{ font-size: {theme.font_size_pt * 3}pt; }}
+#LibraryEmptyTitle {{ font-size: {theme.font_size_pt + 2}pt; font-weight: bold; }}
 #Dim, #Hint {{ color: {c('text_dim')}; }}
 #Hint {{ font-size: {max(7, theme.font_size_pt - 1.5)}pt; }}
 #Good {{ color: {c('good')}; }} #Warn {{ color: {c('warn')}; }} #Bad {{ color: {c('bad')}; }}
@@ -122,6 +126,13 @@ QSlider::groove:horizontal {{ height: 6px; background: {c('seek_track')}; border
 QSlider::sub-page:horizontal {{ background: {c('seek_fill')}; border-radius: 3px; }}
 QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; background: {c('text')}; border-radius: 7px; }}
 QScrollArea, QScrollArea > QWidget > QWidget {{ background: transparent; border: none; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
+QScrollBar::handle:vertical {{ background: {c('seek_track')}; border-radius: 3px; min-height: 24px; }}
+QScrollBar::handle:horizontal {{ background: {c('seek_track')}; border-radius: 3px; min-width: 24px; }}
+QScrollBar::handle:hover {{ background: {c('text_dim')}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0px; height: 0px; border: none; background: none; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 QTabWidget::pane {{ border: 1px solid {c('panel_border')}; border-radius: {r}px; }}
 QTabBar::tab {{ background: {c('button')}; padding: 6px 12px; border-top-left-radius: {r}px; border-top-right-radius: {r}px; }}
 QTabBar::tab:selected {{ background: {c('button_pressed')}; }}

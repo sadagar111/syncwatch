@@ -23,7 +23,6 @@ try:
 except ImportError:  # the converter tests need PyAV
     HAVE_AV = False
 
-CONVERTER = ROOT / "syncwatch" / "library" / "convert.py"
 
 
 class InstalledTests(unittest.TestCase):
@@ -151,7 +150,7 @@ class ConverterTests(unittest.TestCase):
 
     def run_converter(self, *args):
         """Like the window does: SyncWatch's Python, isolated (-I), JSON lines on stdout."""
-        result = subprocess.run([sys.executable, "-I", str(CONVERTER), *map(str, args)], capture_output=True,
+        result = subprocess.run(convert.command(*args), capture_output=True,
                                 text=True, timeout=120)
         return result.returncode, [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
 
@@ -211,6 +210,19 @@ class ConverterTests(unittest.TestCase):
 
     def test_usage(self):
         self.assertEqual(convert.main([]), 2)
+
+
+class ConverterStartTests(unittest.TestCase):
+    def test_sees_libraries_installed_with_pip_user(self):
+        """Microsoft Store Python installs libraries with --user; "-I" hid them, so PyAV looked
+        missing in the 0.4.2 release run. The converter's Python must keep the user's libraries."""
+        flags = convert.command()[1:-1]
+        self.assertNotIn("-I", flags)
+        self.assertNotIn("-s", flags)
+        result = subprocess.run([sys.executable, *flags, "-c", "import site; print(site.ENABLE_USER_SITE)"],
+                                capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(result.stdout.strip(), "False", result.stderr)
+        self.assertEqual(convert.command("probe", "x")[-2:], ["probe", "x"])
 
 
 if __name__ == "__main__":
