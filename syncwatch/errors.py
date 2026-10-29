@@ -7,7 +7,7 @@ instead of you having to explain every time what went wrong.
 
 Code ranges:
     1xx  installation, files, settings
-    2xx  video, sound, subtitles (25x)
+    2xx  video, sound, the film library (22x), subtitles (25x)
     3xx  the network
     4xx  rooms and the relay server
     5xx  watching in sync
@@ -155,11 +155,65 @@ CATALOG: Dict[str, Problem] = {
         "Windows reports no speakers or headphones, so films will play without sound.",
         ["Plug in headphones or speakers, then restart SyncWatch.",
          "Check that a sound device is enabled in Windows sound settings."], WARNING),
+    "SW-208": Problem(
+        "The picture can't be shown",
+        "The video player couldn't draw the picture on this PC, so you may only hear the sound.",
+        ["Settings > Playback > How mpv draws the picture (advanced): pick the other option, then "
+         "restart SyncWatch.",
+         "Update your graphics driver.",
+         "If nothing helps, set Video player (advanced, same page) to Qt."], WARNING),
+    "SW-209": Problem(
+        "SyncWatch uses its previous video player",
+        "The video player (mpv) couldn't start on this PC, so SyncWatch plays films with the player "
+        "of version 0.4.1. Films play as before, but a few sound formats may not work.",
+        ["If you run SyncWatch from its source code, start it with SyncWatch.bat once: it fetches mpv.",
+         "Otherwise click \"Copy details\" and send them to whoever gave you SyncWatch."],
+        WARNING, popup=False),
     "SW-211": Problem(
         "Sound moved to another device",
         "Your speakers or headphones were disconnected, so sound now plays on the Windows "
         "default device.",
         [], INFO, popup=False),
+    "SW-212": Problem(
+        "This film's sound can't be played",
+        "The picture plays, but the video player can't decode this film's sound.",
+        ["If the film has several audio tracks, try another one (Subtitles button > Audio track).",
+         "Add the film with Library > Add film: SyncWatch then offers to convert the sound "
+         "(the picture isn't touched)."], WARNING),
+
+    # ---- 22x: the film library -----------------------------------------------
+    "SW-220": Problem(
+        "Not enough space for this film",
+        "The drive with your library folder has {free} free, and this needs {needed}.",
+        ["Free up some space and try again.",
+         "Or choose a library folder on a bigger drive: Settings > Playback > Library folder."]),
+    "SW-221": Problem(
+        "Couldn't copy the film into the library",
+        "Copying stopped because of an error. Nothing was added, and the original file is untouched.",
+        ["Check that the drive isn't full or disconnected, then try again.",
+         "Antivirus can block copying. Allow SyncWatch in it."]),
+    "SW-222": Problem(
+        "Couldn't convert the film",
+        "The converter stopped because of an error. Nothing was added, and the original file is "
+        "untouched.",
+        ["Try another copy (release) of the film.",
+         "If it keeps happening, click \"Copy details\" and send them to whoever gave you SyncWatch."]),
+    "SW-223": Problem(
+        "This film can't be played",
+        "{reason}",
+        ["If it's still downloading, wait until it's finished.",
+         "Try another copy (release) of the film."]),
+    "SW-224": Problem(
+        "Couldn't remove the film",
+        "Windows didn't allow SyncWatch to delete it. It may be open in another program.",
+        ["Close other programs that might use it and try again, or delete it in File Explorer "
+         "(Library > Show in folder)."], WARNING),
+    "SW-225": Problem(
+        "The converter is missing",
+        "This copy of SyncWatch can't convert films, because its converter (PyAV) isn't there.",
+        ["If you run SyncWatch from its source code, start it with SyncWatch.bat once: it installs "
+         "what's missing.",
+         "Otherwise download the full SyncWatch zip again and unzip it over this folder."]),
 
     # ---- 25x: subtitles ------------------------------------------------------
     "SW-250": Problem(

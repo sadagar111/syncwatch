@@ -280,6 +280,16 @@ class Subtitles(QObject):
     def stop(self) -> None:
         self._cancel.set()
 
+    def film_closed(self) -> None:
+        """No film anymore (it's being removed from the library): stop reading it, show nothing."""
+        self._cancel.set()
+        self._generation += 1
+        self._film, self._film_key = None, ""
+        self.sources, self._mkv_tracks, self._mkv_infos = [], {}, []
+        self.track, self.current_id, self.status = None, "off", ""
+        self._mkv_state = "none"
+        self.sourcesChanged.emit()
+
     def _set_status(self, text: str) -> None:
         if text != self.status:
             self.status = text

@@ -41,12 +41,17 @@ rem ---- 2. Python version -----------------------------------------------------
 %PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" || goto old_python
 
 rem ---- 3. Install the libraries, only if something is missing --------------------------------
-%PY% -c "import PySide6.QtMultimedia, cryptography" >nul 2>&1
+rem (mpv is only looked for here, not loaded: its DLL comes in step 3b.)
+%PY% -c "import PySide6.QtMultimedia, cryptography, av, importlib.util as u; assert u.find_spec('mpv')" >nul 2>&1
 if errorlevel 1 (
-  echo Installing the libraries SyncWatch needs ^(PySide6, cryptography^). This happens only once...
+  echo Installing the libraries SyncWatch needs ^(PySide6, cryptography, mpv, PyAV^). This happens only once...
   %PY% -m pip install --disable-pip-version-check -r requirements.txt
   if errorlevel 1 goto install_failed
 )
+
+rem ---- 3b. The video player library (libmpv-2.dll), only if it's missing ----------------------
+rem If this fails, SyncWatch still starts, with its previous video player (SW-209).
+if not exist "libmpv\libmpv-2.dll" %PY% tools\get_libmpv.py
 
 rem ---- 4. Start ----------------------------------------------------------------------------------
 echo SyncWatch is running. You can minimise this window; closing it also closes SyncWatch.

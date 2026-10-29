@@ -7,7 +7,11 @@ START
   Nothing needs installing: SyncWatch brings its own Python in the "runtime" folder.
 
 FILMS
-  Put films into the "movies" folder, or open them from anywhere with the Open button.
+  The start screen shows your films (your library). Double-click one to play it.
+  Add film... picks a film from Downloads or anywhere on your PC: SyncWatch checks that it
+  plays and copies it into the "movies" folder (the original stays where it was). If its
+  sound can't be played, SyncWatch offers to convert the sound (the picture isn't touched).
+  To play a film without adding it, drop the file onto SyncWatch.
 
 WATCHING TOGETHER
   One person clicks "Host my room" and sends the room code (Copy code).
@@ -32,5 +36,9 @@ PROBLEMS
   can always unzip a fresh copy of SyncWatch over this folder without losing them.
 
 FOLDERS (don't move things around inside)
-  app\        the program            runtime\   SyncWatch's own Python
-  movies\     your films             boot.py    starts SyncWatch, installs updates
+  app\        the program            runtime\   SyncWatch's own Python and video player
+  movies\     your films (library)   boot.py    starts SyncWatch, installs updates
+
+LICENCE
+  SyncWatch is free software (GNU GPL 3 or later, LICENSE.txt). THIRD_PARTY_NOTICES.txt
+  lists everything it brings along, with the licences and where their source code is.

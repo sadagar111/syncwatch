@@ -39,12 +39,28 @@ newer than all `0.3.1-test.N`.
 | `manifest.json` | Version, notes, and the size and SHA-256 fingerprint of every file |
 | `manifest.json.sig` | Your signature of the manifest. Apps refuse anything without a valid one |
 | `SyncWatch-<v>-app.zip` | The app (well under 1 MB). What updates download |
-| `SyncWatch-runtime-<id>.zip` | Python + libraries (~125 MB). **Only when `runtime-spec/` changed**; otherwise the earlier one is reused |
+| `SyncWatch-runtime-<id>.zip` | Python + libraries + mpv (~200 MB since 0.4.2). **Only when `runtime-spec/` changed**; otherwise the earlier one is reused |
 | `SyncWatch-<v>-windows.zip` | Everything in one zip for **new** friends (normal versions only) |
 
 The release tool only packs **committed** files (it uses `git archive`), refuses to publish with
 uncommitted changes or when your `main` differs from GitHub's, runs the tests first, and finally
 checks that GitHub serves exactly what it signed.
+
+## The video player (mpv) and its pre-release
+From 0.4.2 the runtime contains `libmpv-2.dll` (mpv). It comes from zhongfly/mpv-winbuild,
+which deletes old builds after a few weeks, so a copy lives in a **pre-release** of this
+repo named `deps-libmpv-<date>-<commit>`. The runtime build takes the DLL from there (and
+checks its SHA-256 against `runtime-spec/runtime.json`).
+
+- **Once** (and again whenever mpv is updated): on GitHub, **Actions → Mirror libmpv → Run
+  workflow**. It makes that pre-release by itself; if it already exists it does nothing.
+  Without it, building the runtime needs 7-Zip installed (it then uses the original build).
+- The pre-release is never offered as an update: apps only use releases with your signed
+  `manifest.json`. Don't delete it: older releases' runtimes were built from it.
+- **Updating mpv** (rarely; e.g. for a fix): `python tools\mirror_libmpv.py --from <URL of a
+  newer mpv-dev-x86_64-….7z> <its SHA-256>` prints a new `"libmpv"` section for
+  `runtime-spec/runtime.json`. That goes into a pull request like any change; after merging,
+  run the workflow once, test, publish.
 
 ## Keeping the key safe
 | Situation | What to do |

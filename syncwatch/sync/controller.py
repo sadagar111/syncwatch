@@ -1007,7 +1007,12 @@ class Controller(RoomListener):
     @property
     def learned_jump_ms(self) -> float:
         """How long jumps take on this PC, as measured after earlier jumps while playing."""
-        return float(self.settings.get("sync.learned_jump_ms"))
+        return float(self.settings.get(self._learned_key))
+
+    @property
+    def _learned_key(self) -> str:
+        """Learned separately per video player: mpv starts late after a jump, Qt's player doesn't."""
+        return "sync.learned_jump_ms_mpv" if getattr(self.p, "engine", "") == "mpv" else "sync.learned_jump_ms"
 
     def _will_play(self) -> bool:
         """Playing, or paused only until a Sync up or jump starts everyone again."""
@@ -1055,7 +1060,7 @@ class Controller(RoomListener):
             return  # something else happened meanwhile (a stall, a hiccup): don't learn from it
         took = min(MAX_JUMP_AHEAD_MS, max(0.0, ahead + behind))
         learned = self.learned_jump_ms
-        self.settings.set("sync.learned_jump_ms", round(learned + JUMP_LEARN_RATE * (took - learned), 1))
+        self.settings.set(self._learned_key, round(learned + JUMP_LEARN_RATE * (took - learned), 1))
 
     def _send_heartbeat(self) -> None:
         fields = {"pos": max(0, int(self.p.position())), "playing": self.p.is_playing(),

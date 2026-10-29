@@ -73,7 +73,7 @@ class ControlBar(QFrame):
         self.fullscreen = IconButton("fullscreen", "⛶", "Fullscreen (F)")
         self.sidebar = IconButton("sidebar", "☰", "Show/hide the sidebar (Tab)")
         self.settings = IconButton("settings", "⚙", "Settings")
-        self.open = IconButton("open", "📂", "Open a film")
+        self.open = IconButton("open", "📂", "Library: your films")
 
         self.back.clicked.connect(self.backClicked)
         self.play.clicked.connect(self.playClicked)

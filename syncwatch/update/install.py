@@ -23,7 +23,7 @@ log = logging.getLogger("syncwatch.update")
 MAX_TOTAL_BYTES = 3 * 1024 ** 3
 MAX_FILES = 100_000
 ROOT_FILES_DIR = "_root"     # inside the app zip: files that belong next to SyncWatch.bat
-ROOT_FILES = ("boot.py", "SyncWatch.bat", "README.txt")
+ROOT_FILES = ("boot.py", "SyncWatch.bat", "README.txt", "THIRD_PARTY_NOTICES.txt", "LICENSE.txt")
 
 
 class InstallError(Exception):
@@ -136,7 +136,7 @@ def stage_app(layout: Layout, zip_path: Path, version: str) -> None:
 
 
 def _copy_root_files(layout: Layout) -> None:
-    """boot.py, SyncWatch.bat and README.txt live next to the app; neither is running now."""
+    """boot.py, SyncWatch.bat, README.txt and the licence files live next to the app; none is in use now."""
     source_dir = layout.app_new / ROOT_FILES_DIR
     for name in ROOT_FILES:
         source = source_dir / name

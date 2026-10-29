@@ -1,0 +1,39 @@
+# Keeps a copy of the libmpv build SyncWatch uses in a pre-release of this repo, because
+# the original builds are deleted after a few weeks (tools/mirror_libmpv.py explains it).
+#
+# Run it by hand: Actions > "Mirror libmpv" > Run workflow. Needed once, and again only
+# after mpv is updated in runtime-spec/runtime.json. If the copy is already there, it
+# only says so. The pre-release it makes is never offered as an update: the updater only
+# uses releases that contain your signed manifest.json.
+name: Mirror libmpv
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write   # to create the pre-release
+
+jobs:
+  mirror:
+    name: Copy libmpv into a pre-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: 7-Zip (the original builds are 7z files)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends 7zip
+      - name: Make the copy and upload it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(python -c "import json, re; s = json.load(open('runtime-spec/runtime.json'))['libmpv']; print(re.search(r'/download/([^/]+)/', s['mirror_url']).group(1))")
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "The pre-release $tag is already there. Nothing to do."
+            exit 0
+          fi
+          python tools/mirror_libmpv.py --upload

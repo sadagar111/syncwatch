@@ -4,6 +4,14 @@
   "python_tag": "313",
   "embed_url": "https://www.python.org/ftp/python/3.13.17/python-3.13.17-embed-amd64.zip",
   "embed_sha256": "9e35319bffedab8b36ad44d8f377cb4f1733bcec257a0b6d04d94f01486ddb38",
+  "libmpv": {
+    "_help": "mpv's video player library for Windows (libmpv-2.dll), from zhongfly/mpv-winbuild. A copy is kept in this repo's pre-release deps-libmpv-<date>-<commit> (made by tools/mirror_libmpv.py, or the \"Mirror libmpv\" workflow), because the original builds are deleted after a few weeks. Whichever is used, the DLL must have exactly dll_sha256. To update mpv: see tools/mirror_libmpv.py.",
+    "version": "mpv v0.41.0-1349-gcf764c61d",
+    "dll_sha256": "ef21fb0c7501f7a9c7ad3bdde5ce4abcff828c2a9d28830cf581e82689c27f93",
+    "mirror_url": "https://github.com/sadagar111/syncwatch/releases/download/deps-libmpv-20261029-cf764c61d1/libmpv-2-x86_64-20261029-cf764c61d1.zip",
+    "upstream_url": "https://github.com/zhongfly/mpv-winbuild/releases/download/2026-10-29-cf764c61d1/mpv-dev-x86_64-20261029-git-cf764c61d1.7z",
+    "upstream_sha256": "f82f829de26e430418a2561a9ba8c78c7ea1a8701336dba7a485b30456e533ed"
+  },
   "remove": [
     "Lib/site-packages/PySide6/qml/*",
     "Lib/site-packages/PySide6/translations/*",
@@ -14,9 +22,10 @@
     "Lib/site-packages/PySide6/scripts/*",
     "Lib/site-packages/PySide6/*.exe",
     "*/objects-*/*",
-    "*.pyi"
+    "*.pyi",
+    "*.pxd"
   ],
-  "_remove_help": "Files SyncWatch never uses, taken out after installing: QML, Qt's own translations, build files (metatypes, include, typesystems, glue, objects-*), Qt developer tools (*.exe) and type hints (*.pyi). Patterns are matched against paths inside the runtime ('*' also matches '/').",
+  "_remove_help": "Files SyncWatch never uses, taken out after installing: QML, Qt's own translations, build files (metatypes, include, typesystems, glue, objects-*), Qt developer tools (*.exe), type hints (*.pyi) and Cython headers (*.pxd). Patterns are matched against paths inside the runtime ('*' also matches '/').",
   "max_path": 100,
   "_max_path_help": "Longest allowed path inside the runtime, in characters. Windows Explorer can't unzip paths over 260 characters, including the folder people unzip to, so this keeps plenty of room."
 }

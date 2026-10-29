@@ -77,7 +77,7 @@ class ReleaseToolTests(unittest.TestCase):
         cls.tmp = Path(tempfile.mkdtemp(prefix="sw-release-"))
         cls.work = cls.tmp / "repo"
         shutil.copytree(SOURCE, cls.work, ignore=shutil.ignore_patterns("dist", "__pycache__", ".git",
-                                                                         "node_modules", ".wrangler"))
+                                                                         "node_modules", ".wrangler", "libmpv"))
         init = cls.work / "syncwatch" / "__init__.py"
         text = init.read_text()
         current = text.split('__version__ = "')[1].split('"')[0]
@@ -247,6 +247,11 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("syncwatch/room/session.py", app)
         self.assertIn("syncwatch/net/relay_url.py", app)
         self.assertNotIn("tools/release.py", app)
+        self.assertIn("_root/LICENSE.txt", app)                 # updates bring the licence files too (0.4.2)
+        self.assertIn("_root/THIRD_PARTY_NOTICES.txt", app)
+        self.assertIn("syncwatch/library/convert.py", app)      # the converter runs from the app folder
+        self.assertNotIn("tools/get_libmpv.py", app)            # the zip has libmpv inside already
+        self.assertNotIn("tools/mirror_libmpv.py", app)
         self.assertNotIn("tools/local_relay.py", app)
         self.assertNotIn("tools/bots.py", app)          # testing tools stay in the Git folder
         self.assertFalse(any("__pycache__" in n for n in app))
@@ -256,7 +261,8 @@ class ReleaseToolTests(unittest.TestCase):
         rid = self.release.build_runtime.runtime_id()
         for name in ("SyncWatch/SyncWatch.bat", "SyncWatch/boot.py", "SyncWatch/app/syncwatch/__init__.py",
                      "SyncWatch/runtime/current.txt", f"SyncWatch/runtime/{rid}/python.exe",
-                     "SyncWatch/THIRD_PARTY_NOTICES.txt", "SyncWatch/movies/PUT_FILMS_HERE.txt"):
+                     "SyncWatch/THIRD_PARTY_NOTICES.txt", "SyncWatch/LICENSE.txt",
+                     "SyncWatch/movies/PUT_FILMS_HERE.txt"):
             self.assertIn(name, full)
         from syncwatch.update import manifest
         data = (out_dir / "manifest.json").read_bytes()

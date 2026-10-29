@@ -1,6 +1,6 @@
 """How long do jumps take on this PC? (For tuning "When someone jumps while the film plays".)
 
-    python tools/measure_jumps.py <film> [--jumps 8]
+    python tools/measure_jumps.py <film> [--jumps 8] [--player mpv|qt]
     (or drag a film onto tools\\measure_jumps.bat)
 
 Plays the film without sound and without a window, jumps to a few spots while it plays,
@@ -8,6 +8,8 @@ and reports for each jump:
   * how long until the picture at the new spot was there, and
   * whether the film's clock kept running meanwhile (then the picture catches up and the PC
     isn't behind afterwards) or waited (then the PC ends up behind by the loading time).
+
+--player: mpv (SyncWatch's player from 0.4.2, the default) or qt (the fallback player).
 
 Nothing is saved or changed. Send the summary at the end to whoever looks after SyncWatch.
 """
@@ -27,6 +29,7 @@ from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtMultimedia import QVideoSink  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+from syncwatch import mpvlib  # noqa: E402
 from syncwatch.ui.player import Player  # noqa: E402
 
 GAP_S = 4.0          # between jumps
@@ -37,6 +40,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Measure how long jumps take on this PC.")
     parser.add_argument("film", help="a film file (MKV, MP4, ...)")
     parser.add_argument("--jumps", type=int, default=8, help="how many jumps (default 8)")
+    parser.add_argument("--player", choices=["mpv", "qt"], default="mpv", help="which video player (default mpv)")
     args = parser.parse_args(argv)
     film = Path(args.film.strip('"'))
     if not film.is_file():
@@ -44,14 +48,32 @@ def main(argv=None) -> int:
         return 2
     count = max(2, min(30, args.jumps))
     app = QApplication(sys.argv[:1])
-    player = Player()
-    sink = QVideoSink()
-    player.mp.setVideoSink(sink)
-    player.attach_sink(sink)
     frames = []      # (when, film time in ms) of every picture
-    sink.videoFrameChanged.connect(lambda f: frames.append((time.monotonic(), f.startTime() / 1000.0))
-                                   if f.isValid() and f.startTime() >= 0 else None)
-    player.audio.setMuted(True)
+    if args.player == "mpv":
+        from syncwatch.ui.mpv_player import MpvPlayer
+        try:
+            player = MpvPlayer(mpvlib.load(), "none")
+        except mpvlib.Unavailable as exc:
+            print(f"mpv isn't available here ({exc}). Try --player qt.")
+            return 2
+        player.video_widget("#000000")
+        player.start()
+        player.set_volume(0, True)
+
+        def sample():   # mpv's position is the picture on screen (it waits for the picture after a jump)
+            if player.is_ready() and player.is_playing():
+                frames.append((time.monotonic(), player.position()))
+        sampler = QTimer()
+        sampler.timeout.connect(sample)
+        sampler.start(20)
+    else:
+        player = Player()
+        sink = QVideoSink()
+        player.mp.setVideoSink(sink)
+        player.attach_sink(sink)
+        sink.videoFrameChanged.connect(lambda f: frames.append((time.monotonic(), f.startTime() / 1000.0))
+                                       if f.isValid() and f.startTime() >= 0 else None)
+        player.audio.setMuted(True)
     if not player.load(film):
         print("SyncWatch can't open that film.")
         return 2
@@ -67,8 +89,8 @@ def main(argv=None) -> int:
                 state["start"] = now
                 state["next"] = now + FIRST_S
                 player.play()
-                print(f"{film.name}: {player.duration() / 60000:.0f} min. Measuring {count} jumps, "
-                      f"about {total:.0f} s…", flush=True)
+                print(f"{film.name}: {player.duration() / 60000:.0f} min, player: {player.describe()}. "
+                      f"Measuring {count} jumps, about {total:.0f} s…", flush=True)
             elif now - started > 20:
                 print("The film didn't load within 20 s.")
                 app.exit(1)
@@ -83,13 +105,17 @@ def main(argv=None) -> int:
             print(f"  jump {len(jumps)} of {count} to {target / 60000:.1f} min · about {left:.0f} s left",
                   flush=True)
         elif len(jumps) == count and now >= state["next"]:
+            player.tick()
             app.exit(report(jumps, frames))
+        player.tick()
 
     started = time.monotonic()
     timer = QTimer()
     timer.timeout.connect(step)
     timer.start(10)
-    return app.exec()
+    code = app.exec()
+    player.shutdown()
+    return code
 
 
 def report(jumps, frames) -> int:

@@ -3,6 +3,8 @@
 # so nothing else can end up in the runtime. Values from pypi.org.
 # Only PySide6-Essentials + PySide6-Addons are needed (they contain QtMultimedia);
 # the "PySide6" meta package would also pull in the large WebEngine browser.
+# mpv = python-mpv (talks to libmpv-2.dll, see "libmpv" in runtime.json); av = PyAV, the
+# built-in converter (it brings its own FFmpeg).
 shiboken6==6.12.0 \
     --hash=sha256:a1906cb8116869178c64b6bab52623bbc8b4ceed7b30bfc3c9aa0f6e67f6438e
 pyside6-essentials==6.12.0 \
@@ -16,3 +18,7 @@ cffi==2.1.1 \
     --hash=sha256:1aa5645c30469b09530c4ebca77ebf8f17618293c58f8549cb1a543a50236e7d
 pycparser==3.12 \
     --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
+mpv==1.0.8 \
+    --hash=sha256:dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
+av==19.0.2 \
+    --hash=sha256:3ce5a1d7b916d13c16ac58f1756f0fee4af2d53f02bc1403e18550b50d375a22
