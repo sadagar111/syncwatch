@@ -1,46 +1,40 @@
-# Test checklist for 0.3.0 (updates and easy install)
+# Test checklist for 0.4.0 (rooms, friends and security)
 
-You can test all of this alone. Friends only come in at the very end.
 Send me error codes with **Copy details**, or **Settings → Diagnostics → Copy report**.
-The 0.2 checklist is in `docs/TESTING-0.2.md`.
+Older checklists: `docs/TESTING-0.3.md`, `docs/TESTING-0.2.md`.
 
-## A. Git lessons 1–3 (docs/GIT_GUIDE.md)
-- [ ] 0.2.1 is on GitHub as your first commit (lesson 1)
-- [ ] My pull request "SyncWatch 0.3.0" shows green checks, and you merged it (lesson 2)
-- [ ] `main` is protected, and your signing key and repo name are merged through your own pull request (lesson 3)
-- [ ] `tools\release.bat check-backup` says your 24 words are correct
+## A. Before releasing (in your Git folder)
+- [ ] The relay is online (lesson 5) and `tools\release.bat set-relay <address>` is merged
+- [ ] Settings → Watching together shows *Your ID* and the relay address
 
-## B. The automatic tests on GitHub
-Repo → **Actions** → the newest run → **Artifacts** at the bottom → download `gui-windows-latest`.
-- [ ] Open the screenshots in `ui/`. That's the real app, started on GitHub's Windows machine.
-      Do they look like your app? (They're taken without a screen, so the video area is empty.)
+## B. Alone, with two windows (`tools\Test with two windows.bat`)
+- [ ] Window A: **Host my room** → the room panel shows the code; **Copy code**
+- [ ] Window B: paste the code under *Join a room* → **Join** → it says *Asking … to let you in*
+- [ ] Window A shows *Waiting to join: **TestB** XXXX-XXXX · new person* → **Let in** → both show 2 people
+- [ ] Play, pause, jump in A: B follows. Pause in B: A pauses (B's request)
+- [ ] **Sync up** in B: countdown in both, they start together
+- [ ] Close window B without leaving, start it again (same profile), join again: it gets back in **without** asking
+- [ ] A: right-click TestB → **Remove from the room**: B says it was removed
+- [ ] B joins again → A: **No ▾ → Block this person** → B can't ask again (Settings → Watching together → Unblock works)
+- [ ] A: **New code…** with B in the room: B follows by itself; the old code leads nowhere
 
-## C. Your source-code copy (your Git folder)
-- [ ] `SyncWatch.bat` installs `cryptography` once, then starts as before
-- [ ] Settings → **Updates** says "source-code copy (update with git pull)"
+## C. Bots (in your Git folder)
+- [ ] `tools\bots.bat <code> --count 9` → **Let all 9 in** → People (10)
+- [ ] Play/pause/jump: all bots follow (their activity shows in the bots window)
+- [ ] `--lag-ms 800`: bots show ~0.8 s behind; **Sync up** waits for them
+- [ ] `--chaos`: random presses; cooldowns and "only the host" (Settings) behave
 
-## D. Your first release (lesson 4)
-- [ ] `tools\release.bat publish --dry-run` finishes. The first time it builds the runtime (a few minutes); look into `dist\v0.3.0`
-- [ ] `tools\release.bat publish` publishes 0.3.0; the release page shows 5 files
-- [ ] Download `SyncWatch-0.3.0-windows.zip` and unzip it to e.g. `Documents\SyncWatch-test`
-- [ ] Start that copy's `SyncWatch.bat`: **no console window**, the app works as before, and Settings → Updates says "installed copy"
-- [ ] Its films folder is `SyncWatch-test\movies`
-- [ ] Your settings, name and picture carried over: they're stored in your user profile, shared by both copies
+## D. Friends (two windows)
+- [ ] In a room: right-click the other → **Add friend** → the other side **Accept**s
+- [ ] Both leave. A hosts: B's Friends list shows *Hosting TestA's room* → **Join** → A still has to **Let in**
+- [ ] B opens SyncWatch *after* A started hosting: the room still shows up (within seconds)
+- [ ] **⋯ → Remove friend…** removes it on both sides
 
-## E. The update cycle (I'll send version 0.3.1-test.1 as a pull request)
-- [ ] Merge it, `git switch main`, `git pull`, `tools\release.bat publish --test`
-- [ ] In the **installed** copy: Settings → Updates → tick *Get test versions* (advanced) → **Check now**
-- [ ] The banner says 0.3.1-test.1 is available; **What's new** shows the notes
-- [ ] **Update now**: progress with speed and time left, then "ready"
-- [ ] **Restart now**: SyncWatch comes back as 0.3.1-test.1 (sidebar shows the version, and the activity feed says "Updated to…")
-- [ ] Settings → Updates → **Go back to version 0.3.0**: it restarts as 0.3.0
-- [ ] **Check now** offers 0.3.1-test.1 again → update again
-
-## F. Then: your friends
-- [ ] Send friends the link to `SyncWatch-0.3.0-windows.zip` from the release page.
-      From now on they update with the button.
-- [ ] Optional: give your ethical-hacker friend `SECURITY.md` and the repo link
+## E. With friends (after publishing 0.4.0)
+- [ ] Their 0.3.1 updates to 0.4.0 with the button
+- [ ] A real film night through the relay: everyone in sync, the gap shown, Sync up works
+- [ ] Optional: your ethical-hacker friend gets `SECURITY.md` and `docs/ROOMS.md`
 
 ### Things that are expected (not bugs)
-- Windows may ask "Do you want to run this file?" for `SyncWatch.bat` from a downloaded zip. Click Run.
-- Antivirus may scan the new zip for a while on first start, so the first start can be slower.
+- Codes from the test relay on your PC end in `@http://127.0.0.1:…`; real ones don't.
+- Someone with a friend's name but a different ID is shown as a *new person*: that's the point of the ID.

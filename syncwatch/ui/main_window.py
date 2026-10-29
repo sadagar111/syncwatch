@@ -10,27 +10,30 @@ import logging
 import queue
 import time
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QKeySequence, QPainter, QShortcut
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+from PySide6.QtGui import (QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QImage, QKeySequence,
+                           QPainter, QShortcut)
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
-                               QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+                               QMessageBox, QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
-from .. import __version__, errors, log as log_module, paths
+from .. import errors, log as log_module, paths
 from ..filmstate import film_key
 from ..settings import SCHEMA
 from ..sync.controller import Controller, fmt_time
 from .controls import ControlBar
 from .dialogs import error_dialog
 from .dialogs.avatar_editor import choose_avatar
-from .dialogs.settings_dialog import SettingsDialog, diagnostics_extras, profile_extras, updates_extras
+from .dialogs.settings_dialog import (SettingsDialog, diagnostics_extras, profile_extras, rooms_extras,
+                                      updates_extras)
 from .dialogs.subtitle_timing import SubtitleTimingDialog
 from .overlay import Overlay, SubtitleStyle
 from .player import VIDEO_EXTENSIONS, Player
 from .qtutil import asset_pixmap
-from .sidebar import Sidebar
+from .sidebar import FriendEntry, PersonEntry, Sidebar, WaitingEntry
 from .subtitles_ui import Subtitles
 from .updates_ui import UpdateController
 
@@ -113,7 +116,7 @@ class MainWindow(QMainWindow):
 
         self.inbox: "queue.Queue[dict]" = queue.Queue()
         self.player = Player(self)
-        self.controller = Controller(self.player, self, self.settings, self.inbox.put)
+        self.controller = Controller(self.player, self, self.settings, self.inbox.put, context.rooms)
         self.subtitles = Subtitles(self.settings, self.films, context.profile.cache_dir, self)
         self.avatar: Optional[bytes] = context.avatar
         self.controller.set_profile(self.settings.get("profile.name"), self.avatar)
@@ -128,6 +131,7 @@ class MainWindow(QMainWindow):
         self._shortcuts: List[QShortcut] = []
         self._gap_text, self._gap_kind = "", ""
         self._dialogs: list = []
+        self._avatars: dict = {}   # key id -> picture of people met in rooms (for the friends list)
         self.settings_dialog_refresh = None  # set while the settings window is open
 
         self._build()
@@ -151,6 +155,7 @@ class MainWindow(QMainWindow):
         self.updates = UpdateController(self)
         self.sidebar.update_banner.clicked.connect(self._update_banner_clicked)
         QTimer.singleShot(0, self.updates.startup)
+        QTimer.singleShot(0, self.controller.start)  # listen for friends' invitations
 
     # ================================================================ building
     def _build(self) -> None:
@@ -175,7 +180,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.stack, 1)
         left_layout.addWidget(self.controls)
 
-        self.sidebar = Sidebar(self.settings.get("sync.last_address"))
+        self.sidebar = Sidebar(self.settings.get("room.last_code"))
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.addWidget(left)
         self.splitter.addWidget(self.sidebar)
@@ -209,10 +214,21 @@ class MainWindow(QMainWindow):
         ui.subs_menu.aboutToShow.connect(self._build_subs_menu)
         self.idle.openClicked.connect(self.open_dialog)
 
-        connection = self.sidebar.connection
-        connection.hostClicked.connect(self._host)
-        connection.joinClicked.connect(self._join)
-        connection.leaveClicked.connect(self._leave)
+        room = self.sidebar.room
+        room.hostClicked.connect(self._host)
+        room.joinClicked.connect(self._join)
+        room.leaveClicked.connect(self._leave)
+        room.copyClicked.connect(self._copy_code)
+        room.newCodeClicked.connect(self._new_code)
+        room.approveClicked.connect(self.controller.approve)
+        room.approveAllClicked.connect(self.controller.approve_all)
+        room.denyClicked.connect(self._deny)
+        self.sidebar.people.actionRequested.connect(self._person_action)
+        friends = self.sidebar.friends
+        friends.joinClicked.connect(self._friend_join)
+        friends.acceptClicked.connect(lambda key: self.controller.friends.accept(self.controller.session, key))
+        friends.declineClicked.connect(lambda key: self.controller.friends.decline(self.controller.session, key))
+        friends.removeRequested.connect(self._friend_remove)
 
         p.loaded.connect(self._film_loaded)
         p.playingChanged.connect(self._playing_changed)
@@ -238,7 +254,7 @@ class MainWindow(QMainWindow):
 
     # ================================================================ the controller's UI interface
     def status(self, text: str, connected: bool) -> None:
-        self.sidebar.connection.set_status(text, connected)
+        self.sidebar.room.set_status(text, connected)
         self._refresh_soon()
 
     def activity(self, text: str, kind: str = "info") -> None:
@@ -261,18 +277,130 @@ class MainWindow(QMainWindow):
     def changed(self) -> None:
         self._refresh_soon()
 
-    # ================================================================ connecting
+    def join_request(self, knock) -> None:
+        """Someone wants into my room: make sure I notice, even when SyncWatch is in the background."""
+        QApplication.alert(self)
+
+    def shrink_avatar(self, data: bytes, max_bytes: int) -> Optional[bytes]:
+        """A smaller copy of a picture that fits into one room message."""
+        image = QImage.fromData(data)
+        if image.isNull():
+            return None
+        for size in (128, 96, 72, 56, 40):
+            scaled = image.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                                  Qt.TransformationMode.SmoothTransformation)
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            scaled.save(buffer, "PNG")
+            result = bytes(buffer.data())
+            if len(result) <= max_bytes:
+                return result
+        return None
+
+    # ================================================================ rooms
+    def _confirm(self, title: str, text: str, yes: str = "Yes") -> bool:
+        box = QMessageBox(QMessageBox.Icon.Question, title, text, parent=self)
+        ok = box.addButton(yes, QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return box.clickedButton() is ok
+
     def _host(self) -> None:
-        self.controller.host()
+        self.controller.host_room()
         self._refresh_soon()
 
-    def _join(self, address: str) -> None:
-        self.controller.join(address)
+    def _join(self, text: str) -> None:
+        if self.controller.join_room(text):
+            self.settings.set("room.last_code", text.strip()[:600])
         self._refresh_soon()
 
     def _leave(self) -> None:
-        self.controller.leave()
+        c = self.controller
+        if c.is_host and c.peers and not self._confirm(
+                "Close your room?", f"{len(c.peers)} {'person is' if len(c.peers) == 1 else 'people are'} "
+                                    "watching with you. Closing the room ends it for everyone.", "Close room"):
+            return
+        c.leave()
         self._refresh_soon()
+
+    def _copy_code(self) -> None:
+        code = self.controller.session.code
+        if code is not None:
+            QGuiApplication.clipboard().setText(code.text())
+            self.activity("Room code copied. Paste it to your friends (Ctrl+V).", "you")
+
+    def _new_code(self) -> None:
+        if self._confirm("Make a new room code?",
+                         "The old code stops working. People in your room now follow automatically; "
+                         "anyone else needs the new code (friends get it in their Friends list).", "New code"):
+            self.controller.new_code()
+            self._refresh_soon()
+
+    def _deny(self, key: bytes, block: bool) -> None:
+        knock = self.controller.session.waiting.get(key)
+        if block and knock is not None and not self._confirm(
+                "Block this person?", f"{knock.name} ({knock.key.short_id}) won't be able to ask to join your "
+                                      "room again. You can unblock them in Settings > Watching together.", "Block"):
+            return
+        self.controller.deny(key, block)
+
+    def _person_action(self, action: str, key: bytes) -> None:
+        c = self.controller
+        if action == "copy_my_id":
+            QGuiApplication.clipboard().setText(c.rooms.identity.public.short_id)
+            self.activity("Your ID copied", "you")
+            return
+        member = c.session.member(key)
+        if member is None:
+            return
+        if action == "friend":
+            c.friends.request(c.session, member)
+        elif action == "kick" and self._confirm("Remove from the room?",
+                                                f"{member.name} will be removed. They can ask to join again.",
+                                                "Remove"):
+            c.kick(key)
+        elif action == "block" and self._confirm("Remove and block?",
+                                                 f"{member.name} ({member.key.short_id}) will be removed and can't "
+                                                 "ask to join again. You can unblock them in Settings > Watching "
+                                                 "together.", "Remove and block"):
+            c.kick(key, ban=True)
+        elif action == "copy_id":
+            QGuiApplication.clipboard().setText(member.key.short_id)
+            self.activity(f"{member.name}'s ID copied", "you")
+        self._refresh_soon()
+
+    def _friend_join(self, key: bytes) -> None:
+        room = self.controller.friends.room_of(key)
+        if room is not None:
+            self.controller.join_code(room.code)
+        self._refresh_soon()
+
+    def _friend_remove(self, key: bytes) -> None:
+        friend = self.controller.rooms.store.friends.get(key)
+        if friend is not None and self._confirm("Remove friend?", f"Remove {friend.name} from your friends? "
+                                                                  "You'll disappear from their list too.", "Remove"):
+            self.controller.friends.remove(key)
+        self._refresh_soon()
+
+    def _avatar_of(self, key: bytes) -> Optional[bytes]:
+        if key not in self._avatars:
+            path = self.ctx.profile.cache_dir / "avatars" / f"{key.hex()}.png"
+            try:
+                self._avatars[key] = path.read_bytes() if path.is_file() and path.stat().st_size < 200_000 else None
+            except OSError:
+                self._avatars[key] = None
+        return self._avatars[key]
+
+    def _remember_avatar(self, key: bytes, data: Optional[bytes]) -> None:
+        if not data or self._avatars.get(key) == data:
+            return
+        self._avatars[key] = data
+        folder = self.ctx.profile.cache_dir / "avatars"
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / f"{key.hex()}.png").write_bytes(data)
+        except OSError:
+            pass
 
     def _profile_changed(self) -> None:
         self.controller.set_profile(self.settings.get("profile.name"), self.avatar)
@@ -418,18 +546,26 @@ class MainWindow(QMainWindow):
 
     def _refresh_people(self) -> None:
         c = self.controller
+        s = c.session
         connected = c.connected
-        self.sidebar.connection.set_state(connected, c.is_host and c.link.server is not None, c.link.connecting)
+        role = "host" if s.is_host else ("member" if connected else ("joining" if c.joining else "none"))
+        waiting = [WaitingEntry(k.id, k.name, k.key.short_id, k.friend, k.friend_name) for k in s.waiting.values()]
+        self.sidebar.room.set_state(role, s.code.text() if s.is_host and s.code else "", waiting)
+        self.sidebar.room.set_status(c.status_text, connected)
+
         me_status = "Playing" if self.player.is_playing() else ("Paused" if self.player.has_media() else "No film open")
         if connected and not c.attached:
             me_status = "Watching on your own"
         me_detail = me_status
         if connected and self.settings.get("sync.show_gap") and self._gap_text:
             me_detail += f" · {self._gap_text}"
-        me_name = f"{self.settings.get('profile.name') or 'You'} (you)" + (" · host" if connected and c.is_host else "")
-        friend = None
-        peer = c.peer
-        if connected and peer is not None:
+        me_name = f"{self.settings.get('profile.name') or 'You'} (you)" + (" · host" if s.is_host else "")
+        entries = [PersonEntry(b"", me_name, me_detail, self.avatar, f"Your ID: {c.rooms.identity.public.short_id}",
+                               [("Copy my ID", "copy_my_id")])]
+        host_estimate = c.peer_estimate() if not c.is_host else None
+        markers = []
+        for peer in c.people() if connected else []:
+            self._remember_avatar(peer.id, peer.avatar)
             if not peer.known:
                 state = "Connecting…"
             elif peer.separate:
@@ -438,16 +574,35 @@ class MainWindow(QMainWindow):
                 state = "Loading…"
             else:
                 state = "Playing" if peer.playing else "Paused"
-            if self.settings.get("sync.show_ping") and c.link.rtt:
-                state += f" · ping {c.link.rtt * 1000:.0f} ms"
-            friend = (peer.name + (" · host" if peer.is_host else ""), state, peer.avatar)
-        self.sidebar.people.update_people((me_name, me_detail, self.avatar), friend)
-        markers = []
-        if connected and self.settings.get("ui.markers"):
-            estimate = c.peer_estimate()
-            if estimate is not None and peer is not None:
-                markers.append((int(estimate), self.ctx.theme.colors["marker"][:7], peer.name))
+            if peer.known and not peer.separate and self.settings.get("sync.show_gap"):
+                if c.is_host:
+                    offset = c.peer_gap_ms(peer)
+                elif not peer.is_host and host_estimate is not None:
+                    estimate = c.estimate(peer)
+                    offset = None if estimate is None else estimate - host_estimate
+                else:
+                    offset = None
+                if offset is not None:
+                    state += " · in sync" if abs(offset) < IN_SYNC_MS else f" · {offset / 1000:+.1f} s"
+            if peer.match == "different":
+                state += " · different film"
+            if peer.is_host and self.settings.get("sync.show_ping") and s.rtt_ms():
+                state += f" · ping {s.rtt_ms():.0f} ms"
+            friend = c.friends.is_friend(peer.member.key)
+            actions = [] if friend else [("Add friend", "friend")]
+            if c.is_host:
+                actions += [("Remove from the room", "kick"), ("Remove and block", "block")]
+            actions.append(("Copy their ID", "copy_id"))
+            tooltip = f"ID {peer.member.key.short_id}" + (" · your friend" if friend else "")
+            entries.append(PersonEntry(peer.id, peer.name + (" · host" if peer.is_host else ""), state,
+                                       peer.avatar, tooltip, actions))
+            if self.settings.get("ui.markers") and peer.known and not peer.separate:
+                estimate = c.estimate(peer)
+                if estimate is not None:
+                    markers.append((int(estimate), self.ctx.theme.colors["marker"][:7], peer.name))
+        self.sidebar.people.update_people(entries)
         self.controls.seek.set_markers(markers)
+        self._refresh_friends()
         rules = c.effective_rules()
         attention = False
         gap = c.gap_ms()
@@ -460,17 +615,31 @@ class MainWindow(QMainWindow):
         self.controls.sync_up.setToolTip("Only the host can sync everyone right now" if (connected and not c.is_host and rules.host_only)
                                          else "Pause everyone, line up on the host, resume together")
 
+    def _refresh_friends(self) -> None:
+        c = self.controller
+        friends = c.friends
+        entries = [FriendEntry(r.id, r.name, "wants to be your friend", self._avatar_of(r.id), request=True,
+                               short_id=r.key.short_id) for r in friends.incoming.values()]
+        current = c.session.code
+        for friend in friends.friend_list():
+            key = friend.key.key_id
+            room = friends.room_of(key)
+            inside = room is not None and current is not None and current.secret == room.code.secret
+            status = "You're in their room" if inside else (f"Hosting {room.room}" if room else "Not hosting")
+            entries.append(FriendEntry(key, friend.name, status, self._avatar_of(key),
+                                       can_join=room is not None and not inside, short_id=friend.key.short_id))
+        self.sidebar.friends.update_friends(entries)
+
     def _refresh_gap(self) -> None:
         gap = self.controller.gap_ms()
-        peer = self.controller.peer
-        if gap is None or peer is None:
+        if gap is None or not self.controller.peers:
             self._gap_text, self._gap_kind = "", ""
         elif abs(gap) < IN_SYNC_MS:
             self._gap_text, self._gap_kind = "in sync", "Good"
         else:
             warn = abs(gap) / 1000.0 > float(self.settings.get("sync.gap_warn_s"))
             direction = "ahead of" if gap > 0 else "behind"
-            self._gap_text = f"{abs(gap) / 1000:.1f} s {direction} {peer.name}"
+            self._gap_text = f"{abs(gap) / 1000:.1f} s {direction} {self.controller.reference_name()}"
             self._gap_kind = "Warn" if warn else "Dim"
         self._refresh_people()
 
@@ -585,6 +754,7 @@ class MainWindow(QMainWindow):
     def open_settings(self) -> None:
         extras = {
             "Profile": profile_extras(lambda: self.avatar, self._change_avatar, lambda: self.set_avatar(None)),
+            "Watching together": rooms_extras(self.controller),
             "Updates": updates_extras(self.updates, self),
             "Diagnostics": diagnostics_extras(self.ctx.profile.logs_dir, self.copy_report, self.ctx.rerun_checks),
         }
@@ -759,7 +929,6 @@ class MainWindow(QMainWindow):
                 return
 
     def _restore_geometry(self) -> None:
-        from PySide6.QtCore import QByteArray
         geometry = self.settings.get("ui.window_geometry")
         if geometry:
             self.restoreGeometry(QByteArray.fromBase64(geometry.encode("ascii")))
@@ -775,7 +944,7 @@ class MainWindow(QMainWindow):
         self.settings.save()
         self.films.save_if_dirty()
         self.subtitles.stop()
-        self.controller.leave()
+        self.controller.shutdown()
         self._show_cursor(True)
         errors.set_handler(None)
         self.overlay.close()

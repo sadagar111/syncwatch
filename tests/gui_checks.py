@@ -1,6 +1,6 @@
-"""The real-app checks (offscreen): the whole window, two apps in sync, the update cycle.
+"""The real-app checks (offscreen): the whole window, three apps in one room, the update cycle.
 
-    python tests/gui_checks.py [ui|pair|update|all] [--out FOLDER]
+    python tests/gui_checks.py [ui|room|update|all] [--out FOLDER]
 
 Exit code 0 only if every chosen check passes. Screenshots and logs go to
 --out (GitHub uploads that folder, so you can look at the screenshots of each
@@ -14,7 +14,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -30,19 +29,21 @@ def check_ui(out: Path) -> bool:
                             env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     (out / "ui.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("KEY CHECKS", "UI HARNESS",
+                                                                                     "ROOM CHECKS",
                                                                                      "subtitle sources"))))
     return result.returncode == 0
 
 
 def _load(path: Path):
-    samples, events = [], []
+    samples, events, people = [], [], []
     for line in path.read_text().splitlines():
         entry = json.loads(line)
         if "pos" in entry:
             samples.append((entry["t"], entry["pos"]))
+            people.append((entry["t"], entry.get("people", 0)))
         elif "event" in entry and "t" in entry:
             events.append((entry["t"], entry["event"]))
-    return samples, events
+    return samples, events, people
 
 
 def _position(samples, t):
@@ -54,57 +55,87 @@ def _position(samples, t):
     return p0 + (p1 - p0) * (t - t0) / (t1 - t0) if t1 > t0 else p0
 
 
-def check_pair(out: Path) -> bool:
-    """Two real apps (host + friend) with real video players, driven by tests/pair_harness.py."""
-    logs = {role: out / f"pair-{role}.jsonl" for role in ("host", "friend")}
-    port = "50661"
-    host = subprocess.Popen([sys.executable, str(HERE / "pair_harness.py"), "host", str(FILM), str(logs["host"]), port],
-                            env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-    time.sleep(1.0)
-    friend = subprocess.run([sys.executable, str(HERE / "pair_harness.py"), "friend", str(FILM), str(logs["friend"]),
-                             port], env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
-    host_out, _ = host.communicate(timeout=120)
-    (out / "pair.log").write_text(host_out + "\n----\n" + friend.stdout + friend.stderr, encoding="utf-8")
+def check_room(out: Path) -> bool:
+    """Three real apps (host + two guests) with real video players in one room, through a relay on
+    this PC, driven by tests/room_gui_harness.py."""
+    sys.path.insert(0, str(ROOT))
+    from tools.local_relay import LocalRelay
+    relay = LocalRelay().start()
+    roles = ("host", "marek", "kuba")
+    logs = {role: out / f"room-{role}.jsonl" for role in roles}
+    code_file = out / "room-code.txt"
+    if code_file.exists():
+        code_file.unlink()
+    procs = {}
+    try:
+        for role in roles:
+            procs[role] = subprocess.Popen(
+                [sys.executable, str(HERE / "room_gui_harness.py"), role, str(FILM), str(logs[role]), relay.url,
+                 str(code_file), str(out / "ui")], env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace")
+        outputs = {role: proc.communicate(timeout=180)[0] for role, proc in procs.items()}
+    finally:
+        for proc in procs.values():
+            if proc.poll() is None:
+                proc.kill()
+        relay.stop()
+    (out / "room.log").write_text("\n----\n".join(f"[{r}]\n{o}" for r, o in outputs.items()), encoding="utf-8")
     if not all(p.exists() for p in logs.values()):
-        print("pair: a log is missing (an app didn't run its script)")
+        print("room: a log is missing (an app didn't run its script)")
         return False
-    host_samples, host_events = _load(logs["host"])
-    friend_samples, friend_events = _load(logs["friend"])
-    start = min(t for t, _ in host_events + friend_events)
+    data = {role: _load(logs[role]) for role in roles}
+    start = min(t for role in roles for t, _ in data[role][1])
     events = {}
-    for t, name in sorted(host_events + friend_events):
+    for t, name in sorted(e for role in roles for e in data[role][1]):
         events.setdefault(name, t - start)  # first time each event happened
+    needed = ("play", "pause", "seek5", "play2", "syncup", "marek:join", "kuba:join", "marek:drift",
+              "marek:report_gap", "marek:syncme", "marek:friend_pause")
+    missing = [n for n in needed if n not in events]
+    if missing:
+        print(f"room: events missing: {missing}")
+        return False
 
-    def gap_at(seconds):
+    def gap_at(guest, seconds):
         t = start + seconds
-        h, f = _position(host_samples, t), _position(friend_samples, t)
-        return None if h is None or f is None else h - f
+        h, g = _position(data["host"][0], t), _position(data[guest][0], t)
+        return None if h is None or g is None else h - g
 
-    def worst(a, b):
-        gaps = [abs(g) for g in (gap_at(a + i * 0.25) for i in range(int((b - a) * 4))) if g is not None]
+    def worst(guest, a, b):
+        gaps = [abs(g) for g in (gap_at(guest, a + i * 0.25) for i in range(int((b - a) * 4))) if g is not None]
         return max(gaps) if gaps else float("inf")
 
-    limits = {   # (from, to) seconds after the start of the script, allowed gap in ms
-        "joined, paused": ((events["join"] + 1.5, events["play"] - 0.2), 120),
+    joined = max(events["marek:join"], events["kuba:join"])
+    limits = {   # (from, to) seconds after the start, allowed gap in ms
+        "joined, paused": ((joined + 3.0, events["play"] - 0.2), 150),
         "playing together": ((events["play"] + 1.0, events["pause"] - 0.2), 400),
         "paused together": ((events["pause"] + 0.5, events["seek5"] - 0.2), 150),
-        "after a jump": ((events["play2"] + 1.0, events["drift"] - 0.2), 400),
-        "after Sync up": ((events["syncup"] + 4.5, events["friend_pause"] - 0.2), 250),
+        "after a jump": ((events["play2"] + 1.0, events["marek:drift"] - 0.2), 400),
+        "after Sync up": ((events["syncup"] + 4.5, events["marek:friend_pause"] - 0.2), 250),
     }
     ok = True
-    for name, ((a, b), limit) in limits.items():
-        value = worst(a, b)
-        passed = value <= limit
-        ok &= passed
-        print(f"pair: {name:18s} worst gap {value:7.0f} ms (limit {limit}) {'OK' if passed else 'FAIL'}")
-    drift_gap = gap_at(events["report_gap"])
+    host_people = [n for t, n in data["host"][2] if t - start > events["play"]]
+    passed = bool(host_people) and max(host_people) == 2
+    ok &= passed
+    print(f"room: everyone got in (host sees {max(host_people) if host_people else 0} others) "
+          f"{'OK' if passed else 'FAIL'}")
+    for guest in ("marek", "kuba"):
+        for name, ((a, b), limit) in limits.items():
+            value = worst(guest, a, b)
+            passed = value <= limit
+            ok &= passed
+            print(f"room: {guest:5s} {name:18s} worst gap {value:7.0f} ms (limit {limit}) {'OK' if passed else 'FAIL'}")
+    drift_gap = gap_at("marek", events["marek:report_gap"])
     passed = drift_gap is not None and 2000 < abs(drift_gap) < 3000
     ok &= passed
-    print(f"pair: simulated drift stays (no auto-correction): {drift_gap:.0f} ms {'OK' if passed else 'FAIL'}")
-    after_sync_me = gap_at(events["syncme"] + 1.5)
+    print(f"room: Marek's simulated drift stays (no auto-correction): {drift_gap:.0f} ms {'OK' if passed else 'FAIL'}")
+    kuba_then = gap_at("kuba", events["marek:report_gap"])
+    passed = kuba_then is not None and abs(kuba_then) < 400
+    ok &= passed
+    print(f"room: Kuba isn't affected by Marek's drift: {kuba_then:.0f} ms {'OK' if passed else 'FAIL'}")
+    after_sync_me = gap_at("marek", events["marek:syncme"] + 1.5)
     passed = after_sync_me is not None and abs(after_sync_me) < 400
     ok &= passed
-    print(f"pair: after Sync me: {after_sync_me:.0f} ms {'OK' if passed else 'FAIL'}")
+    print(f"room: after Marek's Sync me: {after_sync_me:.0f} ms {'OK' if passed else 'FAIL'}")
     return ok
 
 
@@ -121,12 +152,12 @@ def check_update(out: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("which", nargs="?", default="all", choices=["ui", "pair", "update", "all"])
+    parser.add_argument("which", nargs="?", default="all", choices=["ui", "room", "update", "all"])
     parser.add_argument("--out", default=str(Path(tempfile.gettempdir()) / "syncwatch-gui-checks"))
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    checks = {"ui": check_ui, "pair": check_pair, "update": check_update}
+    checks = {"ui": check_ui, "room": check_room, "update": check_update}
     chosen = list(checks) if args.which == "all" else [args.which]
     results = {}
     for name in chosen:

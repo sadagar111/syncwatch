@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import QPoint, QTimer, QUrl, Qt
-from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFontDatabase, QKeySequence
+from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
                                QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QScrollArea, QSpinBox, QTabWidget, QToolButton, QToolTip,
@@ -415,4 +415,44 @@ def updates_extras(controller, window):
         window.settings_dialog_refresh = refresh
         column.addWidget(info)
         column.addLayout(row)
+    return add
+
+
+def rooms_extras(controller):
+    """Your ID, and the people you blocked (with Unblock), for the Watching together tab."""
+    def add(column: QVBoxLayout) -> None:
+        store = controller.rooms.store
+        identity = controller.rooms.identity.public
+        relay = controller.rooms.default_relay()
+        info = QLabel(f"Your ID: <b>{identity.short_id}</b> &nbsp;·&nbsp; relay server: "
+                      f"{relay or 'not set up yet (rooms are off)'}")
+        info.setWordWrap(True)
+        info.setToolTip("Your ID is made from this PC's own keys. Friends see it next to your name, so "
+                        "nobody can pretend to be you by using your name.")
+        column.addWidget(info)
+        blocked_box = QVBoxLayout()
+        column.addLayout(blocked_box)
+
+        def refresh() -> None:
+            while blocked_box.count():
+                item = blocked_box.takeAt(0)
+                if item.widget() is not None:
+                    item.widget().deleteLater()
+                elif item.layout() is not None:
+                    while item.layout().count():
+                        inner = item.layout().takeAt(0)
+                        if inner.widget() is not None:
+                            inner.widget().deleteLater()
+            title = QLabel("Blocked people:" if store.blocked else "Blocked people: nobody")
+            blocked_box.addWidget(title)
+            for key_id, blocked in sorted(store.blocked.items(), key=lambda item: item[1].name.lower()):
+                row = QHBoxLayout()
+                row.addWidget(QLabel(f"{blocked.name} ({blocked.key.short_id})"))
+                unblock = QPushButton("Unblock")
+                unblock.clicked.connect(lambda _=False, k=key_id: (store.unblock(k), refresh()))
+                row.addWidget(unblock)
+                row.addStretch(1)
+                blocked_box.addLayout(row)
+
+        refresh()
     return add

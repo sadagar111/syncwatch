@@ -131,9 +131,9 @@ class UpdateController(QObject):
                 self._attach(owner)
             self._bring_to_front()
             return
-        peer = self.window.controller.peer
-        self.dialog = UpdateDialog(self.result, peer.name if peer and self.window.controller.connected else "",
-                                   self.window)
+        controller = self.window.controller
+        room = controller.session.room_name if controller.connected and controller.peers else ""
+        self.dialog = UpdateDialog(self.result, room, self.window)
         self.dialog.updateClicked.connect(self._start_download)
         self.dialog.skipClicked.connect(self._skip)
         self.dialog.cancelClicked.connect(self._cancel)

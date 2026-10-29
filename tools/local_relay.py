@@ -62,6 +62,32 @@ class Bucket:
         return True
 
 
+def _lingering_close(sock: socket.socket, seconds: float = 2.0, limit: int = 4 * MAX_MESSAGE) -> None:
+    """After an answer: stop sending, and read (and drop) whatever the client still sends until it closes.
+
+    Closing a socket with unread data (say, the body of a POST refused with 429 before it was
+    read) makes the system reset the connection, and Windows then throws away the answer the
+    client hasn't read yet: the client sees "connection reset" instead of 429."""
+    try:
+        sock.shutdown(socket.SHUT_WR)
+    except OSError:
+        return
+    end = time.monotonic() + seconds
+    received = 0
+    while received < limit:
+        left = end - time.monotonic()
+        if left <= 0:
+            return
+        try:
+            sock.settimeout(left)
+            chunk = sock.recv(65536)
+        except OSError:   # timeout, reset: nothing more to wait for
+            return
+        if not chunk:
+            return
+        received += len(chunk)
+
+
 class LocalRelay:
     def __init__(self, host: str = "127.0.0.1", port: int = 0, certfile: Optional[str] = None,
                  keyfile: Optional[str] = None, quiet: bool = True):
@@ -188,6 +214,7 @@ class LocalRelay:
                           f"Sec-WebSocket-Accept: {accept_key(key)}\r\n\r\n").encode("ascii"))
             sock.settimeout(None)
             ws = WebSocket(sock, rest, max_message=MAX_MESSAGE, mask_outgoing=False, expect_masked=True)
+            ws.linger = 1.0  # so a refused client still reads why (1009, 1003) instead of a reset
             self._member_loop(ws, channel)
         except (OSError, ProtocolError, ValueError):
             pass
@@ -203,6 +230,7 @@ class LocalRelay:
         data = body.encode("utf-8")
         sock.sendall((f"HTTP/1.1 {status} {REASONS.get(status, '')}\r\nContent-Type: {kind}\r\n"
                       f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n").encode("ascii") + data)
+        _lingering_close(sock)
 
     def _post(self, sock: socket.socket, channel: str, headers: Dict[str, str], rest: bytes) -> None:
         try:

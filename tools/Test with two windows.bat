@@ -1,8 +1,11 @@
 @echo off
 rem Opens two SyncWatch windows on this PC with separate profiles ("TestA" and "TestB"),
-rem so you can test watching together without a second computer.
-rem In window A click Host; in window B type 127.0.0.1 and click Join.
-rem Tip: mute one window. The profiles keep their own settings, so you only set them up once.
+rem so you can try rooms without a second computer. Each profile is a different person
+rem (its own ID), and they keep their own settings, so you only set them up once.
+rem   Window A: Host my room, then Copy code.
+rem   Window B: paste the code under "Join a room", click Join.
+rem   Window A: click "Let in".
+rem Tip: mute one window. For more people, use tools\bots.bat.
 rem Works in the source-code folder (tools\ next to SyncWatch.bat) and in the installed
 rem version (app\tools\, two levels below SyncWatch.bat).
 set "LAUNCHER=%~dp0..\SyncWatch.bat"

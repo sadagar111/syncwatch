@@ -1,20 +1,21 @@
-"""The sidebar: connecting, who's watching, and what happened (activity feed).
+"""The sidebar: your room, who's watching, your friends, and what happened (activity feed).
 
 Each panel can be hidden in Settings > Interface, and the whole sidebar with
-the ☰ button or the Tab key.
+the ☰ button or the Tab key. The panels only show things; the main window
+decides what happens when you click (signals).
 """
 from __future__ import annotations
 
 import time
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
                                QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__
-from ..net.link import local_addresses
 from .qtutil import asset_pixmap, avatar_pixmap
 
 
@@ -25,105 +26,9 @@ class Panel(QFrame):
         self.body = QVBoxLayout(self)
         self.body.setContentsMargins(10, 8, 10, 10)
         self.body.setSpacing(6)
-        heading = QLabel(title.upper())
-        heading.setObjectName("PanelTitle")
-        self.body.addWidget(heading)
-
-
-class ConnectionPanel(Panel):
-    hostClicked = Signal()
-    leaveClicked = Signal()
-    joinClicked = Signal(str)
-
-    def __init__(self, last_address: str = "", parent=None):
-        super().__init__("Watch together", parent)
-        self.host_button = QPushButton("Host")
-        self.host_button.setObjectName("Accent")
-        self.host_button.setToolTip("Let a friend join you. Send them one of your addresses below.")
-        self.host_button.clicked.connect(self.hostClicked)
-        self.leave_button = QPushButton("Leave")
-        self.leave_button.clicked.connect(self.leaveClicked)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.host_button)
-        buttons.addWidget(self.leave_button)
-        buttons.addStretch(1)
-        self.body.addLayout(buttons)
-
-        self.status = QLabel("Not connected")
-        self.status.setWordWrap(True)
-        self.body.addWidget(self.status)
-
-        self.addresses_box = QVBoxLayout()
-        self.addresses_box.setSpacing(3)
-        self.body.addLayout(self.addresses_box)
-
-        self.join_title = QLabel("Join a friend:")
-        self.join_title.setObjectName("Dim")
-        self.address = QLineEdit(last_address)
-        self.address.setPlaceholderText("Friend's address, e.g. 100.101.102.103")
-        self.address.returnPressed.connect(self._join)
-        self.join_button = QPushButton("Join")
-        self.join_button.clicked.connect(self._join)
-        self._state = None
-        join_row = QHBoxLayout()
-        join_row.addWidget(self.address, 1)
-        join_row.addWidget(self.join_button)
-        self.body.addWidget(self.join_title)
-        self.body.addLayout(join_row)
-        self.set_state(False, False, False)
-
-    def _join(self) -> None:
-        text = self.address.text().strip()
-        if text:
-            self.joinClicked.emit(text)
-
-    def set_state(self, connected: bool, hosting: bool, joining: bool) -> None:
-        if (connected, hosting, joining) == self._state:
-            return  # nothing changed: don't rebuild (keeps "Copied ✓" and avoids flicker)
-        self._state = (connected, hosting, joining)
-        busy = connected or hosting or joining
-        self.host_button.setVisible(not busy)
-        self.leave_button.setVisible(busy)
-        self.leave_button.setText("Stop hosting" if hosting else "Leave")
-        for widget in (self.join_title, self.address, self.join_button):
-            widget.setVisible(not busy)
-        self._show_addresses(hosting and not connected)
-
-    def set_status(self, text: str, connected: bool) -> None:
-        dot = "🟢" if connected else "⚪"
-        self.status.setText(f"{dot} {text}")
-
-    def _show_addresses(self, show: bool) -> None:
-        while self.addresses_box.count():
-            item = self.addresses_box.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-            elif item.layout() is not None:
-                _clear_layout(item.layout())
-        if not show:
-            return
-        title = QLabel("Send your friend one of these addresses:")
-        title.setObjectName("Dim")
-        title.setWordWrap(True)
-        self.addresses_box.addWidget(title)
-        addresses = local_addresses()
-        if not addresses:
-            none = QLabel("No network address found.")
-            none.setObjectName("Warn")
-            self.addresses_box.addWidget(none)
-        for ip, label in addresses:
-            row = QHBoxLayout()
-            text = QLabel(f"<b>{ip}</b> <span style='color:gray'>({label})</span>")
-            text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            copy = QToolButton()
-            copy.setText("Copy")
-            copy.setToolTip(f"Copy {ip} to paste it to your friend")
-            copy.clicked.connect(lambda _=False, a=ip, b=copy: (QGuiApplication.clipboard().setText(a),
-                                                                 b.setText("Copied ✓")))
-            row.addWidget(text, 1)
-            row.addWidget(copy)
-            self.addresses_box.addLayout(row)
+        self.heading = QLabel(title.upper())
+        self.heading.setObjectName("PanelTitle")
+        self.body.addWidget(self.heading)
 
 
 def _clear_layout(layout) -> None:
@@ -135,12 +40,192 @@ def _clear_layout(layout) -> None:
             _clear_layout(item.layout())
 
 
+def _small_button(text: str, tip: str = "", accent: bool = False) -> QPushButton:
+    button = QPushButton(text)
+    if accent:
+        button.setObjectName("Accent")
+    if tip:
+        button.setToolTip(tip)
+    return button
+
+
+# ============================================================================ your room
+@dataclass
+class WaitingEntry:
+    key: bytes
+    name: str
+    short_id: str
+    friend: bool
+    friend_name: str = ""
+
+
+class RoomPanel(Panel):
+    hostClicked = Signal()
+    joinClicked = Signal(str)
+    leaveClicked = Signal()
+    copyClicked = Signal()
+    newCodeClicked = Signal()
+    approveClicked = Signal(bytes)
+    denyClicked = Signal(bytes, bool)        # (who, block too)
+    approveAllClicked = Signal()
+
+    def __init__(self, last_code: str = "", parent=None):
+        super().__init__("Room", parent)
+        self.status = QLabel("Not in a room")
+        self.status.setWordWrap(True)
+        self.body.addWidget(self.status)
+
+        # not in a room
+        self.host_button = _small_button("Host my room", "Open your room; friends join with its code.", accent=True)
+        self.host_button.clicked.connect(self.hostClicked)
+        self.join_title = QLabel("Join a room:")
+        self.join_title.setObjectName("Dim")
+        self.code_input = QLineEdit(last_code)
+        self.code_input.setPlaceholderText("Paste a room code (SW-…)")
+        self.code_input.returnPressed.connect(self._join)
+        self.join_button = _small_button("Join")
+        self.join_button.clicked.connect(self._join)
+        join_row = QHBoxLayout()
+        join_row.addWidget(self.code_input, 1)
+        join_row.addWidget(self.join_button)
+        self.idle_box = QWidget()
+        idle = QVBoxLayout(self.idle_box)
+        idle.setContentsMargins(0, 0, 0, 0)
+        idle.addWidget(self.host_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        idle.addWidget(self.join_title)
+        idle.addLayout(join_row)
+        self.body.addWidget(self.idle_box)
+
+        # hosting: the code
+        self.code_box = QWidget()
+        code_layout = QVBoxLayout(self.code_box)
+        code_layout.setContentsMargins(0, 0, 0, 0)
+        self.code_label = QLabel()
+        self.code_label.setObjectName("Dim")
+        self.code_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.code_label.setWordWrap(True)
+        self.copy_button = _small_button("Copy code", "Copy the room code to send it to friends.", accent=True)
+        self.copy_button.clicked.connect(self._copy)
+        self.new_code_button = _small_button("New code…", "Make a new code. The old one stops working; people "
+                                                          "in the room follow automatically.")
+        self.new_code_button.clicked.connect(self.newCodeClicked)
+        code_buttons = QHBoxLayout()
+        code_buttons.addWidget(self.copy_button)
+        code_buttons.addWidget(self.new_code_button)
+        code_buttons.addStretch(1)
+        code_layout.addWidget(self.code_label)
+        code_layout.addLayout(code_buttons)
+        self.body.addWidget(self.code_box)
+
+        # waiting to be let in (host)
+        self.waiting_box = QWidget()
+        self.waiting_layout = QVBoxLayout(self.waiting_box)
+        self.waiting_layout.setContentsMargins(0, 4, 0, 0)
+        self.waiting_layout.setSpacing(4)
+        self.body.addWidget(self.waiting_box)
+
+        self.leave_button = _small_button("Leave")
+        self.leave_button.clicked.connect(self.leaveClicked)
+        leave_row = QHBoxLayout()
+        leave_row.addWidget(self.leave_button)
+        leave_row.addStretch(1)
+        self.body.addLayout(leave_row)
+
+        self._state: Optional[tuple] = None
+        self._waiting_keys: Tuple = ()
+        self.set_state("none")
+
+    def _join(self) -> None:
+        text = self.code_input.text().strip()
+        if text:
+            self.joinClicked.emit(text)
+
+    def _copy(self) -> None:
+        self.copyClicked.emit()
+        self.copy_button.setText("Copied ✓")
+        QTimer.singleShot(2500, lambda: self.copy_button.setText("Copy code"))
+
+    def set_status(self, text: str, connected: bool) -> None:
+        dot = "🟢" if connected else ("🟡" if text and not text.startswith("Not in") else "⚪")
+        self.status.setText(f"{dot} {text}")
+
+    def set_state(self, role: str, code: str = "", waiting: Optional[List[WaitingEntry]] = None) -> None:
+        """role: none / host / joining / member"""
+        state = (role, code)
+        if state != self._state:
+            self._state = state
+            self.idle_box.setVisible(role == "none")
+            self.code_box.setVisible(role == "host")
+            self.leave_button.setVisible(role != "none")
+            self.leave_button.setText({"host": "Close room", "joining": "Cancel"}.get(role, "Leave"))
+            self.code_label.setText(f"Room code: {code}" if code else "")
+            self.code_label.setToolTip(code)
+        self._show_waiting((waiting or []) if role == "host" else [])
+
+    def _show_waiting(self, waiting: List[WaitingEntry]) -> None:
+        keys = tuple(w.key for w in waiting)
+        if keys == self._waiting_keys:
+            return
+        self._waiting_keys = keys
+        _clear_layout(self.waiting_layout)
+        self.waiting_box.setVisible(bool(waiting))
+        if not waiting:
+            return
+        title = QLabel("Waiting to join:")
+        title.setObjectName("Warn")
+        self.waiting_layout.addWidget(title)
+        for entry in waiting:
+            row = QHBoxLayout()
+            tag = (f"friend{' “' + entry.friend_name + '”' if entry.friend_name and entry.friend_name != entry.name else ''}"
+                   if entry.friend else "new person")
+            label = QLabel(f"<b>{_html(entry.name)}</b> <span style='color:gray'>{entry.short_id} · {tag}</span>")
+            label.setWordWrap(True)
+            label.setToolTip("The ID is unique to each person's PC. Someone with a friend's name but "
+                             "another ID is someone else.")
+            yes = _small_button("Let in", accent=True)
+            yes.clicked.connect(lambda _=False, k=entry.key: self.approveClicked.emit(k))
+            no = QToolButton()
+            no.setText("No ▾")
+            no.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            menu = QMenu(no)
+            menu.addAction("Not now", lambda k=entry.key: self.denyClicked.emit(k, False))
+            menu.addAction("Block this person", lambda k=entry.key: self.denyClicked.emit(k, True))
+            no.setMenu(menu)
+            row.addWidget(label, 1)
+            row.addWidget(yes)
+            row.addWidget(no)
+            self.waiting_layout.addLayout(row)
+        if len(waiting) > 1:
+            everyone = _small_button(f"Let all {len(waiting)} in")
+            everyone.clicked.connect(self.approveAllClicked)
+            self.waiting_layout.addWidget(everyone, alignment=Qt.AlignmentFlag.AlignLeft)
+
+
+def _html(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+# ============================================================================ people
+@dataclass
+class PersonEntry:
+    key: bytes                     # b"" for me
+    name: str
+    detail: str
+    avatar: Optional[bytes]
+    tooltip: str = ""
+    actions: List[Tuple[str, str]] = field(default_factory=list)   # (label, action id)
+
+
 class PersonRow(QWidget):
+    menuRequested = Signal(object, QPoint)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.entry: Optional[PersonEntry] = None
         self.picture = QLabel()
         self.name = QLabel()
         self.name.setStyleSheet("font-weight: bold;")
+        self.name.setTextFormat(Qt.TextFormat.PlainText)
         self.detail = QLabel()
         self.detail.setObjectName("Dim")
         self.detail.setWordWrap(True)
@@ -153,33 +238,128 @@ class PersonRow(QWidget):
         row.addWidget(self.picture)
         row.addLayout(text, 1)
         self._avatar_key: Optional[Tuple[int, int]] = None
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(lambda point: self.menuRequested.emit(self, self.mapToGlobal(point)))
 
-    def set(self, name: str, detail: str, avatar: Optional[bytes]) -> None:
-        self.name.setText(name)
-        self.detail.setText(detail)
-        key = (hash(avatar) if avatar else 0, 36)
+    def set(self, entry: PersonEntry) -> None:
+        self.entry = entry
+        self.name.setText(entry.name)
+        self.detail.setText(entry.detail)
+        self.setToolTip(entry.tooltip + ("\nRight-click for more" if entry.actions else ""))
+        key = (hash(entry.avatar) if entry.avatar else 0, 36)
         if key != self._avatar_key:
             self._avatar_key = key
-            self.picture.setPixmap(avatar_pixmap(avatar, 36))
+            self.picture.setPixmap(avatar_pixmap(entry.avatar, 36))
 
 
 class PeoplePanel(Panel):
+    actionRequested = Signal(str, bytes)     # (action id, who)
+
     def __init__(self, parent=None):
         super().__init__("People", parent)
-        self.me = PersonRow()
-        self.friend = PersonRow()
-        self.body.addWidget(self.me)
-        self.body.addWidget(self.friend)
-        self.friend.setVisible(False)
+        self.rows_box = QVBoxLayout()
+        self.rows_box.setSpacing(2)
+        self.body.addLayout(self.rows_box)
+        self.rows: Dict[bytes, PersonRow] = {}
+        self._order: Tuple = ()
 
-    def update_people(self, me: Tuple[str, str, Optional[bytes]],
-                      friend: Optional[Tuple[str, str, Optional[bytes]]]) -> None:
-        self.me.set(*me)
-        self.friend.setVisible(friend is not None)
-        if friend is not None:
-            self.friend.set(*friend)
+    def update_people(self, entries: List[PersonEntry]) -> None:
+        order = tuple(e.key for e in entries)
+        if order != self._order:
+            self._order = order
+            for row in self.rows.values():
+                row.setParent(None)
+                row.deleteLater()
+            self.rows = {}
+            for entry in entries:
+                row = PersonRow()
+                row.menuRequested.connect(self._menu)
+                self.rows[entry.key] = row
+                self.rows_box.addWidget(row)
+        for entry in entries:
+            self.rows[entry.key].set(entry)
+        self.heading.setText(f"PEOPLE ({len(entries)})" if len(entries) > 1 else "PEOPLE")
+
+    def _menu(self, row: PersonRow, point: QPoint) -> None:
+        entry = row.entry
+        if entry is None or not entry.actions:
+            return
+        menu = QMenu(self)
+        for label, action in entry.actions:
+            menu.addAction(label, lambda a=action, k=entry.key: self.actionRequested.emit(a, k))
+        menu.exec(point)
 
 
+# ============================================================================ friends
+@dataclass
+class FriendEntry:
+    key: bytes
+    name: str
+    status: str
+    avatar: Optional[bytes]
+    can_join: bool = False
+    request: bool = False          # an incoming friend request (Accept / Decline)
+    short_id: str = ""
+
+
+class FriendsPanel(Panel):
+    joinClicked = Signal(bytes)
+    acceptClicked = Signal(bytes)
+    declineClicked = Signal(bytes)
+    removeRequested = Signal(bytes)
+
+    def __init__(self, parent=None):
+        super().__init__("Friends", parent)
+        self.rows_box = QVBoxLayout()
+        self.rows_box.setSpacing(3)
+        self.body.addLayout(self.rows_box)
+        self.empty = QLabel("Add friends from the People list (right-click someone) when you're in a room "
+                            "together. Then you see when they host and can join with one click.")
+        self.empty.setObjectName("Dim")
+        self.empty.setWordWrap(True)
+        self.body.addWidget(self.empty)
+        self._shown: Tuple = ()
+
+    def update_friends(self, entries: List[FriendEntry]) -> None:
+        shown = tuple((e.key, e.name, e.status, e.can_join, e.request, hash(e.avatar) if e.avatar else 0)
+                      for e in entries)
+        if shown == self._shown:
+            return
+        self._shown = shown
+        _clear_layout(self.rows_box)
+        self.empty.setVisible(not entries)
+        for entry in entries:
+            row = QHBoxLayout()
+            picture = QLabel()
+            picture.setPixmap(avatar_pixmap(entry.avatar, 28))
+            text = QLabel(f"<b>{_html(entry.name)}</b><br><span style='color:gray'>{_html(entry.status)}</span>")
+            text.setWordWrap(True)
+            text.setToolTip(f"ID {entry.short_id}" if entry.short_id else "")
+            row.addWidget(picture)
+            row.addWidget(text, 1)
+            if entry.request:
+                accept = _small_button("Accept", accent=True)
+                accept.clicked.connect(lambda _=False, k=entry.key: self.acceptClicked.emit(k))
+                decline = _small_button("Decline")
+                decline.clicked.connect(lambda _=False, k=entry.key: self.declineClicked.emit(k))
+                row.addWidget(accept)
+                row.addWidget(decline)
+            else:
+                if entry.can_join:
+                    join = _small_button("Join", "Ask to join their room", accent=True)
+                    join.clicked.connect(lambda _=False, k=entry.key: self.joinClicked.emit(k))
+                    row.addWidget(join)
+                more = QToolButton()
+                more.setText("⋯")
+                more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+                menu = QMenu(more)
+                menu.addAction("Remove friend…", lambda k=entry.key: self.removeRequested.emit(k))
+                more.setMenu(menu)
+                row.addWidget(more)
+            self.rows_box.addLayout(row)
+
+
+# ============================================================================ activity
 class ActivityPanel(Panel):
     COLOURS = {"you": "#9BE8B4", "friend": "#9CC9FF", "warn": "#FFC46B", "error": "#FF8A9B", "info": None}
 
@@ -245,9 +425,9 @@ class UpdateBanner(QFrame):
 
 
 class Sidebar(QWidget):
-    def __init__(self, last_address: str = "", parent=None):
+    def __init__(self, last_code: str = "", parent=None):
         super().__init__(parent)
-        self.setMinimumWidth(250)
+        self.setMinimumWidth(260)
         header = QHBoxLayout()
         logo = QLabel()
         pixmap = asset_pixmap("logo.png")
@@ -262,22 +442,25 @@ class Sidebar(QWidget):
         header.addWidget(version)
         header.addStretch(1)
         self.update_banner = UpdateBanner()
-        self.connection = ConnectionPanel(last_address)
+        self.room = RoomPanel(last_code)
         self.people = PeoplePanel()
+        self.friends = FriendsPanel()
         self.activity = ActivityPanel()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 8, 8, 8)
         layout.addLayout(header)
         layout.addWidget(self.update_banner)
-        layout.addWidget(self.connection)
+        layout.addWidget(self.room)
         layout.addWidget(self.people)
+        layout.addWidget(self.friends)
         layout.addWidget(self.activity, 1)
 
     def show_update(self, version: str, ready: bool = False) -> None:
         self.update_banner.set_version(version, ready)
 
     def apply_settings(self, settings) -> None:
-        self.connection.setVisible(settings.get("ui.panel_connection"))
+        self.room.setVisible(settings.get("ui.panel_connection"))
         self.people.setVisible(settings.get("ui.panel_people"))
+        self.friends.setVisible(settings.get("ui.panel_friends"))
         self.activity.setVisible(settings.get("ui.panel_activity"))
         self.activity.max_items = int(settings.get("ui.activity_max"))

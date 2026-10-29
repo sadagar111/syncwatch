@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305  # noqa
 
 from syncwatch.room import codes, crypto  # noqa: E402
 from syncwatch.room.identity import Identity, PublicIdentity, load_or_create  # noqa: E402
+from syncwatch.room.store import RoomStore  # noqa: E402
 
 
 class Base32Tests(unittest.TestCase):
@@ -235,6 +236,60 @@ class ReplayGuardTests(unittest.TestCase):
         for index in range(5):                         # old entries are forgotten after a while
             guard.accept(bytes([index]) * 32, "x", 1)
         self.assertEqual(len(guard._last), 3)
+
+
+class RoomStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="sw-store-"))
+        self.now = 1_000_000.0
+        self.me = Identity.generate()
+        self.a, self.b = Identity.generate().public, Identity.generate().public
+
+    def store(self):
+        return RoomStore(self.dir / "rooms.json", wall=lambda: self.now)
+
+    def test_saved_and_loaded(self):
+        store = self.store()
+        code = store.my_code(self.me)
+        self.assertEqual(store.my_code(self.me).text(), code.text())    # the same code every time
+        store.add_friend(self.a, "Marek", "ab" * 16)
+        store.block(self.b, "Spammer")
+        store.remember_in_room([self.a])
+        store.save()
+        again = self.store()
+        self.assertIsNone(again.problem)
+        self.assertEqual(again.my_code(self.me).text(), code.text())
+        self.assertTrue(again.is_friend(self.a))
+        self.assertTrue(again.is_blocked(self.b))
+        self.assertTrue(again.was_recently_in_room(self.a))
+        self.assertNotEqual(again.new_code(self.me).text(), code.text())
+
+    def test_recent_members(self):
+        store = self.store()
+        store.remember_in_room([self.a])
+        self.assertTrue(store.was_recently_in_room(self.a))
+        self.assertFalse(store.was_recently_in_room(self.b))
+        # Someone whose key id matches but whose full fingerprint doesn't is someone else.
+        store.recent = {self.a.key_id + bytes(24): self.now}
+        self.assertFalse(store.was_recently_in_room(self.a))
+        store.remember_in_room([self.a])
+        store.forget_recent(self.a.key_id)
+        self.assertFalse(store.was_recently_in_room(self.a))
+        store.remember_in_room([self.a])
+        self.now += 10 * 60 + 1
+        self.assertFalse(store.was_recently_in_room(self.a))
+        store.remember_in_room([self.a])
+        store.block(self.a, "Marek")
+        self.assertFalse(store.was_recently_in_room(self.a))
+
+    def test_damaged_file_starts_fresh(self):
+        (self.dir / "rooms.json").write_text("{not json", encoding="utf-8")
+        store = self.store()
+        self.assertIsNotNone(store.problem)
+        self.assertEqual(store.friends, {})
+        self.assertTrue(any(p.name.startswith("rooms.json.damaged-") for p in self.dir.iterdir()))
+        self.assertTrue(store.save())
+        self.assertIsNone(self.store().problem)
 
 
 if __name__ == "__main__":

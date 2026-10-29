@@ -13,15 +13,13 @@ from __future__ import annotations
 
 import logging
 import platform
-import socket
-import sys
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 
 from .. import MIN_PYSIDE6, errors, paths
-from ..net.link import local_addresses
+from ..net.addresses import local_addresses
 
 log = logging.getLogger("syncwatch.checks")
 
@@ -91,28 +89,23 @@ def video_checks() -> List[CheckResult]:
     return results
 
 
-def network_checks(port: int) -> List[CheckResult]:
+def network_checks(relay: str) -> List[CheckResult]:
+    """Network: this PC's addresses, and whether a relay server is set up for rooms.
+
+    Whether the relay can actually be reached shows up when you host or join (it takes a
+    moment to find out, and startup shouldn't wait for it).
+    """
     results = []
     addresses = local_addresses()
     if addresses:
         text = ", ".join(f"{ip} ({label})" for ip, label in addresses)
         results.append(CheckResult("Network", "Your addresses", OK, text))
-        if not any(label == "Tailscale" for _, label in addresses):
-            results.append(CheckResult("Network", "Tailscale", OK, "not found (only needed across networks)"))
     else:
         results.append(CheckResult("Network", "Your addresses", WARN, "no network found", "SW-311"))
-    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        if sys.platform == "win32":
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        probe.bind(("0.0.0.0", port))
-        results.append(CheckResult("Network", "Hosting port", OK, f"port {port} is free"))
-    except OSError as exc:
-        results.append(CheckResult("Network", "Hosting port", WARN,
-                                   f"port {port} is in use (maybe another SyncWatch window); joining still works",
-                                   "SW-301", errors.describe_exception(exc)))
-    finally:
-        probe.close()
+    if relay:
+        results.append(CheckResult("Network", "Relay server", OK, relay))
+    else:
+        results.append(CheckResult("Network", "Relay server", WARN, "not set up yet: rooms are off", "SW-401"))
     return results
 
 

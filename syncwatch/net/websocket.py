@@ -124,6 +124,10 @@ class WebSocket:
         self._expect_masked = expect_masked
         self._close_sent = False
         self.closed: Optional[ConnectionClosed] = None
+        # After our close frame, keep reading (and discarding) this long before hanging up. Closing
+        # with unread data makes Windows reset the connection, and the other side then never
+        # sees our close frame (the relay sets this; clients don't need it).
+        self.linger = 0.0
         self.last_received = time.monotonic()
         self.last_pong = 0.0
 
@@ -222,6 +226,8 @@ class WebSocket:
                     self.sock.sendall(frame)
             except OSError:
                 pass
+            if self.linger > 0:
+                self._drain(self.linger)
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -230,6 +236,21 @@ class WebSocket:
             self.sock.close()
         except OSError:
             pass
+
+    def _drain(self, seconds: float) -> None:
+        """Stop sending, then read and discard until the other side hangs up (or time runs out)."""
+        end = time.monotonic() + seconds
+        try:
+            self.sock.shutdown(socket.SHUT_WR)
+            while True:
+                left = end - time.monotonic()
+                if left <= 0:
+                    return
+                self.sock.settimeout(left)
+                if not self.sock.recv(65536):
+                    return
+        except OSError:
+            return
 
     # ------------------------------------------------------------------ receiving
     def _fill(self, count: int, deadline: Optional[float]) -> None:
