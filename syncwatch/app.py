@@ -7,7 +7,8 @@
     3. One window per profile (SW-108)
     4. Settings, film memory, theme (damaged files fall back to defaults), this PC's
        identity and the rooms file (room code, friends)
-    5. Startup checks (app files, video, network) and the invisible video test
+    5. Startup checks (app files, video, network), then, once the window and its video
+       player exist, which player is in use and the invisible video test with it
     6. First-time setup (your name and picture), then the main window
 """
 from __future__ import annotations
@@ -167,9 +168,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     from .ui import checks
     from .ui.dialogs.startup_dialog import StartupDialog
 
+    created: dict = {}  # filled with the main window once it exists
+
     def run_checks() -> None:
         context.check_results = (checks.app_checks(data_ok, data_error, problems) + checks.video_checks()
                                  + checks.network_checks(rooms.default_relay()))
+        window = created.get("window")
+        if window is not None:
+            from .ui import players
+            context.check_results.append(checks.player_check(window.player, players.fallback_reason or ""))
 
     run_checks()
 
@@ -189,14 +196,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             sections.append(("Film", f"{player.path.name if player.path else '-'} duration={player.duration()} "
                                      f"position={int(player.position())} playing={player.is_playing()} "
                                      f"ready={player.is_ready()} subtitles={window.subtitles.current_id.split(':')[0]} "
-                                     f"delay={window.subtitles.delay_ms}"))
+                                     f"delay={window.subtitles.delay_ms} player={player.describe()}"))
         changed = [f"{s.key} = {settings.get(s.key)!r}" for s in SCHEMA
                    if not s.hidden and s.key != "profile.name" and not settings.is_default(s.key)]
         sections.append(("Settings changed from defaults", "\n".join(changed) or "(none)"))
         return log_module.build_report(sections)
 
     context.build_report = build_report
-    created: dict = {}  # filled with the main window once it exists
     startup_dialog = StartupDialog(lambda: build_report(created.get("window")))
 
     def show_checks(force: bool = False) -> None:
@@ -218,7 +224,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if not settings.get("ui.video_selftest"):
             show_checks(force_show)
             return
-        test = checks.VideoSelfTest(app)
+        window = created.get("window")
+        test = checks.VideoSelfTest(app, window.player.engine if window is not None else "qt")
         selftests.append(test)
 
         def done(result) -> None:
@@ -247,6 +254,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             settings.set("profile.name", (getpass.getuser() or "Friend")[:32])
     window = MainWindow(context)
     created["window"] = window
+    run_checks()   # again, now with the video player the window ended up with
     window.show()
     exit_after = os.environ.get("SYNCWATCH_TEST_EXIT_AFTER", "")  # automatic tests only
     if exit_after.replace(".", "", 1).isdigit():

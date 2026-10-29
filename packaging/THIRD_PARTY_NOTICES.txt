@@ -1,10 +1,31 @@
-SyncWatch includes the following software, each under its own licence.
-The full licence texts are included next to each component: inside
-runtime\<id>\ (Python's LICENSE.txt) and in each library's *.dist-info folder in
-runtime\<id>\Lib\site-packages\.
+SyncWatch is free software: you can share and change it under the GNU General Public
+License, version 3 or (at your option) any later version (LICENSE.txt). Its source code:
+https://github.com/sadagar111/syncwatch
+
+SyncWatch includes the following software, each under its own licence. The full licence
+texts are included next to each component: inside runtime\<id>\ (Python's LICENSE.txt),
+in each library's *.dist-info folder in runtime\<id>\Lib\site-packages\, and in
+runtime\<id>\libmpv\SOURCE.txt for mpv.
 
 Python 3.13 (Windows embeddable package)
   Python Software Foundation License. https://www.python.org/
+
+mpv (libmpv-2.dll in runtime\<id>\libmpv: the video player, from SyncWatch 0.4.2)
+  GNU General Public License, version 2 or later. This build also contains FFmpeg and other
+  libraries, some of them GPL-licensed, so the whole DLL is distributed under the GPL.
+  https://mpv.io/  Source code: https://github.com/mpv-player/mpv
+  The exact version, where the build came from and where to find the source code of every
+  library inside it: runtime\<id>\libmpv\SOURCE.txt
+
+python-mpv (lets SyncWatch talk to mpv)
+  GNU General Public License v2 or later, or GNU Lesser General Public License v2.1 or later.
+  https://github.com/jaseg/python-mpv
+
+PyAV (the built-in converter, from SyncWatch 0.4.2) and the FFmpeg libraries it brings
+  PyAV: BSD 3-Clause. https://github.com/PyAV-Org/PyAV
+  FFmpeg (in Lib\site-packages\av.libs): built with GPL parts (x264, x265), so GPL.
+  https://ffmpeg.org/  Source: https://ffmpeg.org/download.html and the build scripts at
+  https://github.com/PyAV-Org/pyav-ffmpeg
 
 Qt for Python (PySide6, shiboken6) and the Qt libraries it contains
   GNU Lesser General Public License v3 (LGPLv3). https://www.qt.io/qt-for-python
@@ -12,7 +33,7 @@ Qt for Python (PySide6, shiboken6) and the Qt libraries it contains
   replaceable libraries. Source code: https://code.qt.io/ and
   https://download.qt.io/official_releases/QtForPython/
 
-FFmpeg (video decoding inside Qt Multimedia)
+FFmpeg (video decoding inside Qt Multimedia: the fallback player)
   GNU Lesser General Public License v2.1 or later. https://ffmpeg.org/
   Shipped as part of the official Qt for Python build. Source: https://ffmpeg.org/download.html
 

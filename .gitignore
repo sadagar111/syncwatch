@@ -7,6 +7,8 @@ movies/*
 !movies/PUT_MOVIE_HERE.txt
 # Release builds are made by tools/release.py into dist/ and uploaded to GitHub, never committed.
 dist/
+# The video player library for the source-code version (tools/get_libmpv.py fetches it).
+libmpv/
 # Secrets never live in the project folder (they are in your user profile),
 # but just in case, never commit anything that looks like a key:
 *.key

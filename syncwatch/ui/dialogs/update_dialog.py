@@ -6,19 +6,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QProgressBar, QPush
                                QTextBrowser, QVBoxLayout, QWidget)
 
 from ... import __version__
-
-
-def human_size(size: float) -> str:
-    return f"{size / 1e6:.1f} MB" if size < 1e9 else f"{size / 1e9:.2f} GB"
-
-
-def human_time(seconds) -> str:
-    if seconds is None:
-        return "estimating…"
-    seconds = int(seconds + 0.5)
-    if seconds < 60:
-        return f"about {seconds} s left"
-    return f"about {seconds // 60} min {seconds % 60:02d} s left"
+from ...units import human_size, human_time
 
 
 class UpdateDialog(QDialog):

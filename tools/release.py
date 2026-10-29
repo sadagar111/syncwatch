@@ -63,9 +63,11 @@ MIN_PASSPHRASE = 10
 APP_PREFIXES = ("syncwatch/", "assets/", "tools/")
 APP_FILES = ("CHANGELOG.md",)
 NOT_FOR_FRIENDS = ("tools/release.py", "tools/release.bat", "tools/build_runtime.py", "tools/keywords.py",
+                   "tools/get_libmpv.py", "tools/mirror_libmpv.py",
                    "tools/bip39_english.txt", "tools/local_relay.py", "tools/bots.py", "tools/bots.bat")
-ROOT_FILES = {"boot.py": "boot.py", "SyncWatch.bat": "SyncWatch.bat", "packaging/README.txt": "README.txt"}
-EXTRA_FULL_FILES = {"packaging/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt"}
+ROOT_FILES = {"boot.py": "boot.py", "SyncWatch.bat": "SyncWatch.bat", "packaging/README.txt": "README.txt",
+              "packaging/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt", "LICENSE": "LICENSE.txt"}
+EXTRA_FULL_FILES: Dict[str, str] = {}   # only in the all-in-one zip (everything is in ROOT_FILES now)
 
 
 class Stop(Exception):
@@ -338,7 +340,8 @@ def write_full_zip(path: Path, app: Dict[str, bytes], files: Dict[str, bytes], r
             if source in files:
                 put(target, files[source])
         put("runtime/current.txt", runtime_id.encode("ascii"))
-        put("movies/PUT_FILMS_HERE.txt", b"Put your films in this folder.\r\n")
+        put("movies/PUT_FILMS_HERE.txt", b"Your film library. SyncWatch's Add film button copies films here; "
+                                          b"you can also put films in this folder yourself.\r\n")
         members = runtime.infolist()
         for index, member in enumerate(members, 1):
             if not member.is_dir():

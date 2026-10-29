@@ -82,8 +82,25 @@ The full room design, with message formats and keys, is in [docs/ROOMS.md](docs/
   member can always record what they see while they're in the room.
 
 ### Files from the internet
-- **Films** are decoded by Qt Multimedia's FFmpeg. A crafted file can exploit decoder bugs, as with any
-  media player. Mitigation: keep the runtime updated.
+- **Films** are decoded by mpv (libmpv, with FFmpeg inside) since 0.4.2, or by Qt Multimedia's FFmpeg
+  in the fallback player. A crafted file can exploit decoder bugs, as with any media player.
+  Mitigation: keep the runtime updated (a new libmpv build comes with a release; see below).
+- **Adding a film to the library** reads it twice more before copying: the built-in converter's
+  "probe" (PyAV/FFmpeg) and a hidden test playback. The probe and every conversion run in a
+  **separate process** (`syncwatch/library/convert.py`, started with `-I`, standard library + PyAV
+  only), so a decoder crash only ends that process. Files are only ever written into the library
+  folder (as `*.part` until complete), and only films inside the library folder can be removed
+  (to the Recycle Bin).
+- **libmpv itself:** SyncWatch loads `libmpv-2.dll` only from its own folders (the runtime's
+  `libmpv\`, or `libmpv\` in a source-code folder), never from PATH or anywhere else
+  (`syncwatch/mpvlib.py` answers python-mpv's DLL lookup with that one file). The DLL is pinned by
+  its SHA-256 in `runtime-spec/runtime.json`; the build tools refuse any other file, whether it
+  comes from the copy in the `deps-libmpv-…` pre-release or from the original build. That
+  pre-release is ignored by the updater (no signed manifest), and the runtime zip that contains the
+  DLL is listed with its fingerprint in the signed manifest like everything else.
+- No mpv configuration, scripts or key bindings are loaded (`config=no`, `load-scripts=no`,
+  `ytdl=no`, no input bindings): an `mpv.conf` or script elsewhere on the PC can't change what
+  SyncWatch's player does.
 - **Subtitles:** `.srt/.vtt/.ass` parsing is pure Python with size caps (10 MB). The MKV subtitle reader
   (`syncwatch/subtitles/mkv.py`) bounds-checks every element size against the file and caps
   decompression. Fuzzing it is welcome.
@@ -105,7 +122,8 @@ The full room design, with message formats and keys, is in [docs/ROOMS.md](docs/
    from the relay. `tools/local_relay.py` is a relay on your own PC for experiments, and
    `tools/bots.py` fills a room with fake people.
 4. `relay/src/index.js`: get the relay to leak or mix up channels, or to fall over cheaply.
-5. `syncwatch/subtitles/mkv.py` and `parsers.py`: malformed files.
+5. `syncwatch/subtitles/mkv.py` and `parsers.py`: malformed files. `syncwatch/library/`: odd file names,
+   films that change while they're copied, files that crash or hang the converter.
 6. `tools/release.py`: anything that could make it sign something other than the committed code.
 
 Please test against your own relay (`relay/README.md`) or `tools/local_relay.py`, not against

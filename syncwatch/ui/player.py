@@ -1,4 +1,8 @@
-"""The video player: Qt's QMediaPlayer plus what sync needs from it.
+"""Qt's video player (QMediaPlayer) plus what sync needs from it.
+
+Up to 0.4.1 this was SyncWatch's only player. From 0.4.2 mpv plays films (mpv_player.py)
+and this one is the fallback: used when Settings > Playback > "Video player" is Qt, or
+by itself when mpv can't start on a PC (SW-209). Both have the same interface.
 
 What this adds on top of QMediaPlayer:
 * A smooth position. Qt only updates the position about every 50 ms, so
@@ -22,8 +26,10 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QLocale, QObject, QUrl, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaDevices, QMediaMetaData, QMediaPlayer
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from .. import errors
+from ..library.films import VIDEO_EXTENSIONS  # noqa: F401 - the window imports it from here
 
 log = logging.getLogger("syncwatch.player")
 
@@ -31,7 +37,6 @@ MAX_EXTRAPOLATE_MS = 300
 SEEK_SETTLE_S = 1.5
 FRAME_TOLERANCE_MS = 400     # a decoded picture this close to the jump target means "ready"
 FRAME_WAIT_LIMIT_S = 4.0     # never wait longer than this for the picture after a jump
-VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts", ".m2ts", ".ogv")
 
 try:  # Qt >= 6.7
     from PySide6.QtMultimedia import QtAudio as _QtAudio
@@ -49,6 +54,8 @@ class Player(QObject):
     loaded = Signal()          # a new film is ready (duration known)
     tracksChanged = Signal()
     ended = Signal()
+
+    engine = "qt"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -77,6 +84,27 @@ class Player(QObject):
     def attach_sink(self, sink) -> None:
         """Watch the decoded pictures (from the video widget's QVideoSink) to know when a jump is done."""
         sink.videoFrameChanged.connect(self._on_frame)
+
+    # ------------------------------------------------------------ setting up (same as the mpv player)
+    def video_widget(self, background: str, parent=None) -> QVideoWidget:
+        widget = QVideoWidget(parent)
+        widget.setStyleSheet(f"background: {background};")
+        self.mp.setVideoOutput(widget)
+        self.attach_sink(widget.videoSink())
+        return widget
+
+    def start(self) -> None:
+        """Nothing to start: QMediaPlayer is ready as soon as it exists."""
+
+    def describe(self) -> str:
+        import PySide6
+        return f"Qt Multimedia (PySide6 {PySide6.__version__})"
+
+    def set_hwdec(self, value: str) -> None:
+        """Qt decides about hardware decoding itself."""
+
+    def shutdown(self) -> None:
+        self.mp.stop()
 
     # ------------------------------------------------------------ what sync needs
     def position(self) -> float:

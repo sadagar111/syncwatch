@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.2 (new video player, and your film library)
+**A new video player: mpv**
+- Films now play with **mpv**, which handles practically every film, including AC3, E-AC3 and DTS sound that didn't always play before.
+- It comes inside SyncWatch, nothing to install. That's why this update is bigger than usual (once).
+- The previous player stays as a fallback: SyncWatch switches to it by itself if mpv can't start on a PC (SW-209), and you can pick it in Settings → Playback → *Video player* (advanced).
+- Also in Settings → Playback (advanced): *How mpv draws the picture* (try OpenGL if the picture stays black) and *Hardware video decoding*.
+- The audio track menu shows each track's format, e.g. *English · AC3 5.1*.
+
+**Your film library**
+- The start screen lists your films. Double-click one to play it; 📂 or Ctrl+O shows the list while a film is open.
+- **Add film…** picks a film from Downloads or anywhere on your PC. SyncWatch checks that it plays, then copies it into your library folder with a progress bar and the time left. The original stays where it was, and a film that's already in the library isn't copied twice.
+- If a film's picture plays but its sound doesn't, SyncWatch offers to **convert the sound** (to AAC). The picture is copied untouched, so it's quick, and the copy is exactly as long as the original: friends who have the original still line up with you.
+- Right-click a film (or *More*): Show in folder, Convert the sound…, Remove from library… (to the Recycle Bin).
+- Dropping a film file onto SyncWatch still plays it straight away, without adding it.
+- *Films folder* is now *Library folder* (Settings → Playback). SyncWatch no longer opens a film by itself at startup: pick one from the list.
+
+**Other**
+- SyncWatch is now officially free software (GNU GPL 3 or later): `LICENSE.txt`. `THIRD_PARTY_NOTICES.txt` lists everything inside, with where its source code is.
+- `tools\measure_jumps.bat` measures mpv (or the previous player with `--player qt`).
+
 ## 0.4.1 (jumps together)
 - **Jumping while the film plays keeps everyone together.** Everyone waits at the new spot until every PC shows it, then all play at the same moment, so nobody misses the first seconds after a jump. Slow PCs no longer end up behind.
 - Or choose *Keep playing* (Settings → Watching together → *When someone jumps while the film plays*): everyone jumps straight away, and each PC learns how long its own jumps take and jumps that much further ahead. The host's choice counts for the whole room.

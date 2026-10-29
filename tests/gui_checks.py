@@ -1,6 +1,7 @@
-"""The real-app checks (offscreen): the whole window, three apps in one room, the update cycle.
+"""The real-app checks (offscreen): the whole window, the film library, three apps in one room,
+the update cycle.
 
-    python tests/gui_checks.py [ui|room|update|all] [--out FOLDER]
+    python tests/gui_checks.py [ui|library|room|update|all] [--out FOLDER]
 
 Exit code 0 only if every chosen check passes. Screenshots and logs go to
 --out (GitHub uploads that folder, so you can look at the screenshots of each
@@ -29,8 +30,25 @@ def check_ui(out: Path) -> bool:
                             env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     (out / "ui.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("KEY CHECKS", "UI HARNESS",
-                                                                                     "ROOM CHECKS",
+                                                                                     "ROOM CHECKS", "PLAYER",
                                                                                      "subtitle sources"))))
+    player = next((line[len("PLAYER:"):].strip() for line in result.stdout.splitlines()
+                   if line.startswith("PLAYER:")), "")
+    if player and os.environ.get("GITHUB_ACTIONS"):   # shown on the pull request page
+        print(f"::notice title=Video player in the app check ({sys.platform})::{player}", flush=True)
+    return result.returncode == 0
+
+
+def check_library(out: Path) -> bool:
+    """Add film (check, copy, open), a duplicate, a film whose sound gets converted, removing."""
+    result = subprocess.run([sys.executable, str(HERE / "library_harness.py"), str(out / "library")], env=ENV,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    (out / "library.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
+    print("\n".join(line for line in result.stdout.splitlines()
+                    if line.startswith(("LIBRARY", "steps seen", "converted copy", "library now", "ERRORS SEEN"))))
+    if result.returncode != 0:
+        print("library check failed; end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
     return result.returncode == 0
 
 
@@ -158,12 +176,12 @@ def check_update(out: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("which", nargs="?", default="all", choices=["ui", "room", "update", "all"])
+    parser.add_argument("which", nargs="?", default="all", choices=["ui", "library", "room", "update", "all"])
     parser.add_argument("--out", default=str(Path(tempfile.gettempdir()) / "syncwatch-gui-checks"))
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    checks = {"ui": check_ui, "room": check_room, "update": check_update}
+    checks = {"ui": check_ui, "library": check_library, "room": check_room, "update": check_update}
     chosen = list(checks) if args.which == "all" else [args.which]
     results = {}
     for name in chosen:

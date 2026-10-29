@@ -28,8 +28,9 @@ os.environ["SYNCWATCH_RELAY"] = RELAY.url
 profile_dir = data_dir / "profiles" / "default"
 profile_dir.mkdir(parents=True)
 if SCRIPT != "first_launch":
-    (profile_dir / "settings.json").write_text(json.dumps(
-        {"_version": 1, "values": {"profile.name": "Alex", "ui.startup_checks": "always"}}), encoding="utf-8")
+    values = {"profile.name": "Alex", "ui.startup_checks": "always"}
+    values.update(json.loads(os.environ.get("SYNCWATCH_TEST_SETTINGS", "{}")))   # e.g. another video drawing mode
+    (profile_dir / "settings.json").write_text(json.dumps({"_version": 1, "values": values}), encoding="utf-8")
 
 from PySide6.QtCore import QPoint  # noqa: E402
 from PySide6.QtGui import QPainter, QPixmap  # noqa: E402
@@ -106,6 +107,7 @@ def run_script(errors_seen):
             shot_widget(widget, "dialog_" + widget.windowTitle().replace(" ", "_").replace(":", "")[:40])
     window.resize(1280, 760)
     spin(0.3)
+    print("PLAYER:", window.player.describe())
     shot("01_start")
     if FILM:
         window.open_film(Path(FILM))

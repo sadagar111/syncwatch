@@ -105,8 +105,14 @@ QPushButton:disabled, QToolButton:disabled {{ color: {c('text_dim')}; }}
 QToolButton::menu-indicator {{ image: none; width: 0px; }}
 QPushButton#Accent, QToolButton#Accent {{ background: {c('accent')}; color: {c('accent_text')}; border-color: {c('accent')}; }}
 QPushButton#Attention, QToolButton#Attention {{ border: 2px solid {c('warn')}; }}
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QKeySequenceEdit, QPlainTextEdit, QTextEdit, QListWidget {{
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QKeySequenceEdit, QPlainTextEdit, QTextEdit, QListWidget, QTreeWidget {{
     background: {c('input')}; border: 1px solid {c('panel_border')}; border-radius: {r}px; padding: 3px; }}
+QTreeWidget::item {{ padding: 4px 2px; }}
+QTreeWidget::item:selected {{ background: {c('button_hover')}; }}
+QHeaderView::section {{ background: {c('input')}; color: {c('text_dim')}; border: none; padding: 3px 6px; }}
+QProgressBar {{ background: {c('input')}; border: 1px solid {c('panel_border')}; border-radius: {r}px;
+    text-align: center; }}
+QProgressBar::chunk {{ background: {c('accent')}; border-radius: {r}px; }}
 QComboBox QAbstractItemView {{ background: {c('input')}; selection-background-color: {c('button_hover')}; }}
 QMenu {{ background: {c('input')}; border: 1px solid {c('panel_border')}; padding: 4px; }}
 QMenu::item {{ padding: 5px 18px; border-radius: {r}px; }}

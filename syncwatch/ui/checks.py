@@ -1,8 +1,9 @@
 """Startup checks, done in stages so a problem is pinned down to one area.
 
     1. App files     Python and library versions, settings, data folder, design files
-    2. Video         video components, formats, sound device, and a real 2-second
-                     test video played invisibly (proves films will play)
+    2. Video         video components, formats, sound device, which video player is in use
+                     (mpv, or Qt's as the fallback), and a real 2-second test video played
+                     invisibly with that player (proves films will play)
     3. Network       your addresses (home network / Tailscale) and whether the
                      hosting port is free
 
@@ -89,6 +90,16 @@ def video_checks() -> List[CheckResult]:
     return results
 
 
+def player_check(player, fallback_reason: str = "") -> CheckResult:
+    """Which video player plays films: mpv (normal), or Qt's (chosen, or because mpv failed)."""
+    if player.engine == "mpv":
+        return CheckResult("Video", "Video player", OK, player.describe())
+    if fallback_reason:
+        return CheckResult("Video", "Video player", WARN, "mpv couldn't start, using Qt's player", "SW-209",
+                           fallback_reason)
+    return CheckResult("Video", "Video player", OK, f"{player.describe()} (chosen in the settings)")
+
+
 def network_checks(relay: str) -> List[CheckResult]:
     """Network: this PC's addresses, and whether a relay server is set up for rooms.
 
@@ -110,18 +121,29 @@ def network_checks(relay: str) -> List[CheckResult]:
 
 
 class VideoSelfTest(QObject):
-    """Plays the tiny test video invisibly and reports whether a picture came out."""
+    """Plays the tiny test video invisibly and reports whether a picture came out.
+
+    ``engine`` is the player in use: "qt" plays it with Qt's player into an invisible
+    picture sink; "mpv" with a second, hidden mpv that decodes without showing anything
+    (it doesn't touch the real player, which may already be playing a film).
+    """
     finished = Signal(object)  # CheckResult
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, engine: str = "qt"):
         super().__init__(parent)
         self._done = False
+        self.engine = engine
         self.player = None
+        self.core = None
+        self._poll = None
 
     def start(self) -> None:
         if not SELFTEST_FILE.is_file():
             self._finish(CheckResult("Video", "Test video", WARN, "test file missing, skipped", "SW-111",
                                      "assets/selftest/selftest.mp4"))
+            return
+        if self.engine == "mpv":
+            self._start_mpv()
             return
         try:
             from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
@@ -147,6 +169,32 @@ class VideoSelfTest(QObject):
         if frame.isValid():
             self._finish(CheckResult("Video", "Test video", OK, "played fine"))
 
+    def _start_mpv(self) -> None:
+        from .. import mpvlib
+        try:
+            module = mpvlib.load()
+            self.core = module.MPV(vo="null", ao="null", hwdec="no", idle="yes", keep_open="yes", config="no",
+                                   load_scripts="no", ytdl="no", osc="no", input_default_bindings="no")
+            self.core.loadfile(str(SELFTEST_FILE))
+            self.core.pause = False
+        except Exception as exc:  # noqa: BLE001 - any failure here means films won't play either
+            self._finish(CheckResult("Video", "Test video", FAIL, "test video didn't play", "SW-203",
+                                     errors.describe_exception(exc)))
+            return
+        self._poll = QTimer(self)
+        self._poll.timeout.connect(self._check_mpv)
+        self._poll.start(100)
+        QTimer.singleShot(SELFTEST_TIMEOUT_MS, lambda: self._finish(
+            CheckResult("Video", "Test video", FAIL, "nothing played within 6 seconds", "SW-203", "timeout (mpv)")))
+
+    def _check_mpv(self) -> None:
+        try:
+            position = self.core.time_pos if self.core is not None else None
+        except Exception:  # noqa: BLE001 - not available yet
+            position = None
+        if position is not None and position >= 0.3:
+            self._finish(CheckResult("Video", "Test video", OK, "played fine"))
+
     def _finish(self, result: CheckResult) -> None:
         if self._done:
             return
@@ -154,5 +202,13 @@ class VideoSelfTest(QObject):
         if self.player is not None:
             self.player.stop()
             self.player.setSource(QUrl())
+        if self._poll is not None:
+            self._poll.stop()
+        if self.core is not None:
+            core, self.core = self.core, None
+            try:
+                core.terminate()
+            except Exception:  # noqa: BLE001 - it's only the test player
+                log.exception("stopping the test player")
         log.info("video self-test: %s", result.line())
         self.finished.emit(result)

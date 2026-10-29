@@ -60,8 +60,9 @@ SCHEMA: List[Setting] = [
        "Shown to friends when you watch together.", max_len=32),
 
     # ---- Playback ---------------------------------------------------------------------
-    _s("paths.movies_dir", "path", "", "Films folder", PB,
-       "Where SyncWatch looks for films. Empty means the 'movies' folder next to the app."),
+    _s("paths.movies_dir", "path", "", "Library folder", PB,
+       "Where your films are kept. Add film copies films here. Empty means the 'movies' folder "
+       "next to SyncWatch."),
     _s("playback.resume", "bool", True, "Continue where I stopped", PB,
        "When you open a film again, jump to where you were."),
     _s("playback.resume_min_s", "int", 15, "Only continue if I watched at least", PB,
@@ -78,6 +79,20 @@ SCHEMA: List[Setting] = [
     _s("playback.audio_languages", "str", "sk,cs,en", "Preferred audio languages", PB,
        "Language codes separated by commas, best first, e.g. sk,cs,en. Used to pick the audio "
        "track automatically when a film has several.", advanced=True, max_len=60),
+    _s("playback.engine", "choice", "mpv", "Video player", PB,
+       "mpv plays nearly every film. Qt is the player of SyncWatch 0.4.1 and older, kept in case "
+       "mpv doesn't work on this PC (SyncWatch also switches to it by itself then). Restart "
+       "SyncWatch after changing this.", advanced=True,
+       choices=[("mpv", "mpv (recommended)"), ("qt", "Qt (SyncWatch 0.4.1 and older)")]),
+    _s("playback.video_drawing", "choice", "auto", "How mpv draws the picture", PB,
+       "Automatic: on Windows mpv draws into its own window inside SyncWatch (the fastest). "
+       "Try OpenGL if the picture stays black or flickers. Restart SyncWatch after changing this.",
+       advanced=True,
+       choices=[("auto", "Automatic"), ("window", "mpv's own window"), ("opengl", "OpenGL")]),
+    _s("playback.hwdec", "choice", "auto-safe", "Hardware video decoding", PB,
+       "Lets the graphics card decode the film: less work for the processor and smooth 4K. "
+       "Turn it off if the picture shows coloured blocks, freezes or stutters. Only for mpv.",
+       advanced=True, choices=[("auto-safe", "Automatic"), ("no", "Off")]),
     _s("playback.volume", "int", 80, "Volume", PB, hidden=True, minimum=0, maximum=100),
     _s("playback.muted", "bool", False, "Muted", PB, hidden=True),
 
@@ -159,6 +174,8 @@ SCHEMA: List[Setting] = [
        minimum=100, maximum=3000, suffix=" ms later"),
     _s("sync.learned_jump_ms", "float", 0.0, "How long jumps take on this PC", WT, hidden=True,
        minimum=0.0, maximum=3000.0),
+    _s("sync.learned_jump_ms_mpv", "float", 0.0, "How long jumps take on this PC with mpv", WT, hidden=True,
+       minimum=0.0, maximum=3000.0),
     _s("sync.countdown_s", "int", 3, "Countdown before resuming after Sync up", WT,
        "0 = resume immediately.", advanced=True, minimum=0, maximum=10, suffix=" s"),
     _s("sync.ready_timeout_s", "float", 5.0, "Wait for slow PCs at most", WT,
@@ -224,7 +241,7 @@ SCHEMA: List[Setting] = [
     _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),
     _s("keys.sidebar", "keys", "Tab", "Show/hide sidebar", KB, advanced=True),
-    _s("keys.open", "keys", "Ctrl+O", "Open film", KB, advanced=True),
+    _s("keys.open", "keys", "Ctrl+O", "Library (your films)", KB, advanced=True),
     _s("keys.settings", "keys", "Ctrl+,", "Settings", KB, advanced=True),
     _s("keys.help", "keys", "F1", "Keyboard shortcuts", KB, advanced=True),
 
@@ -248,6 +265,9 @@ SCHEMA: List[Setting] = [
 BY_KEY: Dict[str, Setting] = {s.key: s for s in SCHEMA}
 if len(BY_KEY) != len(SCHEMA):  # pragma: no cover - caught by tests
     raise RuntimeError("duplicate setting key in SCHEMA")
+
+# Settings that only take effect after restarting SyncWatch (the window offers to restart).
+RESTART_KEYS = ("playback.engine", "playback.video_drawing")
 
 _COLOR = re.compile(r"^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$")
 

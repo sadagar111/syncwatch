@@ -1,6 +1,7 @@
 @echo off
 rem How long do jumps take on this PC? Drag a film onto this file, or:
 rem   tools\measure_jumps.bat "D:\Films\Some film.mkv"
+rem   tools\measure_jumps.bat "D:\Films\Some film.mkv" --player qt     (the fallback player)
 rem Plays the film without sound or window for about half a minute, jumps a few times,
 rem and prints a summary to send back. Nothing is saved or changed.
 setlocal
@@ -15,5 +16,5 @@ if "%~1"=="" (
   pause
   exit /b 1
 )
-"%PY%" "%~dp0measure_jumps.py" "%~1"
+"%PY%" "%~dp0measure_jumps.py" "%~1" %2 %3 %4 %5
 pause

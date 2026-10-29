@@ -16,13 +16,12 @@ from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import (QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QImage, QKeySequence,
                            QPainter, QShortcut)
-from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
-                               QMessageBox, QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import errors, log as log_module, paths
 from ..filmstate import film_key
-from ..settings import SCHEMA
+from ..settings import RESTART_KEYS, SCHEMA
 from ..sync.controller import Controller, fmt_time
 from .controls import ControlBar
 from .dialogs import error_dialog
@@ -30,8 +29,10 @@ from .dialogs.avatar_editor import choose_avatar
 from .dialogs.settings_dialog import (SettingsDialog, diagnostics_extras, profile_extras, rooms_extras,
                                       updates_extras)
 from .dialogs.subtitle_timing import SubtitleTimingDialog
+from .library_ui import LibraryController, LibraryPanel
+from . import players, winfix
 from .overlay import Overlay, SubtitleStyle
-from .player import VIDEO_EXTENSIONS, Player
+from .player import VIDEO_EXTENSIONS
 from .qtutil import asset_pixmap
 from .sidebar import FriendEntry, PersonEntry, Sidebar, WaitingEntry
 from .subtitles_ui import Subtitles
@@ -73,29 +74,28 @@ class Background(QWidget):
 
 
 class IdleScreen(QWidget):
-    """What you see before a film is open."""
-    openClicked = Signal()
+    """What you see before a film is open: your films (the library)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         logo = QLabel()
         pixmap = asset_pixmap("logo.png")
         if pixmap is not None:
-            logo.setPixmap(pixmap.scaled(160, 160, Qt.AspectRatioMode.KeepAspectRatio,
+            logo.setPixmap(pixmap.scaled(96, 96, Qt.AspectRatioMode.KeepAspectRatio,
                                          Qt.TransformationMode.SmoothTransformation))
         logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint = QLabel("Open a film, or drop a film file here.")
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.library = LibraryPanel()
+        self.hint = QLabel("Tip: drop a film file here to play it straight away, without adding it to the library.")
+        self.hint.setObjectName("Hint")
         self.hint.setWordWrap(True)
-        button = QPushButton("📂  Open a film")
-        button.setObjectName("Accent")
-        button.clicked.connect(self.openClicked)
-        layout = QVBoxLayout(self)
-        layout.addStretch(1)
-        layout.addWidget(logo)
-        layout.addWidget(self.hint)
-        layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addStretch(1)
+        column = QWidget()
+        column.setMaximumWidth(760)
+        column_layout = QVBoxLayout(column)
+        column_layout.addWidget(logo)
+        column_layout.addWidget(self.library, 1)
+        column_layout.addWidget(self.hint)
+        layout = QHBoxLayout(self)
+        layout.addWidget(column, 1)
 
 
 class MainWindow(QMainWindow):
@@ -115,11 +115,9 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         self.inbox: "queue.Queue[dict]" = queue.Queue()
-        self.player = Player(self)
-        self.controller = Controller(self.player, self, self.settings, self.inbox.put, context.rooms)
+        self.player = players.create(self.settings, self)   # mpv, or Qt's player as the fallback
         self.subtitles = Subtitles(self.settings, self.films, context.profile.cache_dir, self)
         self.avatar: Optional[bytes] = context.avatar
-        self.controller.set_profile(self.settings.get("profile.name"), self.avatar)
 
         self._film_key = ""
         self._last_resume_save = 0.0
@@ -134,7 +132,11 @@ class MainWindow(QMainWindow):
         self._avatars: dict = {}   # key id -> picture of people met in rooms (for the friends list)
         self.settings_dialog_refresh = None  # set while the settings window is open
 
-        self._build()
+        self._build()   # also starts the player (and switches to Qt's if mpv can't start)
+        self.controller = Controller(self.player, self, self.settings, self.inbox.put, context.rooms)
+        self.controller.set_profile(self.settings.get("profile.name"), self.avatar)
+        self.library = LibraryController(self)
+        self.library.attach(self.idle.library)
         self._wire()
         self._apply_all_settings()
         self._restore_geometry()
@@ -163,14 +165,12 @@ class MainWindow(QMainWindow):
         self.background = Background(theme)
         self.setCentralWidget(self.background)
 
-        self.video = QVideoWidget()
-        self.video.setStyleSheet(f"background: {theme.colors['video_background'][:7]};")
-        self.player.mp.setVideoOutput(self.video)
-        self.player.attach_sink(self.video.videoSink())
         self.idle = IdleScreen()
         self.stack = QStackedWidget()
         self.stack.addWidget(self.idle)
-        self.stack.addWidget(self.video)
+        self.video: Optional[QWidget] = None
+        self._place_video(self.player)
+        self.player = players.start_or_fallback(self.player, self._place_video, self)
 
         self.controls = ControlBar(theme.colors)
         left = QWidget()
@@ -195,6 +195,14 @@ class MainWindow(QMainWindow):
         self.overlay = Overlay(self)
         QApplication.instance().installEventFilter(self)
 
+    def _place_video(self, player) -> None:
+        """Put the player's picture into the video area (replacing a previous player's)."""
+        if self.video is not None:
+            self.stack.removeWidget(self.video)
+            self.video.deleteLater()
+        self.video = player.video_widget(self.ctx.theme.colors["video_background"][:7], self.stack)
+        self.stack.addWidget(self.video)
+
     def _wire(self) -> None:
         c, p, ui = self.controller, self.player, self.controls
         ui.playClicked.connect(c.toggle)
@@ -208,11 +216,10 @@ class MainWindow(QMainWindow):
         ui.fullscreenClicked.connect(self.toggle_fullscreen)
         ui.sidebarClicked.connect(self.toggle_sidebar)
         ui.settingsClicked.connect(self.open_settings)
-        ui.openClicked.connect(self.open_dialog)
+        ui.openClicked.connect(self.open_library)
         ui.seek.seekRequested.connect(c.seek)
         ui.seek.previewChanged.connect(lambda ms: ui.time_label.setText(fmt_time(ms)))
         ui.subs_menu.aboutToShow.connect(self._build_subs_menu)
-        self.idle.openClicked.connect(self.open_dialog)
 
         room = self.sidebar.room
         room.hostClicked.connect(self._host)
@@ -245,6 +252,7 @@ class MainWindow(QMainWindow):
         self.settings.subscribe("log.debug", lambda k, v: log_module.set_debug(bool(v)))
         self.settings.subscribe("profile.name", lambda k, v: self._profile_changed())
         self.settings.subscribe("sync.gap_refresh_s", lambda k, v: self._set_gap_rate())
+        self.settings.subscribe("playback.hwdec", lambda k, v: self.player.set_hwdec(v))
 
     def _apply_all_settings(self) -> None:
         self._apply_subtitle_style()
@@ -427,28 +435,18 @@ class MainWindow(QMainWindow):
         return paths.movies_dir(self.settings.get("paths.movies_dir"))
 
     def pick_startup_film(self) -> None:
-        folder = self.movies_dir()
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            films = sorted(p for p in folder.iterdir() if p.suffix.lower() in VIDEO_EXTENSIONS and p.is_file())
-        except OSError:
-            films = []
-        if len(films) == 1:
-            self.open_film(films[0])
-        elif films:
-            names = [f.name for f in films]
-            name, ok = QInputDialog.getItem(self, "Pick a film", "Which film?", names, 0, False)
-            if ok:
-                self.open_film(folder / name)
-        else:
-            self.idle.hint.setText(f"Put a film into {folder} or click Open. You can also drop a film file here.")
+        """At startup without a film to open: the start screen shows the library."""
+        self.library.refresh()
 
-    def open_dialog(self) -> None:
-        patterns = " ".join(f"*{ext}" for ext in VIDEO_EXTENSIONS)
-        path, _ = QFileDialog.getOpenFileName(self, "Open a film", str(self.movies_dir()),
-                                              f"Films ({patterns});;All files (*)")
-        if path:
-            self.open_film(Path(path))
+    def open_library(self) -> None:
+        """📂 / Ctrl+O: the start screen's list when no film is open (or Add film if it's empty),
+        else the Library window."""
+        if self.stack.currentWidget() is not self.idle:
+            self.library.open_dialog()
+        elif self.idle.library.tree.topLevelItemCount():
+            self.idle.library.tree.setFocus()
+        else:
+            self.library.add_film()
 
     def open_film(self, path: Path) -> None:
         self._save_resume(force=True)
@@ -462,6 +460,17 @@ class MainWindow(QMainWindow):
             self.stack.setCurrentWidget(self.video)
             self.subtitles.film_opened(path, self._film_key)
             self.controller.set_film(path.name, size, 0)
+
+    def close_film(self) -> None:
+        """Close the open film (e.g. before it's removed from the library): back to the start screen."""
+        self._save_resume(force=True)
+        self.player.unload()
+        self.subtitles.film_closed()
+        self._film_key = ""
+        self.setWindowTitle("SyncWatch")
+        self.stack.setCurrentWidget(self.idle)
+        self.controller.set_film("", 0, 0)
+        self._refresh_soon()
 
     def _film_loaded(self) -> None:
         path = self.player.path
@@ -762,10 +771,15 @@ class MainWindow(QMainWindow):
             "Updates": updates_extras(self.updates, self),
             "Diagnostics": diagnostics_extras(self.ctx.profile.logs_dir, self.copy_report, self.ctx.rerun_checks),
         }
+        before = {key: self.settings.get(key) for key in RESTART_KEYS}
         dialog = SettingsDialog(self.settings, extras, self)
         dialog.exec()
         self.settings_dialog_refresh = None
         self.settings.save_if_dirty()
+        if any(self.settings.get(key) != value for key, value in before.items()) and self._confirm(
+                "Restart SyncWatch?", "The video player changes the next time SyncWatch starts. "
+                                      "Restart it now?", "Restart now"):
+            self.request_restart()
 
     def _change_avatar(self) -> None:
         data = choose_avatar(self)
@@ -811,7 +825,7 @@ class MainWindow(QMainWindow):
             "keys.subs_earlier": lambda: self._nudge_subs(-1),
             "keys.subs_later": lambda: self._nudge_subs(1),
             "keys.sidebar": self.toggle_sidebar,
-            "keys.open": self.open_dialog,
+            "keys.open": self.open_library,
             "keys.settings": self.open_settings,
             "keys.help": self.toggle_help,
         }
@@ -857,7 +871,11 @@ class MainWindow(QMainWindow):
             self.settings.set("ui.sidebar", not self.settings.get("ui.sidebar"))
 
     def toggle_fullscreen(self) -> None:
+        # Windows hides the overlay (subtitles!) behind a fullscreen OpenGL window without a border.
+        border_fix = getattr(self.player, "video_output", "") == "opengl"
         if self.isFullScreen():
+            if border_fix:
+                winfix.set_border(int(self.winId()), False)
             self.showMaximized() if self._was_maximized else self.showNormal()
             self.controls.setVisible(True)
             self.sidebar.setVisible(self.settings.get("ui.sidebar"))
@@ -865,6 +883,8 @@ class MainWindow(QMainWindow):
         else:
             self._was_maximized = self.isMaximized()
             self.showFullScreen()
+            if border_fix:
+                winfix.set_border(int(self.winId()), True)
             self.sidebar.setVisible(bool(self.settings.get("ui.sidebar_in_fullscreen")))
             self._last_mouse_move = time.monotonic()
         self.controls.set_fullscreen(self.isFullScreen())
@@ -948,7 +968,9 @@ class MainWindow(QMainWindow):
         self.settings.save()
         self.films.save_if_dirty()
         self.subtitles.stop()
+        self.library.shutdown()
         self.controller.shutdown()
+        self.player.shutdown()
         self._show_cursor(True)
         errors.set_handler(None)
         self.overlay.close()
