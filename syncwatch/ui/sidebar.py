@@ -72,6 +72,7 @@ class RoomPanel(Panel):
     def __init__(self, last_code: str = "", parent=None):
         super().__init__("Room", parent)
         self.status = QLabel("Not in a room")
+        self.status.setTextFormat(Qt.TextFormat.PlainText)   # has the host's name in it
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
 

@@ -48,6 +48,12 @@ MAX_WAITING = 25            # more waiting at once is spam: they get "the host i
 KNOCKS_PER_MIN = 6
 PING_FAST_S, PING_SLOW_S, FAST_PING_FOR_S = 2.0, 10.0, 20.0
 CLOCK_SAMPLES = 8
+# The host answers others, so a flood of messages from one person could become a flood from the
+# host, and the relay then drops the host's own messages (everyone's sync). These keep the host's
+# answers few, however much arrives.
+PING_ANSWER_GAP_S = 0.5      # members ping every 2-10 s
+MEMBERS_SOON_S = 1.0         # name changes: one member list per second at most
+DENIES_PER_S, DENY_BURST = 5.0, 10.0
 
 HOST_ONLY = {"members", "close", "state", "cmd", "reject", "sync_prepare", "sync_go", "sync_abort", "pong"}
 MEMBERS_ONLY = {"req", "sync_ready", "ping", "bye"}     # only for the host (statuses everyone sees)
@@ -63,6 +69,7 @@ class Member:
     joined: float = 0.0       # (monotonic clock)
     last_seen: float = 0.0
     session: str = ""
+    last_ping_answer: float = -1e9
 
     @property
     def id(self) -> bytes:
@@ -157,6 +164,7 @@ class RoomSession:
         self.challenge = b""
         self._used_nonces: Deque[bytes] = collections.deque(maxlen=512)
         self._knock_times: Dict[bytes, Deque[float]] = {}
+        self._deny_tokens, self._deny_time = DENY_BURST, 0.0
         self._last_card = -1e9
         self._last_members = 0.0
         self._last_recent = 0.0
@@ -346,7 +354,12 @@ class RoomSession:
     def _send_direct(self, to: PublicIdentity, kind: str, **fields) -> bool:
         if self.keys is None:
             return False
-        return self._send(crypto.pack_direct(self.keys.channel, to, self.me, self._body(kind, **fields)))
+        try:
+            data = crypto.pack_direct(self.keys.channel, to, self.me, self._body(kind, **fields))
+        except ValueError as exc:   # a key nobody can encrypt to (see crypto.usable_dh), or too big
+            log.warning("not sending %s to %s: %s", kind, to.short_id, exc)
+            return False
+        return self._send(data)
 
     def send_to(self, key_id: bytes, kind: str, **fields) -> bool:
         """A direct message to one person in the room (e.g. a friend request)."""
@@ -428,7 +441,7 @@ class RoomSession:
 
     def _on_card(self, sender: bytes, body: Dict) -> None:
         key = PublicIdentity(sender, body["dh"])
-        if self.code is None or key.key_id != self.code.host_commit:
+        if self.code is None or key.key_id != self.code.host_commit or not crypto.usable_dh(key.dh_pub):
             if sender not in self._warned_impostors:
                 self._warned_impostors.add(sender)
                 log.warning("someone who isn't the host sent a room card (%s)", key.short_id)
@@ -552,6 +565,8 @@ class RoomSession:
             if key == self.me.public:
                 new[key.key_id] = self.members.get(key.key_id) or Member(key, self.my_name(), is_me=True, joined=now)
                 continue
+            if not crypto.usable_dh(key.dh_pub):
+                continue
             old = self.members.get(key.key_id)
             member = old if old is not None and old.key == key else Member(key, entry["name"], joined=now,
                                                                             last_seen=now)
@@ -593,7 +608,9 @@ class RoomSession:
             if kind == "bye":
                 self._remove(member, "left")
             elif kind == "ping":
-                self.send_room("pong", id=body["id"], to=b64(member.id), at=self.host_clock_ms(now))
+                if now - member.last_ping_answer >= PING_ANSWER_GAP_S:
+                    member.last_ping_answer = now
+                    self.send_room("pong", id=body["id"], to=b64(member.id), at=self.host_clock_ms(now))
             else:
                 self.listener.room_message(member, body)
             return
@@ -634,6 +651,9 @@ class RoomSession:
         try:
             key = PublicIdentity(sender, body["dh"])
         except ValueError:
+            return
+        if not crypto.usable_dh(key.dh_pub):
+            log.warning("ignored a knock with a key nobody can encrypt to (%s)", key.short_id)
             return
         times = self._knock_times.setdefault(key.key_id, collections.deque(maxlen=KNOCKS_PER_MIN))
         if len(times) == KNOCKS_PER_MIN and now - times[0] < 60:
@@ -714,6 +734,12 @@ class RoomSession:
         return True
 
     def _deny(self, knock: Knock, reason: str) -> None:
+        now = self.clock()
+        self._deny_tokens = min(DENY_BURST, self._deny_tokens + (now - self._deny_time) * DENIES_PER_S)
+        self._deny_time = now
+        if self._deny_tokens < 1:
+            return  # a flood of knocks: not everyone gets an answer
+        self._deny_tokens -= 1
         self._send_direct(knock.key, "deny", nonce=b64(knock.nonce), reason=reason)
 
     def _admit(self, *knocks: Knock) -> None:
@@ -797,13 +823,17 @@ class RoomSession:
             me.name = self.my_name()
         if self.role == HOST:
             self.room_name = f"{self.my_name()}'s room"
-            self.send_room("members", no=self.epoch_no, list=self._member_list())
+            self._members_soon()
 
     def rename_member(self, member: Member, name: str) -> None:
         """A member's profile message had a new name (the host passes it on in the member list)."""
         if self.role == HOST and member.name != name:
             member.name = name
-            self.send_room("members", no=self.epoch_no, list=self._member_list())
+            self._members_soon()
+
+    def _members_soon(self) -> None:
+        """Send the member list within a second (however many names change meanwhile)."""
+        self._last_members = min(self._last_members, self.clock() - MEMBERS_EVERY_S + MEMBERS_SOON_S)
 
     # ================================================================ timers
     def tick(self) -> None:

@@ -131,6 +131,8 @@ def check_relay_address(address: str) -> str:
     scheme, host = match.group(1), match.group(2).lower()
     if scheme == "http" and host not in _LOCAL_HOSTS:
         raise CodeError("relay addresses must start with https://")
+    if match.group(3) and not 0 < int(match.group(3)[1:]) <= 65535:
+        raise CodeError("the relay address in the code has an impossible port number")
     return address.rstrip("/")
 
 

@@ -242,8 +242,13 @@ class ReleaseToolTests(unittest.TestCase):
         self.assertIn("_root/README.txt", app)
         self.assertIn("syncwatch/__main__.py", app)
         self.assertIn("tools/remove_firewall.bat", app)
+        self.assertIn("tools/Test with two windows.bat", app)
+        self.assertIn("syncwatch/room/session.py", app)
+        self.assertIn("syncwatch/net/relay_url.py", app)
         self.assertNotIn("tools/release.py", app)
         self.assertNotIn("tools/local_relay.py", app)
+        self.assertNotIn("tools/bots.py", app)          # testing tools stay in the Git folder
+        self.assertFalse(any("__pycache__" in n for n in app))
         self.assertFalse(any(n.startswith("relay/") for n in app))
         self.assertFalse(any(n.startswith("tests/") for n in app))
         full = zipfile.ZipFile(out_dir / "SyncWatch-0.3.0-windows.zip").namelist()

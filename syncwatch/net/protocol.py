@@ -57,6 +57,10 @@ class ListOf:
 Spec = Dict[str, Tuple[Any, bool, Any]]
 
 _HEX = re.compile(r"^[0-9a-f]*$")
+# Characters that are invisible or turn the following text around: removed from received text,
+# so a name can't hide, look like someone else's, or flip the rest of a line ("\u202e").
+# (Zero-width joiners stay: emoji and some scripts need them.)
+INVISIBLE = frozenset("\u061c\u200b\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2060\u2066\u2067\u2068\u2069\ufeff")
 
 NAME = (str, True, 32)
 KEY = (B64(32), True, None)
@@ -179,7 +183,10 @@ def _check_value(name: str, value: Any, kind: Any, limit: Any) -> Any:
             raise BadMessage(f"{name}: expected text")
         if len(value) > limit:
             raise BadMessage(f"{name}: too long")
-        return "".join(ch for ch in value if ch >= " " or ch == "\t").replace("\x7f", "")
+        # Control characters out; so are lone UTF-16 halves ("\ud800"), which can't be written to
+        # files or logs as UTF-8, and the invisible characters above.
+        return "".join(ch for ch in value if (ch >= " " or ch == "\t") and ch != "\x7f"
+                       and not "\ud800" <= ch <= "\udfff" and ch not in INVISIBLE)
     raise BadMessage(f"{name}: bad spec")  # pragma: no cover
 
 

@@ -32,6 +32,7 @@ ROOM_EXPIRES_S = 12 * 60
 MAX_CLOCK_SKEW_S = 10 * 60
 REQUEST_EXPIRES_S = 10 * 60
 MAIL_KINDS = {"hosting", "hosting_end", "who_hosts", "unfriend", "friend_ok"}
+ANSWER_GAP_S = 20.0          # "anyone hosting?" from the same friend: answered at most this often
 
 
 @dataclass
@@ -74,6 +75,7 @@ class Friends:
         self.outgoing: Dict[bytes, Tuple[PublicIdentity, float]] = {}   # requests I sent
         self.hosting: Optional[Tuple[RoomCode, str]] = None
         self.guard = crypto.ReplayGuard()
+        self._answered: Dict[bytes, float] = {}
         self.session_id = os.urandom(8).hex()
         self._seq = 0
         self._gen = 0
@@ -141,7 +143,8 @@ class Friends:
                     key = PublicIdentity(opened.sender, body["dh"])
                 except ValueError:
                     return
-                self._accepted(key, body)
+                if crypto.usable_dh(key.dh_pub):
+                    self._accepted(key, body)
             return
         if not self.guard.accept(opened.sender, body["s"], body["n"]):
             return
@@ -166,7 +169,10 @@ class Friends:
             if self.rooms.pop(key_id, None) is not None:
                 self.listener.friends_changed("rooms")
         elif kind == "who_hosts":
-            if self.hosting is not None and self.settings.get("friends.announce"):
+            now = self.clock()
+            if self.hosting is not None and self.settings.get("friends.announce") and \
+                    now - self._answered.get(key_id, -1e9) >= ANSWER_GAP_S:
+                self._answered[key_id] = now
                 self._post(friend, "hosting", code=self.hosting[0].text(), room=self.hosting[1], ts=self.wall())
         elif kind == "unfriend":
             self.store.remove_friend(key_id)
@@ -186,7 +192,11 @@ class Friends:
         relay = self._relay or (self.relay_for(self.default_relay()) if self.default_relay() else None)
         if relay is None:
             return False
-        data = crypto.pack_direct(bytes.fromhex(mailbox), key, self.me, self._body(kind, **fields))
+        try:
+            data = crypto.pack_direct(bytes.fromhex(mailbox), key, self.me, self._body(kind, **fields))
+        except ValueError as exc:   # a key nobody can encrypt to (see crypto.usable_dh)
+            log.warning("not posting %s: %s", kind, exc)
+            return False
         return relay.post_later(mailbox, data)
 
     # ================================================================ hosting

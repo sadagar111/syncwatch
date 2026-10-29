@@ -150,7 +150,22 @@ def _direct_key(shared: bytes, ephemeral_pub: bytes, recipient_dh: bytes, channe
     return hkdf(shared, b"SyncWatch direct v1", ephemeral_pub + recipient_dh + channel)
 
 
+_PROBE = X25519PrivateKey.generate()
+
+
+def usable_dh(dh_pub: bytes) -> bool:
+    """Whether messages can be encrypted to this key. A few special values ("low order points")
+    make every shared secret zero; nobody's real key is one of them, so whoever sends one is
+    up to no good, and sending to it would fail."""
+    try:
+        _PROBE.exchange(X25519PublicKey.from_public_bytes(dh_pub))
+        return True
+    except Exception:
+        return False
+
+
 def pack_direct(channel: bytes, recipient: PublicIdentity, sender: Identity, body: Dict[str, Any]) -> bytes:
+    """Raises ValueError for a body that's too big or a recipient key nobody can encrypt to."""
     ephemeral = X25519PrivateKey.generate()
     ephemeral_pub = ephemeral.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     shared = ephemeral.exchange(X25519PublicKey.from_public_bytes(recipient.dh_pub))
@@ -194,8 +209,8 @@ def _unseal(key: bytes, data: bytes, kind: int, channel: bytes) -> Opened:
         raise BadEnvelope("bad signature") from None
     try:
         body = json.loads(body_bytes.decode("utf-8"), parse_constant=_no_constants)
-    except (UnicodeDecodeError, ValueError) as exc:
-        raise BadEnvelope(f"not JSON: {exc}") from None
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:   # (RecursionError: nested 30,000 deep)
+        raise BadEnvelope(f"not JSON: {type(exc).__name__}") from None
     if not isinstance(body, dict) or not isinstance(body.get("t"), str):
         raise BadEnvelope("not a message object")
     return Opened(kind, header[2:2 + KEY_FIELD], sender, body)

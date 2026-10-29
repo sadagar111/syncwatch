@@ -206,4 +206,14 @@ because everything is signed and checked.
   sees the request and can block them, switch to *Only friends*, or make a new code).
 - Flood the relay channel: the relay limits each connection, and apps drop
   anything that doesn't open with a key they hold before doing any other work.
+  The host answers each person only a little (refusals, pongs, member lists,
+  "please wait"), so a flood never turns into a flood from the host, which the
+  relay would then cut, taking everyone's sync with it.
+- Fill the channel's 32 connections, so nobody else can connect (SW-404). Or
+  fill the waiting list with requests. Both end with **New code**.
 - Without a code: nothing. Channels are 128-bit random names.
+
+Someone let into the room can additionally send anything a modified app can
+make: `tests/test_fuzz.py` does exactly that (random and broken messages of
+every kind, junk JSON, keys nobody can encrypt to, floods) and checks that
+nobody's app stumbles, nobody takes over, and the room keeps working.

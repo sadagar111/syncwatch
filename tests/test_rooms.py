@@ -175,6 +175,20 @@ class WatchingTests(RoomTestCase):
         self.assertTrue(self.pump(until=lambda: all(abs(p.player.position() - 300_000) < 2000
                                                     for p in self.everyone())))
 
+    def test_a_members_jump_while_playing_keeps_them_together(self):
+        """Marek's jump reaches the host only after the skipping stops (debounce): by then his
+        film has played on from the jump, so the host must jump to where he is, not where he
+        jumped to, or Marek stays ahead of everyone by the debounce time."""
+        marek, kuba = self.guests
+        self.alex.c.play()
+        self.assertTrue(self.pump(until=lambda: all(g.player.playing for g in self.guests)))
+        self.pump(0.5)
+        marek.c.seek(900_000)
+        self.assertTrue(self.pump(until=lambda: abs(self.alex.player.position() - 900_000) < 5000))
+        self.pump(1.5)
+        for guest in (marek, kuba):
+            self.assertLess(abs(guest.player.position() - self.alex.player.position()), 150, guest.name)
+
     def test_host_only_mode(self):
         marek = self.guests[0]
         self.alex.settings.set("sync.host_only", True)
@@ -364,6 +378,8 @@ class ResilienceTests(RoomTestCase):
         self.assertTrue(self.pump(until=lambda: "SW-415" in late.ui.problems()))
 
     def test_relay_restart(self):
+        if not hasattr(self.room.relay, "drop_all"):
+            self.skipTest("restarting the relay needs the one on this PC (tools/local_relay.py)")
         alex, marek = self.room.person("Alex"), self.room.person("Marek")
         self.room.let_in(alex, marek)
         alex.c.play()

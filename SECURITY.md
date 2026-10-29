@@ -56,8 +56,14 @@ The full room design, with message formats and keys, is in [docs/ROOMS.md](docs/
   visible to everyone in the room.
 - **Strict parsing:** every message body is checked against a table of allowed types, fields,
   sizes and ranges (`syncwatch/net/protocol.py`) before use; unknown or malformed messages are
-  dropped. Profile pictures: at most 40 KB, PNG or JPEG only, at most 512 px (checked before Qt
-  decodes the pixels).
+  dropped. Received text loses control characters, lone UTF-16 halves and invisible or
+  direction-changing characters (so a name can't hide or flip the text after it), and is never
+  shown as HTML. Profile pictures: at most 40 KB, PNG or JPEG only, at most 512 px (checked
+  before Qt decodes the pixels). `tests/test_fuzz.py` throws random and hostile data at all of
+  this, including from someone inside the room.
+- **Floods:** the relay limits every connection; the host answers each person only a little
+  (one refusal or pong per second, member lists at most once a second, refusals to strangers
+  5 a second), so nobody can make the host flood the room.
 - **Friends** find each other's rooms through *mailboxes*: relay channels only friends know. Mailbox
   messages are sealed to the recipient, signed, and dropped unless they're signed with a friend's
   key and carry a time within 10 minutes of the receiver's clock (the one exception: the answer to a

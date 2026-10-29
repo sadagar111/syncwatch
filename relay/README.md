@@ -28,6 +28,7 @@ npm ci
 npx wrangler dev --port 8787
 ```
 
-Then `SYNCWATCH_TEST_RELAY=http://127.0.0.1:8787 python -m unittest tests.test_relay.RelayConformance`
-from the project folder checks it. `tools/local_relay.py` is a Python copy of the
+Then `SYNCWATCH_TEST_RELAY=http://127.0.0.1:8787 python -m unittest tests.test_relay.RelayConformance tests.test_rooms`
+from the project folder checks it, the second part with whole rooms of simulated people
+(GitHub does the same for every change to the relay or the room code). `tools/local_relay.py` is a Python copy of the
 same behaviour that needs nothing installed (used by the normal tests).
