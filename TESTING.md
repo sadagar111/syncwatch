@@ -1,3 +1,28 @@
+# Test checklist for 0.5 (YouTube together), branch `try/0.5-youtube`
+
+Nothing here could be tried with the real YouTube from where it was built (YouTube is blocked
+there); GitHub's machines try it on every run (see the notes on the checks page). So this list
+is the real test.
+
+## Y1. On your PC
+- [ ] `git fetch` then `git switch try/0.5-youtube`, double-click `SyncWatch.bat`: it installs yt-dlp and
+      Deno once (about 45 MB). The startup checks show **YouTube: yt-dlp 2026.10.26 with Deno**
+- [ ] Start screen → YouTube → paste a link → **Watch**: the video opens within a few seconds, with sound
+- [ ] The same with a youtu.be link, a Shorts link and a link with `&t=1m30s` (starts at 1:30)
+- [ ] Ctrl+L while a film plays: a small window for the link. Ctrl+V outside text fields: opens the link
+      in the clipboard. Drag a video's link from the browser onto SyncWatch: it opens
+- [ ] Jump around, pause, play: as smooth as with a film? Settings → YouTube → *Quality* 720p / 4K: does it change?
+- [ ] An age-restricted video: **SW-603** with a plain explanation. A private or deleted one: **SW-602**
+
+## Y2. Together (two PCs, or two windows with `--profile`)
+- [ ] Host a room, the other joins. The host pastes a link: the other opens the same video by
+      itself and lines up (People list: *in sync*)
+- [ ] Play, pause, jumps, Sync up: same as with films
+- [ ] The guest clicks *Following the room* (→ *On my own*): a new video from the host doesn't open for them
+- [ ] The host switches to another video: everyone follows
+
+---
+
 # Test checklist for 0.4.2 (mpv and the film library)
 
 Send me error codes with **Copy details**, or **Settings → Diagnostics → Copy report**.

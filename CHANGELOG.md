@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 (in progress: YouTube together)
+**Watch YouTube together**
+- Paste a YouTube link on the start screen (or press Ctrl+L, or Ctrl+V anywhere, or drag a link from your browser onto SyncWatch). Watch links, youtu.be, Shorts and `&t=` start times all work.
+- In a room, when the host plays a YouTube video, everyone who follows the host opens it too and lines up with the host. Play, pause, jumps, Sync up and Sync me work as with films.
+- No ads: SyncWatch plays YouTube's video streams directly with mpv (through yt-dlp). Quality up to 1080p by default (Settings > YouTube > Quality, up to 4K).
+- Nothing to install: yt-dlp and Deno (which yt-dlp needs for YouTube) come with SyncWatch. That makes this update about 45 MB bigger (once).
+- New problems with plain explanations: SW-601 to SW-609 (e.g. "YouTube wants a sign-in for this video", "YouTube changed something: update SyncWatch").
+
 ## 0.4.2 (new video player, and your film library)
 **A new video player: mpv**
 - Films now play with **mpv**, which handles practically every film, including AC3, E-AC3 and DTS sound that didn't always play before.

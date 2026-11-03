@@ -46,13 +46,19 @@ class Hex:
 
 
 @dataclass(frozen=True)
+class Pattern:
+    """Text that must match ``regex`` completely (e.g. a YouTube video ID)."""
+    regex: str
+
+
+@dataclass(frozen=True)
 class ListOf:
     item: Any
     max_items: int
 
 
 # field name -> (kind, required, limit)
-#   kind: str/int/float/bool, a tuple of allowed values, a nested spec (dict), B64, Hex, ListOf
+#   kind: str/int/float/bool, a tuple of allowed values, a nested spec (dict), B64, Hex, Pattern, ListOf
 #   limit: max length for str, (min, max) for numbers
 Spec = Dict[str, Tuple[Any, bool, Any]]
 
@@ -68,8 +74,10 @@ NONCE = (B64(16), True, None)
 SEQ = (int, True, (0, MAX_CLOCK))
 CLOCK = (int, True, (0, MAX_CLOCK))
 POS = (int, True, (0, MAX_POSITION_MS))
+YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}")
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
-              "dur": (int, False, (0, MAX_POSITION_MS))}
+              "dur": (int, False, (0, MAX_POSITION_MS)),
+              "yt": (YOUTUBE_ID, False, None)}   # since 0.5: a YouTube video instead of a file
 RULES: Spec = {"host_only": (bool, True, None), "cd_pp": (float, False, (0, 3600)),
                "cd_sync": (float, False, (0, 3600)),
                "jump": (("together", "ahead"), False, None)}   # since 0.4.1
@@ -153,6 +161,10 @@ def _check_value(name: str, value: Any, kind: Any, limit: Any) -> Any:
         if len(data) != kind.size:
             raise BadMessage(f"{name}: expected {kind.size} bytes")
         return data
+    if isinstance(kind, Pattern):
+        if not isinstance(value, str) or len(value) > 200 or not re.fullmatch(kind.regex, value):
+            raise BadMessage(f"{name}: unexpected text")
+        return value
     if isinstance(kind, Hex):
         if not isinstance(value, str) or len(value) != kind.chars or not _HEX.match(value):
             raise BadMessage(f"{name}: expected {kind.chars} hex characters")

@@ -25,7 +25,7 @@ log = logging.getLogger("syncwatch.settings")
 
 FILE_VERSION = 1
 
-SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "Interface",
+SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Interface",
             "Keyboard", "Updates", "Diagnostics"]
 
 
@@ -52,7 +52,7 @@ def _s(*args, **kwargs) -> Setting:
     return Setting(*args, **kwargs)
 
 
-P, PB, SB, WT, UI, KB, UP, DG = SECTIONS
+P, PB, SB, WT, YT, UI, KB, UP, DG = SECTIONS
 
 SCHEMA: List[Setting] = [
     # ---- Profile ----------------------------------------------------------------------
@@ -196,6 +196,26 @@ SCHEMA: List[Setting] = [
     _s("sync.compensate_latency", "bool", True, "Compensate for network delay", WT, advanced=True),
     _s("room.last_code", "str", "", "Last room code", WT, hidden=True, max_len=600),
 
+    # ---- YouTube (from 0.5) -----------------------------------------------------------
+    _s("youtube.quality", "choice", "1080", "Quality", YT,
+       "The highest picture quality SyncWatch asks YouTube for. Lower it if videos stutter or your "
+       "internet is slow. Qt's player (advanced, Playback) only gets up to 720p.",
+       choices=[("360", "360p"), ("480", "480p"), ("720", "720p (HD)"), ("1080", "1080p (Full HD)"),
+                ("1440", "1440p"), ("2160", "2160p (4K)")]),
+    _s("youtube.follow_host", "bool", True, "Open the videos the host plays", YT,
+       "In a room, when the host plays a YouTube video, it opens for you too (unless you're watching "
+       "on your own)."),
+    _s("youtube.codecs", "choice", "compatible", "Video formats", YT,
+       "Most compatible avoids AV1, which older PCs can't decode smoothly. Any also allows AV1: a bit "
+       "sharper for the same internet speed, but needs a newer PC or graphics card.", advanced=True,
+       choices=[("compatible", "Most compatible (no AV1)"), ("any", "Any (AV1 too)")]),
+    _s("youtube.timeout_s", "int", 45, "Give up finding a video after", YT,
+       "How long SyncWatch waits for YouTube's answer before it reports a problem.", advanced=True,
+       minimum=10, maximum=300, suffix=" s"),
+    _s("youtube.js_runtime", "path", "", "Deno program", YT,
+       "yt-dlp needs a JavaScript program to read YouTube's pages: Deno, which comes with SyncWatch. "
+       "Only set this to use another deno.exe. Empty means the one inside SyncWatch.", advanced=True),
+
     # ---- Interface --------------------------------------------------------------------
     _s("ui.show_advanced", "bool", False, "Show advanced options", UI),
     _s("ui.settings_help_inline", "bool", False, "Show explanations under the settings", UI,
@@ -242,6 +262,7 @@ SCHEMA: List[Setting] = [
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),
     _s("keys.sidebar", "keys", "Tab", "Show/hide sidebar", KB, advanced=True),
     _s("keys.open", "keys", "Ctrl+O", "Library (your films)", KB, advanced=True),
+    _s("keys.youtube", "keys", "Ctrl+L", "Open a YouTube link", KB, advanced=True),
     _s("keys.settings", "keys", "Ctrl+,", "Settings", KB, advanced=True),
     _s("keys.help", "keys", "F1", "Keyboard shortcuts", KB, advanced=True),
 

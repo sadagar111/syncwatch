@@ -37,6 +37,8 @@ from .qtutil import asset_pixmap
 from .sidebar import FriendEntry, PersonEntry, Sidebar, WaitingEntry
 from .subtitles_ui import Subtitles
 from .updates_ui import UpdateController
+from .youtube_ui import LinkBox, LinkDialog, YouTube
+from ..youtube import links as youtube_links
 
 log = logging.getLogger("syncwatch.window")
 
@@ -95,7 +97,22 @@ class IdleScreen(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(18, 16, 18, 14)
         card_layout.addWidget(self.library)
-        self.hint = QLabel("Tip: drop a film file here to play it straight away, without adding it to the library.")
+        youtube_card = QFrame()
+        youtube_card.setObjectName("Card")
+        youtube_title = QLabel("YouTube")
+        youtube_title.setObjectName("LibraryTitle")
+        youtube_note = QLabel("Watch a YouTube video. In a room, everyone who follows the host opens it too.")
+        youtube_note.setObjectName("Dim")
+        youtube_note.setWordWrap(True)
+        self.youtube_box = LinkBox()
+        youtube_layout = QVBoxLayout(youtube_card)
+        youtube_layout.setContentsMargins(18, 14, 18, 14)
+        youtube_layout.setSpacing(6)
+        youtube_layout.addWidget(youtube_title)
+        youtube_layout.addWidget(youtube_note)
+        youtube_layout.addWidget(self.youtube_box)
+        self.hint = QLabel("Tip: drop a film file (or a YouTube link from your browser) here to play it straight "
+                           "away, without adding it to the library.")
         self.hint.setObjectName("Hint")
         self.hint.setWordWrap(True)
         self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -106,6 +123,7 @@ class IdleScreen(QWidget):
         column_layout.setSpacing(14)
         column_layout.addWidget(logo)
         column_layout.addWidget(card)
+        column_layout.addWidget(youtube_card)
         column_layout.addWidget(self.hint)
         row = QHBoxLayout()   # the column as wide as it may be, the rest split evenly on both sides
         row.addStretch(1)
@@ -140,6 +158,8 @@ class MainWindow(QMainWindow):
         self.avatar: Optional[bytes] = context.avatar
 
         self._film_key = ""
+        self._start_at_ms = 0          # a YouTube link's &t=: jump there once the video is open
+        self._follow_align = False     # the video was opened because the host plays it: line up after
         self._last_resume_save = 0.0
         self._refresh_wanted = True
         self._was_maximized = False
@@ -157,6 +177,11 @@ class MainWindow(QMainWindow):
         self.controller.set_profile(self.settings.get("profile.name"), self.avatar)
         self.library = LibraryController(self)
         self.library.attach(self.idle.library)
+        self.youtube = YouTube(self.settings, self.ctx.profile.cache_dir, lambda: self.player.engine, self)
+        self.youtube.opened.connect(self.play_stream)
+        self.youtube.busy.connect(self._youtube_busy)
+        self.youtube.quietFailure.connect(self._youtube_follow_failed)
+        self.idle.youtube_box.submitted.connect(self.open_youtube)
         self._wire()
         self._apply_all_settings()
         self._restore_geometry()
@@ -481,6 +506,58 @@ class MainWindow(QMainWindow):
             self.subtitles.film_opened(path, self._film_key)
             self.controller.set_film(path.name, size, 0)
 
+    # ---------------------------------------------------------------- YouTube
+    def open_youtube(self, ref) -> None:
+        """A YouTube link someone pasted or dropped: find it (in the background), then play it."""
+        self._follow_align = False
+        if self.youtube.open(ref):
+            self.activity(f"Finding the YouTube video {ref.id}…", "you")
+
+    def ask_youtube_link(self) -> None:
+        """Ctrl+L: the link box on the start screen, or a small window while something plays."""
+        if self.stack.currentWidget() is self.idle:
+            self.idle.youtube_box.field.setFocus()
+            return
+        dialog = LinkDialog(self)
+        if dialog.exec() and dialog.ref is not None:
+            self.open_youtube(dialog.ref)
+
+    def follow_youtube(self, video_id: str, title: str = "") -> None:
+        """The controller: the host plays a YouTube video I don't have open."""
+        if not self.settings.get("youtube.follow_host") or self.youtube.busy_with() == video_id \
+                or self.youtube.failed_recently(video_id):
+            return
+        if self.youtube.open(youtube_links.VideoRef(video_id), start_s=0, quiet=True):
+            self._follow_align = True
+            self.activity(f"The host plays a YouTube video: opening {title or video_id}", "friend")
+
+    def play_stream(self, stream, start_s: int = 0) -> None:
+        """A YouTube video was found: play it like a film."""
+        self._save_resume(force=True)
+        if not self.player.load_stream(stream):
+            return
+        self._film_key = f"yt:{stream.id}"
+        self._start_at_ms = max(0, int(start_s)) * 1000
+        self.setWindowTitle(f"SyncWatch: {stream.label}")
+        self.stack.setCurrentWidget(self.video)
+        self.subtitles.film_closed()
+        self.controller.set_film(stream.label, 0, stream.duration_ms, yt=stream.id)
+
+    def _youtube_busy(self, text: str) -> None:
+        if text:
+            self.overlay.toast(text, "info")
+
+    def _youtube_follow_failed(self, video_id: str, code: str) -> None:
+        problem = errors.CATALOG.get(code)
+        title = problem.title if problem else code
+        self.activity(f"Couldn't open the host's YouTube video {video_id}: {title} ({code})", "warn")
+
+    def _paste_link(self) -> None:
+        """Ctrl+V outside a text field: a YouTube link from the clipboard opens."""
+        ref = youtube_links.find(QApplication.clipboard().text())
+        if ref is not None:
+            self.open_youtube(ref)
+
     def close_film(self) -> None:
         """Close the open film (e.g. before it's removed from the library): back to the start screen."""
         self._save_resume(force=True)
@@ -493,20 +570,31 @@ class MainWindow(QMainWindow):
         self._refresh_soon()
 
     def _film_loaded(self) -> None:
-        path = self.player.path
-        if path is None:
+        path, stream = self.player.path, getattr(self.player, "stream", None)
+        if path is None and stream is None:
             return
         duration = self.player.duration()
         memory = self.films.get(self._film_key)
         resume = int(memory.get("pos_ms", 0))
         minimum = 1000 * int(self.settings.get("playback.resume_min_s"))
-        if (self.settings.get("playback.resume") and not self.controller.connected
+        start, self._start_at_ms = self._start_at_ms, 0
+        if start and start < duration:
+            self.controller.seek(start)   # the link's &t= (in a room: for everyone, if allowed)
+            self.activity(f"Starting at {fmt_time(start)}, as the link says", "you")
+        elif (self.settings.get("playback.resume") and not self.controller.connected
                 and minimum < resume < duration - 60_000):
             self.player.seek(resume)
             self.activity(f"Continuing where you stopped ({fmt_time(resume)})", "you")
+        if self._follow_align:
+            self._follow_align = False
+            self.controller.align_on_next_state()
         self._apply_audio_preference()
-        self.controller.set_film(path.name, path.stat().st_size if path.exists() else 0, duration)
-        self.activity(f"Opened {path.name} ({fmt_time(duration)})", "you")
+        if stream is not None:
+            self.controller.set_film(stream.label, 0, duration or stream.duration_ms, yt=stream.id)
+            self.activity(f"Opened {stream.label} (YouTube, {stream.describe()}, {fmt_time(duration)})", "you")
+        else:
+            self.controller.set_film(path.name, path.stat().st_size if path.exists() else 0, duration)
+            self.activity(f"Opened {path.name} ({fmt_time(duration)})", "you")
         self._refresh_soon()
 
     def _apply_audio_preference(self) -> None:
@@ -619,6 +707,8 @@ class MainWindow(QMainWindow):
                     state += " · in sync" if abs(offset) < IN_SYNC_MS else f" · {offset / 1000:+.1f} s"
             if peer.match == "different":
                 state += " · different film"
+            elif peer.match == "elsewhere":
+                state += " · watching something else"
             if peer.is_host and self.settings.get("sync.show_ping") and s.rtt_ms():
                 state += f" · ping {s.rtt_ms():.0f} ms"
             friend = c.friends.is_friend(peer.member.key)
@@ -846,6 +936,7 @@ class MainWindow(QMainWindow):
             "keys.subs_later": lambda: self._nudge_subs(1),
             "keys.sidebar": self.toggle_sidebar,
             "keys.open": self.open_library,
+            "keys.youtube": self.ask_youtube_link,
             "keys.settings": self.open_settings,
             "keys.help": self.toggle_help,
         }
@@ -857,6 +948,10 @@ class MainWindow(QMainWindow):
             shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
             shortcut.activated.connect(action)
             self._shortcuts.append(shortcut)
+        paste = QShortcut(QKeySequence(QKeySequence.StandardKey.Paste), self)   # text fields keep their own
+        paste.setContext(Qt.ShortcutContext.WindowShortcut)
+        paste.activated.connect(self._paste_link)
+        self._shortcuts.append(paste)
         escape = QShortcut(QKeySequence("Esc"), self)
         escape.activated.connect(self._escape)
         self._shortcuts.append(escape)
@@ -959,11 +1054,19 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, event)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
-        if event.mimeData().hasUrls():
+        data = event.mimeData()
+        if data.hasUrls() or (data.hasText() and youtube_links.find(data.text())):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:  # noqa: N802
-        for url in event.mimeData().urls():
+        data = event.mimeData()
+        for url in data.urls():
+            if not url.isLocalFile():
+                ref = youtube_links.parse(url.toString())
+                if ref is not None:
+                    self.open_youtube(ref)
+                    return
+                continue
             path = Path(url.toLocalFile())
             if path.suffix.lower() in VIDEO_EXTENSIONS:
                 self.open_film(path)
@@ -971,6 +1074,9 @@ class MainWindow(QMainWindow):
             if path.suffix.lower() in (".srt", ".vtt", ".ass", ".ssa") and self.player.path:
                 self.subtitles.load_external(path)
                 return
+        ref = youtube_links.find(data.text()) if data.hasText() else None
+        if ref is not None:   # a link dragged as text
+            self.open_youtube(ref)
 
     def _restore_geometry(self) -> None:
         geometry = self.settings.get("ui.window_geometry")
@@ -1002,6 +1108,7 @@ class MainWindow(QMainWindow):
         self.settings.save()
         self.films.save_if_dirty()
         self.subtitles.stop()
+        self.youtube.stop()
         self.library.shutdown()
         self.controller.shutdown()
         self.player.shutdown()

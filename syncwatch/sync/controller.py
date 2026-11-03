@@ -191,8 +191,11 @@ class Controller(RoomListener):
                 self.session.rename()
             self._send_profile()
 
-    def set_film(self, name: str, size: int, duration_ms: int) -> None:
+    def set_film(self, name: str, size: int, duration_ms: int, yt: str = "") -> None:
+        """What I have open. yt: a YouTube video's ID (then name is its title and size 0)."""
         film = {"name": name[:255], "size": int(size), "dur": max(0, int(duration_ms))}
+        if yt:
+            film["yt"] = yt
         if film == self.film:
             return
         self.film = film
@@ -734,9 +737,14 @@ class Controller(RoomListener):
         self._report(peer, body)
         peer.separate = body.get("separate", False)
 
+    def align_on_next_state(self) -> None:
+        """After opening the host's video: jump to where the host is when their next heartbeat comes."""
+        self._align_on_next_state = True
+
     def _on_state(self, peer: Peer, body: Dict) -> None:
         """The host's heartbeat."""
         self._report(peer, body)
+        self._follow_host_video(body.get("film") or {})
         peer.separate = False
         rules = body["rules"]
         old = self.rules.host_only
@@ -748,6 +756,15 @@ class Controller(RoomListener):
         if self._align_on_next_state and self.p.has_media():
             self._align_on_next_state = False
             self.sync_me()
+
+    def _follow_host_video(self, film: Dict) -> None:
+        """The host plays a YouTube video I don't have open: the window opens it (if I follow the room)."""
+        video = film.get("yt")
+        if not video or self.is_host or not self.attached or (self.film or {}).get("yt") == video:
+            return
+        follow = getattr(self.ui, "follow_youtube", None)
+        if follow is not None:
+            follow(video, film.get("name", ""))
 
     def _on_req(self, peer: Peer, body: Dict) -> None:
         if not self.is_host:
@@ -1186,7 +1203,10 @@ class Controller(RoomListener):
             theirs = peer.film
             if not theirs:
                 continue
-            if mine["size"] == theirs["size"] and mine["name"] == theirs["name"]:
+            if mine.get("yt") or theirs.get("yt"):
+                # YouTube: the same video or not; a member who follows opens the host's by itself
+                state = "same" if mine.get("yt") == theirs.get("yt") else "elsewhere"
+            elif mine["size"] == theirs["size"] and mine["name"] == theirs["name"]:
                 state = "same"
             elif mine.get("dur") and theirs.get("dur") and abs(mine["dur"] - theirs["dur"]) <= MATCH_TOLERANCE_MS:
                 state = "similar"

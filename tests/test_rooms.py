@@ -250,6 +250,41 @@ class WatchingTests(RoomTestCase):
                                   and self.guests[1].peer(marek).name == "Marek K"))
 
 
+class YouTubeTests(RoomTestCase):
+    """From 0.5: the host plays a YouTube video, the others open the same one by themselves."""
+    VIDEO = "dQw4w9WgXcQ"
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex")
+        self.marek = self.room.person("Marek")
+        self.kuba = self.room.person("Kuba")
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.pump(until=lambda: self.marek.c.session.clock_ready and self.kuba.c.session.clock_ready)
+
+    def test_members_follow_the_hosts_video(self):
+        self.kuba.c.set_attached(False)    # watching on his own: he isn't pulled along
+        self.alex.c.set_film("A test video", 0, 212_000, yt=self.VIDEO)
+        self.assertTrue(self.pump(until=lambda: self.VIDEO in self.marek.ui.followed()))
+        self.pump(1.5)
+        self.assertEqual(self.kuba.ui.followed(), [])
+        self.assertEqual(self.alex.ui.followed(), [])      # the host never follows anyone
+        # Marek has it open now: no more asking, and it counts as the same "film"
+        self.marek.c.set_film("A test video", 0, 212_000, yt=self.VIDEO)
+        count = len(self.marek.ui.followed())
+        self.pump(2.5)
+        self.assertEqual(len(self.marek.ui.followed()), count)
+        self.assertTrue(self.pump(until=lambda: self.alex.peer(self.marek).match == "same"))
+        self.assertNotIn("SW-501", self.marek.ui.problems() + self.alex.ui.problems())
+
+    def test_a_film_and_a_video_arent_compared_by_length(self):
+        self.alex.c.set_film("A test video", 0, 7_200_000, yt=self.VIDEO)
+        self.kuba.c.set_attached(False)
+        self.kuba.c.set_film("film.mkv", 1000, 7_200_000)    # same length by chance
+        self.assertTrue(self.pump(until=lambda: self.alex.peer(self.kuba).match == "elsewhere"))
+        self.assertNotIn("SW-501", self.alex.ui.problems())
+
+
 class SecurityTests(RoomTestCase):
     def setUp(self):
         super().setUp()

@@ -64,3 +64,25 @@ def make_film(path: Path, seconds: float = 3.0, audio_codec: Optional[str] = "aa
             for packet in audio.encode(None):
                 out.mux(packet)
     return "h264" if video_codec == "libx264" else "mpeg4"
+
+
+def make_sound(path: Path, seconds: float = 3.0, audio_codec: str = "aac", sample_rate: int = 48000) -> None:
+    """Sound only (like YouTube's separate sound streams): a quiet tone, stereo."""
+    import av
+    with av.open(str(path), "w", format="matroska") as out:
+        audio = out.add_stream(audio_codec, rate=sample_rate, layout="stereo")
+        block = audio.codec_context.frame_size or 1024
+        total = int(seconds * sample_rate)
+        for start in range(0, total, block):
+            count = min(block, total - start)
+            frame = av.AudioFrame(format="fltp", layout="stereo", samples=block)
+            tone = array("f", (0.1 * math.sin(2 * math.pi * 330 * (start + i) / sample_rate) if i < count else 0.0
+                               for i in range(block)))
+            for plane in frame.planes:
+                plane.update(tone.tobytes())
+            frame.sample_rate = sample_rate
+            frame.pts = start
+            for packet in audio.encode(frame):
+                out.mux(packet)
+        for packet in audio.encode(None):
+            out.mux(packet)

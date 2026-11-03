@@ -11,7 +11,7 @@ Code ranges:
     3xx  the network
     4xx  rooms and the relay server
     5xx  watching in sync
-    6xx  film sources such as Real-Debrid / Stremio (later)
+    6xx  film sources: YouTube (60x), later torrents and sharing films in a room
     7xx  updates
     8xx  profile pictures
     9xx  unexpected errors and crashes
@@ -356,6 +356,56 @@ CATALOG: Dict[str, Problem] = {
         "Only the host can do that right now. Your buttons work just for you until the host "
         "allows everyone again.",
         [], INFO, popup=False),
+
+    # ---- 60x: YouTube --------------------------------------------------------
+    "SW-601": Problem(
+        "That isn't a YouTube video link",
+        "SyncWatch can play links to YouTube videos (youtube.com/watch?v=..., youtu.be/..., Shorts).",
+        ["Copy the link from the address bar or YouTube's Share button and paste it again."], INFO),
+    "SW-602": Problem(
+        "This YouTube video isn't available",
+        "YouTube says the video doesn't exist, was removed, is private, or isn't shown in your country.",
+        ["Check that the link opens in your browser.",
+         "If it's private, ask whoever posted it to make it public or unlisted."], WARNING),
+    "SW-603": Problem(
+        "YouTube wants a sign-in for this video",
+        "This video is age-restricted or for channel members only, and SyncWatch doesn't sign in to "
+        "YouTube.",
+        ["Pick another video, or watch this one in your browser."], WARNING),
+    "SW-604": Problem(
+        "YouTube is blocking this PC for a while",
+        "YouTube asked this PC to prove it isn't a bot. That happens after many requests in a short "
+        "time, or on some networks (VPNs, shared or university Wi-Fi).",
+        ["Wait half an hour and try again.",
+         "Turn off a VPN, or try another network (e.g. a phone hotspot)."], WARNING),
+    "SW-605": Problem(
+        "YouTube changed something",
+        "SyncWatch's YouTube part (yt-dlp) can't read YouTube's pages any more. YouTube changes them every "
+        "few weeks, and then yt-dlp needs an update.",
+        ["Update SyncWatch (Settings > Updates > Check now).",
+         "If there's no update yet, tell whoever publishes SyncWatch: \"Copy details\" and send them."]),
+    "SW-606": Problem(
+        "Can't reach YouTube",
+        "SyncWatch couldn't connect to YouTube.",
+        ["Check that this PC is online (open youtube.com in your browser).",
+         "A firewall or antivirus may be blocking SyncWatch's Python. Allow it."]),
+    "SW-607": Problem(
+        "Live streams can't be watched together yet",
+        "This video is a live stream or a premiere that hasn't started. SyncWatch plays normal videos.",
+        ["Wait until the stream is over and its recording is online."], INFO),
+    "SW-608": Problem(
+        "YouTube support is missing",
+        "This copy of SyncWatch can't play YouTube videos, because yt-dlp or Deno (which yt-dlp needs for "
+        "YouTube) isn't there.",
+        ["If you run SyncWatch from its source code, start it with SyncWatch.bat once: it installs "
+         "what's missing.",
+         "Otherwise download the full SyncWatch zip again and unzip it over this folder."]),
+    "SW-609": Problem(
+        "Couldn't play the YouTube video",
+        "The video was found, but the player couldn't play its stream.",
+        ["Try again: YouTube's stream addresses sometimes fail once.",
+         "Try a lower quality (Settings > YouTube > Quality).",
+         "Still nothing? Click \"Copy details\" and send them to whoever gave you SyncWatch."]),
 
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(

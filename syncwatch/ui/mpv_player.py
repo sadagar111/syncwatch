@@ -183,6 +183,7 @@ class MpvPlayer(QObject):
         self.core = None
         self.widget: Optional[QWidget] = None
         self.path: Optional[Path] = None
+        self.stream = None            # a YouTube video (youtube/streams.py) instead of a file
         self.version = ""
         self._pos = 0.0               # ms, as last reported by mpv
         self._pos_time = time.monotonic()
@@ -290,7 +291,7 @@ class MpvPlayer(QObject):
         return self.has_media() and not self._paused and not self._eof
 
     def has_media(self) -> bool:
-        return self.path is not None and self._loaded and not self._failed
+        return (self.path is not None or self.stream is not None) and self._loaded and not self._failed
 
     def is_ready(self) -> bool:
         return self.has_media() and not self._waiting
@@ -344,7 +345,32 @@ class MpvPlayer(QObject):
         except OSError as exc:
             errors.report("SW-205", f"{type(exc).__name__}: {exc}")
             return False
-        self.path = path
+        self.path, self.stream = path, None
+        self._set_headers("", [])
+        if not self._open(str(path), "SW-205"):
+            return False
+        log.info("loading film %s (%d MB)", path.name, path.stat().st_size // 1_000_000)
+        return True
+
+    def load_stream(self, stream) -> bool:
+        """A YouTube video found by youtube/resolve.py: picture and sound joined in one EDL."""
+        if self.core is None:
+            return False
+        self.path, self.stream = None, stream
+        self._set_headers(stream.headers.get("User-Agent", ""), stream.header_fields())
+        if not self._open(stream.address(), "SW-609"):
+            return False
+        log.info("loading YouTube video %s (%s)", stream.id, stream.describe())
+        return True
+
+    def _set_headers(self, user_agent: str, fields: List[str]) -> None:
+        """HTTP headers for streams (YouTube wants the ones yt-dlp used); none for files."""
+        self._async("set", "user-agent", user_agent or "libmpv")
+        self._async("change-list", "http-header-fields", "clr", "")
+        for field in fields:   # "append" takes the text as one item, commas and all
+            self._async("change-list", "http-header-fields", "append", field)
+
+    def _open(self, address: str, problem: str) -> bool:
         self._loaded = self._failed = self._eof = False
         self._paused = True
         self._waiting, self._wait_kind, self._target, self._wait_started = True, "load", 0.0, time.monotonic()
@@ -357,18 +383,20 @@ class MpvPlayer(QObject):
         self._async("set", "pause", "yes")          # open paused: shows the first picture
         seq = self._load_seq
         try:
-            self.core.command_async("loadfile", str(path), "replace",
+            self.core.command_async("loadfile", address, "replace",
                                     callback=lambda error, result: self._send("loadfile-reply", (seq, error, result)))
         except Exception as exc:  # noqa: BLE001 - mpv refused straight away
-            errors.report("SW-205", f"mpv: {errors.describe_exception(exc)}")
+            errors.report(problem, f"mpv: {errors.describe_exception(exc)}")
             return False
         self._report_playing()
-        log.info("loading film %s (%d MB)", path.name, path.stat().st_size // 1_000_000)
         return True
+
+    def _load_problem(self) -> str:
+        return "SW-609" if self.stream is not None else "SW-205"
 
     def unload(self) -> None:
         self._async("stop")
-        self.path = None
+        self.path = self.stream = None
         self._loaded = False
         self._waiting = False
         self._report_playing()
@@ -506,7 +534,7 @@ class MpvPlayer(QObject):
                 return   # a film that was replaced in the meantime
             if error:
                 self._failed, self._waiting = True, False
-                self._problem("SW-205", f"mpv refused the file: {error}")
+                self._problem(self._load_problem(), f"mpv refused it: {error}")
                 self._report_playing()
             else:
                 self._wanted_entry = (result or {}).get("playlist_entry_id") if isinstance(result, dict) else None
@@ -516,7 +544,7 @@ class MpvPlayer(QObject):
                 self._wanted_entry is None or self._current_entry != self._wanted_entry):
             return   # about a film that was replaced in the meantime
         elif what == "file-loaded":
-            if self.path is None:
+            if self.path is None and self.stream is None:
                 return
             self._loaded = True
             duration = self._read("duration")
@@ -540,10 +568,10 @@ class MpvPlayer(QObject):
             reason, error, entry = value
             if entry != self._wanted_entry:
                 return   # about a film that was replaced in the meantime
-            if reason == self.module.MpvEventEndFile.ERROR and self.path is not None:
+            if reason == self.module.MpvEventEndFile.ERROR and (self.path is not None or self.stream is not None):
                 self._failed = True
                 self._waiting = False
-                self._problem("SW-205", f"mpv: {self._error_text(error)}")
+                self._problem(self._load_problem(), f"mpv: {self._error_text(error)}")
                 self._report_playing()
         elif what == "decoder-failed":
             prefix, text = value

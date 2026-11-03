@@ -27,6 +27,13 @@ PyAV (the built-in converter, from SyncWatch 0.4.2) and the FFmpeg libraries it 
   https://ffmpeg.org/  Source: https://ffmpeg.org/download.html and the build scripts at
   https://github.com/PyAV-Org/pyav-ffmpeg
 
+yt-dlp and yt-dlp-ejs (finding YouTube videos' streams, from SyncWatch 0.5)
+  The Unlicense (public domain). https://github.com/yt-dlp/yt-dlp and https://github.com/yt-dlp/ejs
+
+Deno (deno.exe in Lib\site-packages\bin: runs YouTube's JavaScript for yt-dlp, from SyncWatch 0.5)
+  MIT License. https://deno.com/  Source code: https://github.com/denoland/deno
+  Installed from the "deno" package on PyPI, which holds the official deno.exe.
+
 Qt for Python (PySide6, shiboken6) and the Qt libraries it contains
   GNU Lesser General Public License v3 (LGPLv3). https://www.qt.io/qt-for-python
   These are the unmodified official builds from PyPI, loaded as separate,

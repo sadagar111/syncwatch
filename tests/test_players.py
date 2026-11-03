@@ -280,6 +280,100 @@ class MpvPlayerTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_MPV, "libmpv isn't installed")
+class _HeaderRecorder:
+    """A local web server that remembers the headers of every request (a stand-in for YouTube)."""
+
+    def __init__(self, folder: Path):
+        import functools
+        import http.server
+        import threading
+        seen = self.headers = []
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def end_headers(self):
+                seen.append(dict(self.headers))
+                super().end_headers()
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(folder)))
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def close(self):
+        self.server.shutdown()
+
+
+@unittest.skipUnless(HAVE_MPV or ON_GITHUB, "libmpv isn't installed")
+class StreamTests(unittest.TestCase):
+    """A YouTube-like video: picture and sound as two separate web addresses, joined by an EDL."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from tests.media_maker import make_film, make_sound
+        except ImportError as exc:   # PyAV missing (it's required on GitHub)
+            raise unittest.SkipTest(f"PyAV isn't installed: {exc}")
+        cls.dir = Path(tempfile.mkdtemp())
+        make_film(cls.dir / "picture.mkv", seconds=4, audio_codec=None)
+        make_sound(cls.dir / "sound.mka", seconds=4)
+        cls.web = _HeaderRecorder(cls.dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.web.close()
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def setUp(self):
+        from syncwatch.ui.mpv_player import MpvPlayer
+        self.player = MpvPlayer(mpvlib.load(), "none")
+        self.player.video_widget("#000000")
+        self.player.start()
+
+    def tearDown(self):
+        self.player.shutdown()
+
+    def stream(self, **changes):
+        from syncwatch.youtube.streams import Stream
+        values = dict(id="dQw4w9WgXcQ", title="Test", channel="", duration_s=4.0, thumbnail="",
+                      video_url=f"{self.web.base}/picture.mkv", audio_url=f"{self.web.base}/sound.mka",
+                      headers={"User-Agent": "SyncWatchTest/1", "Accept-Language": "en-us,en;q=0.5"},
+                      expires=time.time() + 3600)
+        values.update(changes)
+        return Stream(**values)
+
+    def test_picture_and_sound_play_as_one(self):
+        self.web.headers.clear()
+        self.assertTrue(self.player.load_stream(self.stream()))
+        self.assertTrue(spin(15, self.player.is_ready), "the stream never became ready")
+        self.assertTrue(self.player.has_media())
+        self.assertIsNone(self.player.path)
+        self.assertAlmostEqual(self.player.duration(), 4000, delta=150)
+        self.assertEqual(len(self.player.audio_tracks()), 1)      # the sound stream joined the picture
+        self.player.seek(2500)
+        self.assertTrue(spin(10, self.player.is_ready))
+        self.assertAlmostEqual(self.player.position(), 2500, delta=100)
+        agents = {h.get("User-Agent") for h in self.web.headers}
+        self.assertEqual(agents, {"SyncWatchTest/1"})
+        self.assertTrue(all(h.get("Accept-Language") == "en-us,en;q=0.5" for h in self.web.headers))
+
+    def test_a_file_after_a_stream_gets_no_stream_headers(self):
+        self.assertTrue(self.player.load_stream(self.stream(audio_url="")))
+        self.assertTrue(spin(15, self.player.is_ready))
+        self.assertTrue(self.player.load(FILM))
+        self.assertTrue(spin(10, self.player.is_ready))
+        self.assertIsNone(self.player.stream)
+        self.assertEqual(self.player.path, FILM)
+
+    def test_a_broken_stream_is_reported(self):
+        with Reports() as reports:
+            self.assertTrue(self.player.load_stream(self.stream(video_url=f"{self.web.base}/missing.mkv",
+                                                                audio_url="")))
+            self.assertTrue(spin(15, lambda: "SW-609" in reports.codes), reports.codes)
+        self.assertFalse(self.player.has_media())
+
+
 class PlayabilityTests(unittest.TestCase):
     def run_test(self, engine, path):
         from syncwatch.ui.players import PlayabilityTest

@@ -109,6 +109,12 @@ class RecorderUI:
     def countdown(self, ms):
         self.countdowns.append(ms)
 
+    def follow_youtube(self, video_id, title=""):
+        self._add(("follow", video_id))
+
+    def followed(self):
+        return [e[1] for e in self.events if e[0] == "follow"]
+
     def join_request(self, knock):
         self.requests.append(knock)
 

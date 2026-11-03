@@ -1,0 +1,316 @@
+"""YouTube in the window: the link box, finding videos in the background, and their problems.
+
+Finding a video runs youtube/resolve.py (yt-dlp) as its own process, like the converter. Only one
+video is opened at a time: if someone pastes another link meanwhile, the newest wins. Videos that
+were found are kept for a while (their addresses work for hours), so opening one again, or the
+next video of a queue that was looked up ahead, starts straight away.
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import logging
+import time
+from pathlib import Path
+from typing import Callable, Dict, Optional
+
+from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+
+from .. import errors
+from ..youtube import links, resolve, streams
+
+log = logging.getLogger("syncwatch.youtube")
+
+PROBLEMS = {"unavailable": "SW-602", "private": "SW-602", "signin": "SW-603", "bot": "SW-604",
+            "outdated": "SW-605", "other": "SW-605", "network": "SW-606", "live": "SW-607",
+            "missing": "SW-608"}
+CACHE_SIZE = 50
+
+
+def find_js_runtime(setting: str) -> Optional[str]:
+    """Deno for yt-dlp: the one chosen in the settings, else the one inside SyncWatch's runtime."""
+    if setting:
+        return setting if Path(setting).is_file() else None
+    try:
+        from deno import find_deno_bin  # noqa: PLC0415 - the "deno" package only holds deno.exe
+        return find_deno_bin()
+    except (ImportError, FileNotFoundError):
+        return None
+
+
+def ytdlp_installed() -> bool:
+    return importlib.util.find_spec("yt_dlp") is not None
+
+
+class ResolveJob(QObject):
+    """One run of resolve.py. Emits found(Stream) or failed(kind, message), exactly once."""
+    found = Signal(object)
+    failed = Signal(str, str)
+
+    def __init__(self, video_id: str, arguments: list, timeout_s: int, parent=None):
+        super().__init__(parent)
+        self.video_id = video_id
+        self.started_at = 0.0
+        self._done = False
+        self._arguments = arguments
+        self.process = QProcess(self)
+        self.process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        self.process.finished.connect(self._finished)
+        self.process.errorOccurred.connect(self._error)
+        self._timer = QTimer(self, singleShot=True, interval=max(10, timeout_s) * 1000)
+        self._timer.timeout.connect(self._timed_out)
+
+    def start(self) -> None:
+        program, *options = resolve.command(self.video_id, *self._arguments)
+        self.started_at = time.monotonic()
+        self.process.start(program, options)
+        self._timer.start()
+
+    def cancel(self) -> None:
+        self._done = True
+        self._timer.stop()
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            self.process.kill()
+
+    def _finish(self, kind: str, message: str, stream=None) -> None:
+        if self._done:
+            return
+        self._done = True
+        self._timer.stop()
+        if stream is not None:
+            self.found.emit(stream)
+        else:
+            self.failed.emit(kind, message)
+
+    def _timed_out(self) -> None:
+        self.process.kill()
+        self._finish("network", "YouTube didn't answer in time")
+
+    def _error(self, error) -> None:
+        if error == QProcess.ProcessError.FailedToStart:
+            self._finish("missing", f"couldn't start Python for yt-dlp: {self.process.errorString()}")
+
+    def _finished(self, _code: int, _status) -> None:
+        output = bytes(self.process.readAllStandardOutput()).decode("utf-8", "replace")
+        trouble = bytes(self.process.readAllStandardError()).decode("utf-8", "replace").strip()
+        if trouble:
+            log.debug("resolve.py said on stderr: %s", trouble[-2000:])
+        lines = [line for line in output.splitlines() if line.strip()]
+        try:
+            message = json.loads(lines[-1]) if lines else {}
+        except ValueError:
+            message = {}
+        if "ok" in message:
+            try:
+                self._finish("", "", streams.from_json(message["ok"]))
+            except streams.BadStream as exc:
+                self._finish("other", f"odd answer from resolve.py: {exc}")
+            return
+        kind = message.get("error") if isinstance(message.get("error"), str) else "other"
+        text = message.get("message") if isinstance(message.get("message"), str) else (trouble[-1000:] or "no answer")
+        self._finish(kind if kind in PROBLEMS else "other", text)
+
+
+class YouTube(QObject):
+    """The window's YouTube part. ``opened(stream, start_s)`` when a video is ready to play."""
+    opened = Signal(object, int)
+    busy = Signal(str)             # "Finding …" text for the status line ("" = done)
+    quietFailure = Signal(str, str)   # (video ID, problem code) of a video opened quietly (following the host)
+
+    def __init__(self, settings, cache_dir: Path, engine: Callable[[], str], parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.cache_dir = cache_dir
+        self.engine = engine                     # "mpv" or "qt": Qt's player needs one stream with both
+        self._cache: Dict[str, streams.Stream] = {}
+        self._job: Optional[ResolveJob] = None
+        self._job_start = 0
+        self._job_quiet = False
+        self._prefetch: Dict[str, ResolveJob] = {}
+        self._failed_at: Dict[str, float] = {}   # video ID -> when it last failed (for "follow the host")
+
+    # ------------------------------------------------------------ asking
+    def check(self) -> Optional[str]:
+        """None if YouTube can work here, else the problem code."""
+        if not ytdlp_installed() or find_js_runtime(self.settings.get("youtube.js_runtime")) is None:
+            return "SW-608"
+        return None
+
+    def open(self, ref: links.VideoRef, start_s: Optional[int] = None, quiet: bool = False) -> bool:
+        """Find the video and emit opened(). quiet: problems only go to the log (following the host)."""
+        start = ref.start_s if start_s is None else start_s
+        problem = self.check()
+        if problem:
+            if not quiet:
+                errors.report(problem, "yt-dlp or Deno not found")
+            return False
+        cached = self._cached(ref.id)
+        if cached is not None:
+            self._drop_job()
+            self.opened.emit(cached, start)
+            return True
+        if self._job is not None and self._job.video_id == ref.id:
+            self._job_start, self._job_quiet = start, quiet and self._job_quiet
+            return True
+        self._drop_job()
+        waiting = self._prefetch.pop(ref.id, None)
+        job = waiting or self._new_job(ref.id)
+        self._job, self._job_start, self._job_quiet = job, start, quiet
+        job.found.connect(self._found)
+        job.failed.connect(self._failed)
+        if waiting is None:
+            job.start()
+        self.busy.emit(f"Finding the YouTube video {ref.id}…")
+        return True
+
+    def prefetch(self, video_id: str) -> None:
+        """Look a video up ahead (the next one in the queue), so it starts at once later."""
+        if not links.is_video_id(video_id) or self._cached(video_id) is not None or video_id in self._prefetch \
+                or (self._job is not None and self._job.video_id == video_id) or self.check():
+            return
+        job = self._new_job(video_id)
+        job.found.connect(self._remember)
+        job.found.connect(lambda _stream: self._prefetch.pop(video_id, None))
+        job.failed.connect(lambda _kind, _text: self._prefetch.pop(video_id, None))
+        self._prefetch[video_id] = job
+        job.start()
+
+    def failed_recently(self, video_id: str, within_s: float = 60.0) -> bool:
+        return time.monotonic() - self._failed_at.get(video_id, -1e9) < within_s
+
+    def busy_with(self) -> str:
+        return self._job.video_id if self._job is not None else ""
+
+    def stop(self) -> None:
+        self._drop_job()
+        for job in list(self._prefetch.values()):
+            job.cancel()
+        self._prefetch.clear()
+
+    # ------------------------------------------------------------ results
+    def _new_job(self, video_id: str) -> ResolveJob:
+        arguments = ["--height", str(self.settings.get("youtube.quality")),
+                     "--codecs", str(self.settings.get("youtube.codecs")),
+                     "--cache", str(self.cache_dir / "yt-dlp"),
+                     "--timeout", str(max(10, int(self.settings.get("youtube.timeout_s")) - 5))]
+        deno = find_js_runtime(self.settings.get("youtube.js_runtime"))
+        if deno:
+            arguments += ["--js", f"deno={deno}"]
+        if self.engine() == "qt":
+            arguments.append("--combined")
+        return ResolveJob(video_id, arguments, int(self.settings.get("youtube.timeout_s")), self)
+
+    def _cached(self, video_id: str) -> Optional[streams.Stream]:
+        stream = self._cache.get(video_id)
+        if stream is not None and stream.expired():
+            del self._cache[video_id]
+            return None
+        return stream
+
+    def _remember(self, stream: streams.Stream) -> None:
+        self._cache[stream.id] = stream
+        while len(self._cache) > CACHE_SIZE:
+            self._cache.pop(next(iter(self._cache)))
+
+    def _drop_job(self) -> None:
+        if self._job is not None:
+            self._job.cancel()
+            self._job.deleteLater()
+            self._job = None
+            self.busy.emit("")
+
+    def _found(self, stream: streams.Stream) -> None:
+        job = self.sender()
+        if job is not self._job:
+            return
+        took = time.monotonic() - job.started_at if job.started_at else 0.0
+        log.info("found YouTube video %s in %.1f s: %s", stream.id, took, stream.describe())
+        self._remember(stream)
+        self._failed_at.pop(stream.id, None)
+        start = self._job_start
+        self._job = None
+        job.deleteLater()
+        self.busy.emit("")
+        self.opened.emit(stream, start)
+
+    def _failed(self, kind: str, message: str) -> None:
+        job = self.sender()
+        if job is not self._job:
+            return
+        self._failed_at[job.video_id] = time.monotonic()
+        quiet = self._job_quiet
+        self._job = None
+        job.deleteLater()
+        self.busy.emit("")
+        code = PROBLEMS.get(kind, "SW-605")
+        log.warning("YouTube video %s: %s (%s)", job.video_id, kind, message)
+        if quiet:
+            self.quietFailure.emit(job.video_id, code)
+            return
+        errors.report(code, f"{job.video_id}: {message}")
+
+
+class LinkBox(QWidget):
+    """A field for a YouTube link and a Watch button. Emits submitted(VideoRef)."""
+    submitted = Signal(object)
+
+    def __init__(self, button_text: str = "▶  Watch", parent=None):
+        super().__init__(parent)
+        self.field = QLineEdit()
+        self.field.setPlaceholderText("Paste a YouTube link…")
+        self.field.setClearButtonEnabled(True)
+        self.field.returnPressed.connect(self._submit)
+        self.field.textChanged.connect(self._changed)
+        self.button = QPushButton(button_text)
+        self.button.setObjectName("Accent")
+        self.button.clicked.connect(self._submit)
+        self.note = QLabel("")
+        self.note.setObjectName("Hint")
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.field, 1)
+        row.addWidget(self.button)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addLayout(row)
+        layout.addWidget(self.note)
+        self.note.hide()
+        self._changed("")
+
+    def _changed(self, text: str) -> None:
+        ref = links.parse(text)
+        self.button.setEnabled(ref is not None)
+        bad = bool(text.strip()) and ref is None
+        self.note.setText("That isn't a YouTube video link." if bad else "")
+        self.note.setVisible(bad)
+
+    def _submit(self) -> None:
+        ref = links.parse(self.field.text())
+        if ref is None:
+            return
+        self.field.clear()
+        self.submitted.emit(ref)
+
+
+class LinkDialog(QDialog):
+    """Ctrl+L while a video plays: a small window with the link box."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Open a YouTube video")
+        self.box = LinkBox()
+        self.box.submitted.connect(self._chosen)
+        self.ref: Optional[links.VideoRef] = None
+        hint = QLabel("In a room, everyone who follows you opens the same video.")
+        hint.setObjectName("Hint")
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.box)
+        layout.addWidget(hint)
+        self.setMinimumWidth(460)
+        self.box.field.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _chosen(self, ref: links.VideoRef) -> None:
+        self.ref = ref
+        self.accept()
