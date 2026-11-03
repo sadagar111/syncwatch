@@ -179,6 +179,9 @@ class Controller(RoomListener):
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
+        subscribe = getattr(settings, "subscribe", None)
+        if subscribe is not None:          # the host changed who may add/skip: tell the room now
+            subscribe("youtube.queue_", lambda _key, _value: self._queue_rules_changed())
 
     # ================================================================ setup
     def start(self) -> None:
@@ -932,6 +935,11 @@ class Controller(RoomListener):
         if play is not None:
             play(item)
         return item
+
+    def _queue_rules_changed(self) -> None:
+        if self.connected and self.is_host:
+            self._queue_dirty = True
+        self.ui_queue_changed()
 
     def _queue_changed(self) -> None:
         self._queue_dirty = True

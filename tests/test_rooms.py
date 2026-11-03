@@ -305,7 +305,8 @@ class QueueTests(RoomTestCase):
         self.assertEqual(self.alex.ui.played_items(), [])
         self.assertTrue(self.pump(until=lambda: self.ids(self.marek) == [self.A] and self.ids(self.kuba) == [self.A]))
         self.marek.c.queue_add(self.B, "Second", 30_000)
-        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.A, self.B]))
+        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.A, self.B]
+                                  and self.ids(self.marek) == [self.A, self.B]))
         self.assertTrue(any("Marek added Second" in text for text in self.kuba.ui.activities()))
         self.marek.c.queue_skip()                             # only the host may skip (default)
         self.assertIn("SW-610", self.marek.ui.problems())

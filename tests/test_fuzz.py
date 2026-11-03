@@ -12,6 +12,7 @@ import base64
 import json
 import os
 import random
+import re
 import socket
 import sys
 import threading
@@ -27,7 +28,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305  # noqa
 from room_harness import Room  # noqa: E402
 
 from syncwatch.net import protocol  # noqa: E402
-from syncwatch.net.protocol import B64, BadMessage, Hex, ListOf  # noqa: E402
+from syncwatch.net.protocol import B64, BadMessage, Hex, ListOf, Pattern  # noqa: E402
 from syncwatch.net.websocket import WebSocket, WebSocketError  # noqa: E402
 from syncwatch.room import crypto, session as session_module  # noqa: E402
 from syncwatch.room.codes import CodeError, RoomCode, parse  # noqa: E402
@@ -63,6 +64,8 @@ def example(spec_entry, rng=None):
         return base64.b64encode(bytes(kind.size)).decode("ascii")
     if isinstance(kind, Hex):
         return "0" * kind.chars
+    if isinstance(kind, Pattern):
+        return "dQw4w9WgXcQ"     # the only pattern so far: a YouTube video ID
     if isinstance(kind, tuple):
         return kind[0]
     if kind is bool:
@@ -115,6 +118,8 @@ def conforms(value, entry) -> bool:
         return isinstance(value, bytes) and len(value) == kind.size
     if isinstance(kind, Hex):
         return isinstance(value, str) and len(value) == kind.chars
+    if isinstance(kind, Pattern):
+        return isinstance(value, str) and re.fullmatch(kind.regex, value) is not None
     if isinstance(kind, tuple):
         return value in kind
     if kind is bool:
