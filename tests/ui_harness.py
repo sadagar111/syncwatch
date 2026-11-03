@@ -11,6 +11,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+import faulthandler
+faulthandler.enable()   # a crash inside Qt or mpv prints where every thread was
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

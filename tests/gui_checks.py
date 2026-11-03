@@ -61,7 +61,7 @@ def check_youtube(out: Path) -> bool:
     print("\n".join(line for line in result.stdout.splitlines()
                     if line.startswith(("YOUTUBE", "activity", "ERRORS SEEN"))))
     if result.returncode != 0:
-        print("youtube check failed; end of its output:")
+        print(f"youtube check failed (exit code {result.returncode}); end of its output:")
         print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
     return result.returncode == 0
 
@@ -129,6 +129,9 @@ def check_room(out: Path) -> bool:
     missing = [n for n in needed if n not in events]
     if missing:
         print(f"room: events missing: {missing}")
+        for role, proc in procs.items():
+            print(f"room: {role} exited with {proc.returncode}; end of its output:")
+            print("\n".join(outputs[role].strip().splitlines()[-25:]))
         return False
 
     def gap_at(guest, seconds):
