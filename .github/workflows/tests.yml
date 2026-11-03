@@ -50,7 +50,7 @@ jobs:
         run: python tools/get_libmpv.py
       - name: Unit and integration tests
         run: python tests/ci_run.py python -m unittest discover -s tests -p "test_*.py" -v
-      - name: YouTube for real (information only: YouTube often blocks GitHub's machines)
+      - name: YouTube for real (information only, YouTube often blocks GitHub's machines)
         run: python tests/youtube_live.py
       - name: Real-app checks (window, film library, a room of three apps, update cycle)
         run: python tests/ci_run.py python tests/gui_checks.py all --out gui-artifacts
