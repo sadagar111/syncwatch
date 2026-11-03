@@ -4,6 +4,8 @@
 **Watch YouTube together**
 - Paste a YouTube link on the start screen (or press Ctrl+L, or Ctrl+V anywhere, or drag a link from your browser onto SyncWatch). Watch links, youtu.be, Shorts and `&t=` start times all work.
 - In a room, when the host plays a YouTube video, everyone who follows the host opens it too and lines up with the host. Play, pause, jumps, Sync up and Sync me work as with films.
+- **Up next (the queue):** ➕ Queue next to Watch (or Ctrl+V / dropping a link while a video plays) lines videos up in the sidebar. When one ends, the next starts for everyone at the same moment: SyncWatch waits until everyone has it open (at most 20 s, then it names who's slow). Skip, and right-click a video: Play now, Move up/down, Remove. Titles fill in by themselves. A video that's gone from YouTube is skipped with a line in the activity feed.
+- The host decides who may add videos and who may skip, remove and reorder (Settings > YouTube). Everyone can remove the videos they added. The host's app checks every request, like everything else in a room.
 - No ads: SyncWatch plays YouTube's video streams directly with mpv (through yt-dlp). Quality up to 1080p by default (Settings > YouTube > Quality, up to 4K).
 - Nothing to install: yt-dlp and Deno (which yt-dlp needs for YouTube) come with SyncWatch. That makes this update about 45 MB bigger (once).
 - New problems with plain explanations: SW-601 to SW-609 (e.g. "YouTube wants a sign-in for this video", "YouTube changed something: update SyncWatch").

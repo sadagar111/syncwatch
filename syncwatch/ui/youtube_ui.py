@@ -10,7 +10,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import threading
 import time
+import urllib.request
+from urllib.parse import quote
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
@@ -117,6 +120,7 @@ class YouTube(QObject):
     opened = Signal(object, int)
     busy = Signal(str)             # "Finding …" text for the status line ("" = done)
     quietFailure = Signal(str, str)   # (video ID, problem code) of a video opened quietly (following the host)
+    failed = Signal(str, str)         # (video ID, problem code) of any video that couldn't be opened
 
     def __init__(self, settings, cache_dir: Path, engine: Callable[[], str], parent=None):
         super().__init__(parent)
@@ -245,15 +249,47 @@ class YouTube(QObject):
         self.busy.emit("")
         code = PROBLEMS.get(kind, "SW-605")
         log.warning("YouTube video %s: %s (%s)", job.video_id, kind, message)
+        self.failed.emit(job.video_id, code)
         if quiet:
             self.quietFailure.emit(job.video_id, code)
             return
         errors.report(code, f"{job.video_id}: {message}")
 
 
+class TitleLookup(QObject):
+    """A video's title from YouTube's oEmbed address (quick, no yt-dlp): for the queue, so people see
+    what's coming. Each video is asked once; found(video ID, title) from a background thread."""
+    found = Signal(str, str)
+    ADDRESS = "https://www.youtube.com/oembed?format=json&url="
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._asked: set = set()
+
+    def ask(self, video_id: str) -> None:
+        if not links.is_video_id(video_id) or video_id in self._asked:
+            return
+        self._asked.add(video_id)
+        threading.Thread(target=self._fetch, args=(video_id,), name="youtube-title", daemon=True).start()
+
+    def _fetch(self, video_id: str) -> None:
+        url = self.ADDRESS + quote(f"https://www.youtube.com/watch?v={video_id}", safe="")
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "SyncWatch"})
+            with urllib.request.urlopen(request, timeout=8) as answer:
+                data = json.loads(answer.read(200_000).decode("utf-8", "replace"))
+            title = data.get("title") if isinstance(data, dict) else None
+            if isinstance(title, str) and title.strip():
+                self.found.emit(video_id, " ".join(title.split())[:120])
+        except Exception as exc:  # noqa: BLE001 - only a nicer name for the queue
+            log.debug("no title for %s: %s", video_id, exc)
+
+
 class LinkBox(QWidget):
-    """A field for a YouTube link and a Watch button. Emits submitted(VideoRef)."""
+    """A field for a YouTube link, a Watch button and (optional) an Add to queue button.
+    Emits submitted(VideoRef) (watch now) or queued(VideoRef)."""
     submitted = Signal(object)
+    queued = Signal(object)
 
     def __init__(self, button_text: str = "▶  Watch", parent=None):
         super().__init__(parent)
@@ -265,12 +301,16 @@ class LinkBox(QWidget):
         self.button = QPushButton(button_text)
         self.button.setObjectName("Accent")
         self.button.clicked.connect(self._submit)
+        self.queue_button = QPushButton("➕  Queue")
+        self.queue_button.setToolTip("Add it to the queue: it plays after the current video")
+        self.queue_button.clicked.connect(self._queue)
         self.note = QLabel("")
         self.note.setObjectName("Hint")
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.field, 1)
         row.addWidget(self.button)
+        row.addWidget(self.queue_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -282,6 +322,7 @@ class LinkBox(QWidget):
     def _changed(self, text: str) -> None:
         ref = links.parse(text)
         self.button.setEnabled(ref is not None)
+        self.queue_button.setEnabled(ref is not None)
         bad = bool(text.strip()) and ref is None
         self.note.setText("That isn't a YouTube video link." if bad else "")
         self.note.setVisible(bad)
@@ -293,6 +334,13 @@ class LinkBox(QWidget):
         self.field.clear()
         self.submitted.emit(ref)
 
+    def _queue(self) -> None:
+        ref = links.parse(self.field.text())
+        if ref is None:
+            return
+        self.field.clear()
+        self.queued.emit(ref)
+
 
 class LinkDialog(QDialog):
     """Ctrl+L while a video plays: a small window with the link box."""
@@ -301,8 +349,10 @@ class LinkDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Open a YouTube video")
         self.box = LinkBox()
-        self.box.submitted.connect(self._chosen)
+        self.box.submitted.connect(lambda ref: self._chosen(ref, "watch"))
+        self.box.queued.connect(lambda ref: self._chosen(ref, "queue"))
         self.ref: Optional[links.VideoRef] = None
+        self.mode = "watch"
         hint = QLabel("In a room, everyone who follows you opens the same video.")
         hint.setObjectName("Hint")
         layout = QVBoxLayout(self)
@@ -311,6 +361,6 @@ class LinkDialog(QDialog):
         self.setMinimumWidth(460)
         self.box.field.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def _chosen(self, ref: links.VideoRef) -> None:
-        self.ref = ref
+    def _chosen(self, ref: links.VideoRef, mode: str) -> None:
+        self.ref, self.mode = ref, mode
         self.accept()

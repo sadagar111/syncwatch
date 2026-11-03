@@ -285,6 +285,87 @@ class YouTubeTests(RoomTestCase):
         self.assertNotIn("SW-501", self.alex.ui.problems())
 
 
+class QueueTests(RoomTestCase):
+    """The YouTube queue (0.5): the host's app holds it, members ask, everyone sees it."""
+    A, B, C, D = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex", seek_delay=0.2)
+        self.marek = self.room.person("Marek", seek_delay=0.2)
+        self.kuba = self.room.person("Kuba", seek_delay=0.2)
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.pump(until=lambda: self.marek.c.session.clock_ready and self.kuba.c.session.clock_ready)
+
+    def ids(self, person):
+        return [item.id for item in person.c.queue.items]
+
+    def test_everyone_sees_it_and_the_hosts_rules_count(self):
+        self.alex.c.queue_add(self.A, "First", 60_000)       # a film is open: it doesn't start by itself
+        self.assertEqual(self.alex.ui.played_items(), [])
+        self.assertTrue(self.pump(until=lambda: self.ids(self.marek) == [self.A] and self.ids(self.kuba) == [self.A]))
+        self.marek.c.queue_add(self.B, "Second", 30_000)
+        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.A, self.B]))
+        self.assertTrue(any("Marek added Second" in text for text in self.kuba.ui.activities()))
+        self.marek.c.queue_skip()                             # only the host may skip (default)
+        self.assertIn("SW-610", self.marek.ui.problems())
+        self.assertEqual(self.alex.ui.played_items(), [])
+        second = self.marek.c.queue.items[1]
+        self.marek.c.queue_remove(second.key)                 # but everyone may remove their own
+        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.A]))
+        first = self.marek.c.queue.items[0]
+        self.marek.c.session.send_room("qreq", op="remove", key=first.key)   # not his: refused
+        self.pump(1.0)
+        self.assertEqual(self.ids(self.alex), [self.A])
+        self.alex.settings.set("youtube.queue_control", "everyone")
+        self.assertTrue(self.pump(until=lambda: self.marek.c.can_queue("control")))
+        self.marek.c.queue_skip()
+        self.assertTrue(self.pump(until=lambda: self.alex.ui.played_items() == [self.A]))
+        self.assertTrue(self.pump(until=lambda: self.marek.c.queue.now is not None
+                                  and self.marek.c.queue.now.id == self.A))
+
+    def test_no_adding_when_the_host_says_so(self):
+        self.alex.settings.set("youtube.queue_add", "host")
+        self.alex.c.queue_add(self.A, "First", 60_000)
+        self.assertTrue(self.pump(until=lambda: self.ids(self.marek) == [self.A]))
+        self.assertFalse(self.marek.c.queue_add(self.B, "Second"))
+        self.assertIn("SW-610", self.marek.ui.problems())
+        self.marek.c.session.send_room("qreq", op="add", yt=self.B, title="Second")   # a modified app
+        self.pump(1.0)
+        self.assertEqual(self.ids(self.alex), [self.A])
+
+    def test_flooding_the_host_is_dropped(self):
+        for index in range(30):
+            self.marek.c.session.send_room("qreq", op="add", yt=f"video{index:06d}", title=f"V{index}")
+        self.pump(1.5)
+        from syncwatch.sync.controller import QREQ_RATE
+        self.assertEqual(len(self.alex.c.queue.items), QREQ_RATE)
+
+    def test_the_next_video_starts_together(self):
+        for person in (self.alex, self.marek, self.kuba):
+            person.c.set_film("Video C", 0, 60_000, yt=self.C)
+        self.alex.c.queue_add(self.D, "Video D", 45_000)
+        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.D]))
+        self.alex.c.queue_next()                               # Video C ended
+        self.assertEqual(self.alex.ui.played_items(), [self.D])
+        # the host's window opens it, then starts everyone together
+        self.alex.c.set_film("Video D", 0, 45_000, yt=self.D)
+        self.alex.player.pause()
+        self.alex.player.seek(0)
+        self.alex.c.start_together()
+        self.assertTrue(self.pump(until=lambda: self.D in self.marek.ui.followed() and self.D in self.kuba.ui.followed()))
+        self.marek.c.set_film("Video D", 0, 45_000, yt=self.D)  # Marek's window opened it
+        self.marek.player.seek(0)
+        self.pump(1.5)                                          # Kuba still finding it: nobody starts
+        self.assertFalse(self.alex.player.is_playing() or self.marek.player.is_playing())
+        self.kuba.c.set_film("Video D", 0, 45_000, yt=self.D)
+        self.kuba.player.seek(0)
+        self.assertTrue(self.pump(until=lambda: all(p.player.is_playing() for p in (self.alex, self.marek, self.kuba))))
+        positions = [p.player.position() for p in (self.alex, self.marek, self.kuba)]
+        self.assertLess(max(positions) - min(positions), 300)
+        self.assertNotIn("SW-503", self.alex.ui.problems())
+
+
 class SecurityTests(RoomTestCase):
     def setUp(self):
         super().setUp()

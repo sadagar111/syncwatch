@@ -78,6 +78,9 @@ YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}")
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
               "yt": (YOUTUBE_ID, False, None)}   # since 0.5: a YouTube video instead of a file
+QUEUE_ITEM: Spec = {"k": (int, True, (1, 1 << 31)), "yt": (YOUTUBE_ID, True, None), "title": (str, True, 120),
+                    "dur": (int, False, (0, MAX_POSITION_MS)), "by": (str, False, 32)}
+QUEUE_RULES: Spec = {"add": (("everyone", "host"), True, None), "control": (("host", "everyone"), True, None)}
 RULES: Spec = {"host_only": (bool, True, None), "cd_pp": (float, False, (0, 3600)),
                "cd_sync": (float, False, (0, 3600)),
                "jump": (("together", "ahead"), False, None)}   # since 0.4.1
@@ -133,10 +136,17 @@ ROOM: Dict[str, Spec] = {
                "reason": (("cooldown", "host_only", "busy"), True, None), "wait": (float, False, (0, 3600))},
     "sync_prepare": {"id": (int, True, (0, 1 << 31)), "pos": POS, "by": (str, False, 32),
                      "by_id": (B64(8), False, None),
-                     "jump": (bool, False, None)},   # true: after a jump (0.4.1); missing: Sync up
+                     "jump": (bool, False, None),    # true: after a jump (0.4.1); missing: Sync up
+                     "next": (bool, False, None)},   # true: the next video of the queue starts (0.5)
     "sync_ready": {"id": (int, True, (0, 1 << 31))},
     "sync_go": {"id": (int, True, (0, 1 << 31)), "start": CLOCK},
     "sync_abort": {"id": (int, True, (0, 1 << 31))},
+    # the YouTube queue (0.5): the host's app sends all of it after every change; members ask
+    "queue": {"no": SEQ, "items": (ListOf(QUEUE_ITEM, 50), True, None), "now": (QUEUE_ITEM, False, None),
+              "rules": (QUEUE_RULES, True, None)},
+    "qreq": {"op": (("add", "remove", "skip", "play", "move"), True, None), "yt": (YOUTUBE_ID, False, None),
+             "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
+             "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
 }
 
 COMMON: Spec = {"s": (Hex(16), True, None), "n": SEQ}

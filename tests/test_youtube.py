@@ -277,3 +277,62 @@ class ProtocolTests(unittest.TestCase):
         for bad in ("short", "dQw4w9WgXcQ1", "dQw4w9WgXc!", "../../etc/pa", 12345678901, ["x"], "dQw4w9WgXc\n"):
             with self.subTest(bad=bad), self.assertRaises(protocol.BadMessage):
                 protocol.validate(protocol.ROOM, self.body(yt=bad))
+
+
+class QueueTests(unittest.TestCase):
+    """The queue on its own: no room, no Qt."""
+
+    def setUp(self):
+        from syncwatch.youtube.queue import Queue
+        self.queue = Queue()
+        self.a = self.queue.add("aaaaaaaaaaa", "A", 60_000, "Alex")
+        self.b = self.queue.add("bbbbbbbbbbb", "B", 0, "Marek")
+        self.c = self.queue.add("ccccccccccc", "C", 30_000, "Kuba")
+
+    def order(self, queue=None):
+        return [item.id[0] for item in (queue or self.queue).items]
+
+    def test_order_and_playing(self):
+        self.assertEqual(self.order(), ["a", "b", "c"])
+        self.assertTrue(self.queue.move(self.c.key, 0))
+        self.assertEqual(self.order(), ["c", "a", "b"])
+        self.assertEqual(self.queue.advance().id[0], "c")
+        self.assertEqual(self.order(), ["a", "b"])
+        self.assertEqual(self.queue.play(self.b.key).id[0], "b")
+        self.assertEqual((self.queue.now.id[0], self.order()), ("b", ["a"]))
+        self.assertEqual(self.queue.remove(self.a.key).id[0], "a")
+        self.assertIsNone(self.queue.advance())                     # nothing left: "now" stays
+        self.assertEqual(self.queue.now.id[0], "b")
+        self.assertFalse(self.queue.move(999, 0))
+
+    def test_limits(self):
+        from syncwatch.youtube.queue import MAX_ITEMS, QueueFull
+        with self.assertRaises(ValueError):
+            self.queue.add("not an id", "x", 0, "x")
+        for index in range(MAX_ITEMS - 3):
+            self.queue.add(f"v{index:010d}", "x" * 500, 0, "y" * 99)
+        with self.assertRaises(QueueFull):
+            self.queue.add("zzzzzzzzzzz", "Z", 0, "Z")
+        self.assertEqual(len(self.queue.items[-1].title), 120)
+
+    def test_titles_and_lengths_come_later(self):
+        self.assertTrue(self.queue.update_info("bbbbbbbbbbb", "B (real title)", 125_000))
+        self.assertEqual((self.b.title, self.b.dur), ("B (real title)", 125_000))
+        self.assertTrue(self.queue.update_info("aaaaaaaaaaa", "A2", 0))     # unknown length: kept
+        self.assertEqual(self.a.dur, 60_000)
+        self.assertFalse(self.queue.update_info("aaaaaaaaaaa", "A2", 0))
+
+    def test_members_copy_and_old_messages(self):
+        from syncwatch.net import protocol
+        from syncwatch.youtube.queue import Queue
+        self.queue.advance()
+        body = {"t": "queue", "s": "0" * 16, "n": 1, **self.queue.to_message(),
+                "rules": {"add": "everyone", "control": "host"}}
+        clean = protocol.validate(protocol.ROOM, body)      # what the host sends passes the checks
+        member = Queue()
+        self.assertTrue(member.load_message(clean))
+        self.assertEqual((member.now.id[0], self.order(member)), ("a", ["b", "c"]))
+        old = dict(clean, no=clean["no"] - 1, items=[])
+        self.assertFalse(member.load_message(old))           # an older message doesn't win
+        self.assertEqual(self.order(member), ["b", "c"])
+        self.assertIsNone(member.items[0].by_id)             # who added it, by key: the host's app only

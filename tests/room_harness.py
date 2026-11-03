@@ -115,6 +115,15 @@ class RecorderUI:
     def followed(self):
         return [e[1] for e in self.events if e[0] == "follow"]
 
+    def queue_changed(self):
+        self._add(("queue", None))
+
+    def play_queue_item(self, item):
+        self._add(("play_item", item.id))
+
+    def played_items(self):
+        return [e[1] for e in self.events if e[0] == "play_item"]
+
     def join_request(self, knock):
         self.requests.append(knock)
 

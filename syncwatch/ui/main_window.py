@@ -37,7 +37,8 @@ from .qtutil import asset_pixmap
 from .sidebar import FriendEntry, PersonEntry, Sidebar, WaitingEntry
 from .subtitles_ui import Subtitles
 from .updates_ui import UpdateController
-from .youtube_ui import LinkBox, LinkDialog, YouTube
+from .sidebar import QueueEntry
+from .youtube_ui import LinkBox, LinkDialog, TitleLookup, YouTube
 from ..youtube import links as youtube_links
 
 log = logging.getLogger("syncwatch.window")
@@ -73,6 +74,13 @@ class Background(QWidget):
                                        Qt.TransformationMode.SmoothTransformation)
                 painter.drawPixmap((self.width() - scaled.width()) // 2, (self.height() - scaled.height()) // 2, scaled)
         painter.end()
+
+
+def _short_time(ms: int) -> str:
+    """'3:32' or '1:02:05' (fmt_time always shows hours)."""
+    seconds = max(0, int(ms) // 1000)
+    hours, minutes, rest = seconds // 3600, seconds % 3600 // 60, seconds % 60
+    return f"{hours}:{minutes:02d}:{rest:02d}" if hours else f"{minutes}:{rest:02d}"
 
 
 class IdleScreen(QWidget):
@@ -160,6 +168,8 @@ class MainWindow(QMainWindow):
         self._film_key = ""
         self._start_at_ms = 0          # a YouTube link's &t=: jump there once the video is open
         self._follow_align = False     # the video was opened because the host plays it: line up after
+        self._queue_autostart = False  # the next video of the queue: start everyone together once it's open
+        self._following_id = ""        # the host's video I'm opening (its problems only go to the activity feed)
         self._last_resume_save = 0.0
         self._refresh_wanted = True
         self._was_maximized = False
@@ -181,7 +191,19 @@ class MainWindow(QMainWindow):
         self.youtube.opened.connect(self.play_stream)
         self.youtube.busy.connect(self._youtube_busy)
         self.youtube.quietFailure.connect(self._youtube_follow_failed)
+        self.youtube.failed.connect(self._youtube_failed)
         self.idle.youtube_box.submitted.connect(self.open_youtube)
+        self.idle.youtube_box.queued.connect(self.queue_youtube)
+        self.titles = TitleLookup(self)
+        self.titles.found.connect(lambda video, title: self.controller.queue_info(video, title, 0))
+        queue_panel = self.sidebar.queue
+        queue_panel.playRequested.connect(self.controller.queue_play)
+        queue_panel.removeRequested.connect(self.controller.queue_remove)
+        queue_panel.moveRequested.connect(self.controller.queue_move)
+        queue_panel.skipClicked.connect(self.controller.queue_skip)
+        queue_panel.addClicked.connect(lambda: self.ask_youtube_link(queue=True))
+        self.player.ended.connect(self._media_ended)
+        self.settings.subscribe("ui.panel_queue", lambda k, v: self.queue_changed())
         self._wire()
         self._apply_all_settings()
         self._restore_geometry()
@@ -508,19 +530,72 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------------- YouTube
     def open_youtube(self, ref) -> None:
-        """A YouTube link someone pasted or dropped: find it (in the background), then play it."""
-        self._follow_align = False
+        """Watch: find the video (in the background), then play it. In a room where I follow the
+        host, only the host decides what plays for everyone, so it goes into the queue instead."""
+        c = self.controller
+        if c.connected and not c.is_host and c.attached:
+            self.activity("In a room, the host decides what plays: added to the queue instead", "info")
+            self.queue_youtube(ref)
+            return
+        self._follow_align = self._queue_autostart = False
         if self.youtube.open(ref):
             self.activity(f"Finding the YouTube video {ref.id}…", "you")
 
-    def ask_youtube_link(self) -> None:
+    def queue_youtube(self, ref) -> None:
+        """Add to the queue (my own when I host or am alone; else a request to the host)."""
+        if self.controller.queue_add(ref.id, "", 0) and self.controller.decides_queue:
+            self.overlay.toast("Added to the queue", "info")
+
+    def _open_or_queue(self, ref) -> None:
+        """Ctrl+V or a dropped link: queue it if something from YouTube plays (or is queued), else play it."""
+        youtube_on = getattr(self.player, "stream", None) is not None and self.player.has_media()
+        if youtube_on or self.controller.queue.items:
+            self.queue_youtube(ref)
+        else:
+            self.open_youtube(ref)
+
+    def ask_youtube_link(self, queue: bool = False) -> None:
         """Ctrl+L: the link box on the start screen, or a small window while something plays."""
-        if self.stack.currentWidget() is self.idle:
+        if self.stack.currentWidget() is self.idle and not queue:
             self.idle.youtube_box.field.setFocus()
             return
         dialog = LinkDialog(self)
         if dialog.exec() and dialog.ref is not None:
-            self.open_youtube(dialog.ref)
+            if dialog.mode == "queue" or queue:
+                self.queue_youtube(dialog.ref)
+            else:
+                self.open_youtube(dialog.ref)
+
+    # the controller: the queue changed / the next video starts
+    def queue_changed(self) -> None:
+        c, queue = self.controller, self.controller.queue
+        entries = [QueueEntry(item.key, item.title, _short_time(item.dur) if item.dur else "",
+                              item.by, item.by == c.name) for item in queue.items]
+        now = f"▶ Now: {queue.now.title}" if queue.now is not None else ""
+        panel = self.sidebar.queue
+        panel.update_queue(now, entries, c.can_queue("add"), c.can_queue("control"))
+        panel.setVisible(bool(self.settings.get("ui.panel_queue")) and bool(queue.items or queue.now))
+        if queue.next is not None:
+            self.youtube.prefetch(queue.next.id)    # the next video starts without waiting for YouTube
+        if c.decides_queue:
+            for item in queue.items:
+                if item.title == item.id:
+                    self.titles.ask(item.id)
+
+    def play_queue_item(self, item) -> None:
+        self._follow_align = False
+        self._queue_autostart = True
+        self.activity(f"Next: {item.title}", "you")
+        # quiet: a queued video that's gone is skipped with a line in the activity feed, no popup
+        if not self.youtube.open(youtube_links.VideoRef(item.id), start_s=0, quiet=True):
+            self._queue_autostart = False
+
+    def _media_ended(self) -> None:
+        """A video ended: the next one in the queue starts (host or alone, if Play the next is on)."""
+        if getattr(self.player, "stream", None) is None or not self.settings.get("youtube.autoplay"):
+            return
+        if self.controller.decides_queue and self.controller.queue.items:
+            self.controller.queue_next()
 
     def follow_youtube(self, video_id: str, title: str = "") -> None:
         """The controller: the host plays a YouTube video I don't have open."""
@@ -529,6 +604,7 @@ class MainWindow(QMainWindow):
             return
         if self.youtube.open(youtube_links.VideoRef(video_id), start_s=0, quiet=True):
             self._follow_align = True
+            self._following_id = video_id
             self.activity(f"The host plays a YouTube video: opening {title or video_id}", "friend")
 
     def play_stream(self, stream, start_s: int = 0) -> None:
@@ -547,7 +623,20 @@ class MainWindow(QMainWindow):
         if text:
             self.overlay.toast(text, "info")
 
+    def _youtube_failed(self, video_id: str, code: str) -> None:
+        """A queued video can't be opened (removed, private…): go on with the next one."""
+        now = self.controller.queue.now
+        if self._queue_autostart and now is not None and now.id == video_id:
+            self._queue_autostart = False
+            self.activity(f"Skipping {now.title}: {errors.CATALOG[code].title if code in errors.CATALOG else code}",
+                          "warn")
+            if self.controller.decides_queue and self.controller.queue.items:
+                QTimer.singleShot(500, self.controller.queue_next)
+
     def _youtube_follow_failed(self, video_id: str, code: str) -> None:
+        if video_id != self._following_id:
+            return   # a queued video: _youtube_failed already said so
+        self._following_id = ""
         problem = errors.CATALOG.get(code)
         title = problem.title if problem else code
         self.activity(f"Couldn't open the host's YouTube video {video_id}: {title} ({code})", "warn")
@@ -556,7 +645,7 @@ class MainWindow(QMainWindow):
         """Ctrl+V outside a text field: a YouTube link from the clipboard opens."""
         ref = youtube_links.find(QApplication.clipboard().text())
         if ref is not None:
-            self.open_youtube(ref)
+            self._open_or_queue(ref)
 
     def close_film(self) -> None:
         """Close the open film (e.g. before it's removed from the library): back to the start screen."""
@@ -591,9 +680,17 @@ class MainWindow(QMainWindow):
         self._apply_audio_preference()
         if stream is not None:
             self.controller.set_film(stream.label, 0, duration or stream.duration_ms, yt=stream.id)
-            self.activity(f"Opened {stream.label} (YouTube, {stream.describe()}, {fmt_time(duration)})", "you")
+            self.controller.queue_info(stream.id, stream.label, duration or stream.duration_ms)
+            if self._queue_autostart:
+                self._queue_autostart = False
+                self.controller.start_together()
+            else:
+                self.controller.queue_now_playing(stream.id, stream.label, duration or stream.duration_ms)
+            details = ", ".join(part for part in ("YouTube", stream.describe(), fmt_time(duration)) if part)
+            self.activity(f"Opened {stream.label} ({details})", "you")
         else:
             self.controller.set_film(path.name, path.stat().st_size if path.exists() else 0, duration)
+            self.controller.queue_playing_elsewhere()
             self.activity(f"Opened {path.name} ({fmt_time(duration)})", "you")
         self._refresh_soon()
 
@@ -1064,7 +1161,7 @@ class MainWindow(QMainWindow):
             if not url.isLocalFile():
                 ref = youtube_links.parse(url.toString())
                 if ref is not None:
-                    self.open_youtube(ref)
+                    self._open_or_queue(ref)
                     return
                 continue
             path = Path(url.toLocalFile())
@@ -1076,7 +1173,7 @@ class MainWindow(QMainWindow):
                 return
         ref = youtube_links.find(data.text()) if data.hasText() else None
         if ref is not None:   # a link dragged as text
-            self.open_youtube(ref)
+            self._open_or_queue(ref)
 
     def _restore_geometry(self) -> None:
         geometry = self.settings.get("ui.window_geometry")

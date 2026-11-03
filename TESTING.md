@@ -21,6 +21,16 @@ is the real test.
 - [ ] The guest clicks *Following the room* (→ *On my own*): a new video from the host doesn't open for them
 - [ ] The host switches to another video: everyone follows
 
+## Y3. The queue (Up next)
+- [ ] Alone: ➕ Queue three videos while one plays. *Up next* shows them, titles appear after a moment
+- [ ] When the video ends, the next one starts by itself; Skip jumps to the next; right-click: Play now,
+      Move up/down, Remove
+- [ ] In a room: the guest adds a video (➕ Queue): it appears for everyone. When a video ends, the next
+      one starts for both **at the same moment** (the slower PC is waited for)
+- [ ] The guest tries Skip: *Only the host can do that* (SW-610). Host: Settings → YouTube → *Who can skip*
+      → Everyone: now the guest's Skip works
+- [ ] Queue a deleted/private video: it's skipped with a line in Activity, the next one plays
+
 ---
 
 # Test checklist for 0.4.2 (mpv and the film library)

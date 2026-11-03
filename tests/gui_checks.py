@@ -1,7 +1,7 @@
 """The real-app checks (offscreen): the whole window, the film library, three apps in one room,
 the update cycle.
 
-    python tests/gui_checks.py [ui|library|room|update|all] [--out FOLDER]
+    python tests/gui_checks.py [ui|library|youtube|room|update|all] [--out FOLDER]
 
 Exit code 0 only if every chosen check passes. Screenshots and logs go to
 --out (GitHub uploads that folder, so you can look at the screenshots of each
@@ -48,6 +48,20 @@ def check_library(out: Path) -> bool:
                     if line.startswith(("LIBRARY", "steps seen", "converted copy", "library now", "ERRORS SEEN"))))
     if result.returncode != 0:
         print("library check failed; end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
+    return result.returncode == 0
+
+
+def check_youtube(out: Path) -> bool:
+    """A pasted link, the queue moving on by itself, Skip, a deleted video (YouTube itself replaced by
+    a local web server; the resolver process, yt-dlp and mpv are real)."""
+    result = subprocess.run([sys.executable, str(HERE / "youtube_harness.py"), str(out / "youtube")], env=ENV,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    (out / "youtube.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
+    print("\n".join(line for line in result.stdout.splitlines()
+                    if line.startswith(("YOUTUBE", "activity", "ERRORS SEEN"))))
+    if result.returncode != 0:
+        print("youtube check failed; end of its output:")
         print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
     return result.returncode == 0
 
@@ -176,12 +190,14 @@ def check_update(out: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("which", nargs="?", default="all", choices=["ui", "library", "room", "update", "all"])
+    parser.add_argument("which", nargs="?", default="all",
+                        choices=["ui", "library", "youtube", "room", "update", "all"])
     parser.add_argument("--out", default=str(Path(tempfile.gettempdir()) / "syncwatch-gui-checks"))
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    checks = {"ui": check_ui, "library": check_library, "room": check_room, "update": check_update}
+    checks = {"ui": check_ui, "library": check_library, "youtube": check_youtube, "room": check_room,
+              "update": check_update}
     chosen = list(checks) if args.which == "all" else [args.which]
     results = {}
     for name in chosen:

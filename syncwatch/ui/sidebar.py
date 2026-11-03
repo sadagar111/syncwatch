@@ -291,6 +291,102 @@ class PeoplePanel(Panel):
         menu.exec(point)
 
 
+# ============================================================================ the YouTube queue (0.5)
+@dataclass
+class QueueEntry:
+    key: int
+    title: str
+    length: str          # "3:32", "" if not known
+    by: str
+    mine: bool
+
+
+class QueuePanel(Panel):
+    """What plays now and what's next. Right-click a video: play now, move, remove."""
+    playRequested = Signal(int)
+    removeRequested = Signal(int)
+    moveRequested = Signal(int, int)       # (key, new position)
+    skipClicked = Signal()
+    addClicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__("Up next", parent)
+        self.now = QLabel("")
+        self.now.setObjectName("Dim")
+        self.now.setWordWrap(True)
+        self.list = QListWidget()
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._menu)
+        self.list.itemDoubleClicked.connect(lambda item: self._double_clicked(item))
+        self.empty = QLabel("Nothing queued. Paste YouTube links (Ctrl+L) to line up videos.")
+        self.empty.setObjectName("Hint")
+        self.empty.setWordWrap(True)
+        self.add_button = _small_button("➕ Add", "Add a YouTube video to the queue (Ctrl+L)")
+        self.add_button.clicked.connect(self.addClicked)
+        self.skip_button = _small_button("⏭ Skip", "Play the next video now")
+        self.skip_button.clicked.connect(self.skipClicked)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.add_button)
+        buttons.addWidget(self.skip_button)
+        buttons.addStretch(1)
+        self.body.addWidget(self.now)
+        self.body.addWidget(self.list)
+        self.body.addWidget(self.empty)
+        self.body.addLayout(buttons)
+        self.entries: List[QueueEntry] = []
+        self.can_control = False
+
+    def update_queue(self, now_text: str, entries: List[QueueEntry], can_add: bool, can_control: bool) -> None:
+        self.can_control = can_control
+        self.now.setText(now_text)
+        self.now.setVisible(bool(now_text))
+        if [(e.key, e.title, e.length) for e in entries] != [(e.key, e.title, e.length) for e in self.entries]:
+            self.list.clear()
+            for number, entry in enumerate(entries, 1):
+                text = f"{number}. {entry.title}" + (f"  ·  {entry.length}" if entry.length else "")
+                item = QListWidgetItem(text)
+                item.setData(Qt.ItemDataRole.UserRole, entry.key)
+                item.setToolTip(f"{entry.title}\nAdded by {entry.by or 'someone'}")
+                self.list.addItem(item)
+        self.entries = list(entries)
+        if entries:   # just tall enough for the videos, up to six rows (then it scrolls)
+            row = self.list.sizeHintForRow(0) if self.list.count() else 0
+            row = row if row > 0 else self.fontMetrics().height() + 6
+            self.list.setFixedHeight(row * min(len(entries), 6) + 2 * self.list.frameWidth() + 8)
+        self.list.setVisible(bool(entries))
+        self.empty.setVisible(not entries)
+        self.add_button.setEnabled(can_add)
+        self.skip_button.setVisible(can_control and bool(entries))
+        total = len(entries)
+        self.heading.setText(f"UP NEXT ({total})" if total else "UP NEXT")
+
+    def _entry(self, key: int) -> Optional[QueueEntry]:
+        return next((e for e in self.entries if e.key == key), None)
+
+    def _double_clicked(self, item: QListWidgetItem) -> None:
+        if self.can_control:
+            self.playRequested.emit(int(item.data(Qt.ItemDataRole.UserRole)))
+
+    def _menu(self, point: QPoint) -> None:
+        item = self.list.itemAt(point)
+        if item is None:
+            return
+        key = int(item.data(Qt.ItemDataRole.UserRole))
+        entry = self._entry(key)
+        index = self.list.row(item)
+        menu = QMenu(self)
+        if self.can_control:
+            menu.addAction("Play now", lambda: self.playRequested.emit(key))
+            if index > 0:
+                menu.addAction("Move up", lambda: self.moveRequested.emit(key, index - 1))
+            if index < self.list.count() - 1:
+                menu.addAction("Move down", lambda: self.moveRequested.emit(key, index + 1))
+        if self.can_control or (entry is not None and entry.mine):
+            menu.addAction("Remove from the queue", lambda: self.removeRequested.emit(key))
+        if not menu.isEmpty():
+            menu.exec(self.list.viewport().mapToGlobal(point))
+
+
 # ============================================================================ friends
 @dataclass
 class FriendEntry:
@@ -445,6 +541,8 @@ class Sidebar(QWidget):
         self.update_banner = UpdateBanner()
         self.room = RoomPanel(last_code)
         self.people = PeoplePanel()
+        self.queue = QueuePanel()
+        self.queue.hide()                  # shown once YouTube is used (see apply_settings / the window)
         self.friends = FriendsPanel()
         self.activity = ActivityPanel()
         layout = QVBoxLayout(self)
@@ -453,6 +551,7 @@ class Sidebar(QWidget):
         layout.addWidget(self.update_banner)
         layout.addWidget(self.room)
         layout.addWidget(self.people)
+        layout.addWidget(self.queue)
         layout.addWidget(self.friends)
         layout.addWidget(self.activity, 1)
 

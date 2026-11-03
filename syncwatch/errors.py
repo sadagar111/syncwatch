@@ -407,6 +407,11 @@ CATALOG: Dict[str, Problem] = {
          "Try a lower quality (Settings > YouTube > Quality).",
          "Still nothing? Click \"Copy details\" and send them to whoever gave you SyncWatch."]),
 
+    "SW-610": Problem(
+        "Only the host can do that with the queue",
+        "The host's settings decide who may add videos, skip, remove and reorder.",
+        ["Ask the host, or watch on your own (click \"Following the room\")."], INFO),
+
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(
         "Couldn't check for updates",

@@ -205,6 +205,18 @@ SCHEMA: List[Setting] = [
     _s("youtube.follow_host", "bool", True, "Open the videos the host plays", YT,
        "In a room, when the host plays a YouTube video, it opens for you too (unless you're watching "
        "on your own)."),
+    _s("youtube.autoplay", "bool", True, "Play the next video by itself", YT,
+       "When a video ends, the next one in the queue starts (for everyone, when you host)."),
+    _s("youtube.queue_add", "choice", "everyone", "Who can add videos to the queue", YT,
+       "When you host a room. Requests from others are checked by your app.",
+       choices=[("everyone", "Everyone in the room"), ("host", "Only me (the host)")]),
+    _s("youtube.queue_control", "choice", "host", "Who can skip, remove and reorder", YT,
+       "When you host a room. Everyone can always remove the videos they added themselves.",
+       choices=[("host", "Only me (the host)"), ("everyone", "Everyone in the room")]),
+    _s("youtube.start_wait_s", "int", 20, "Wait for everyone to open the next video at most", YT,
+       "When you host: the next video starts for everyone together, once all have it open (slow "
+       "PCs are named after this long, and it starts anyway).", advanced=True, minimum=5, maximum=120,
+       suffix=" s"),
     _s("youtube.codecs", "choice", "compatible", "Video formats", YT,
        "Most compatible avoids AV1, which older PCs can't decode smoothly. Any also allows AV1: a bit "
        "sharper for the same internet speed, but needs a newer PC or graphics card.", advanced=True,
@@ -224,6 +236,8 @@ SCHEMA: List[Setting] = [
     _s("ui.panel_connection", "bool", True, "Show the room panel", UI),
     _s("ui.panel_people", "bool", True, "Show the people panel", UI),
     _s("ui.panel_friends", "bool", True, "Show the friends panel", UI),
+    _s("ui.panel_queue", "bool", True, "Show the YouTube queue (Up next)", UI,
+       "Only appears once a YouTube video plays or something is queued."),
     _s("ui.panel_activity", "bool", True, "Show the activity feed", UI),
     _s("ui.markers", "bool", True, "Show friends on the seek bar", UI),
     _s("ui.end_clock", "bool", True, "Show when the film ends", UI),
