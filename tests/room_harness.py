@@ -112,6 +112,9 @@ class RecorderUI:
     def follow_youtube(self, video_id, title=""):
         self._add(("follow", video_id))
 
+    def follow_torrent(self, magnet, name="", size=0):
+        self._add(("follow_torrent", magnet))
+
     def followed(self):
         return [e[1] for e in self.events if e[0] == "follow"]
 

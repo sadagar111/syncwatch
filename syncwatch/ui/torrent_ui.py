@@ -196,6 +196,15 @@ class Torrents(QObject):
         self.statusText.emit("⬇ finding the torrent…")
         return True
 
+    def magnet(self) -> str:
+        """A magnet link for what streams now: the one opened, or one made from the info-hash."""
+        if links.is_magnet(self.source_text):
+            return self.source_text
+        if len(self.hash) == 40:
+            from urllib.parse import quote  # noqa: PLC0415
+            return f"magnet:?xt=urn:btih:{self.hash}&dn={quote(self.name)}"
+        return ""
+
     def add_peer(self, address: str) -> None:
         """Someone who has the film (e.g. a friend in the room): connect to them directly."""
         if self.engine is not None:

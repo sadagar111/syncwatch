@@ -241,6 +241,9 @@ SCHEMA: List[Setting] = [
     _s("torrents.incoming", "bool", True, "Let others connect to me", TR,
        "Faster, and needed to share films with friends in a room. Windows asks once whether SyncWatch may "
        "use the network. Off: SyncWatch only connects out."),
+    _s("torrents.follow_host", "bool", True, "Stream the torrents the host streams", TR,
+       "In a room, when the host streams a torrent you don't have, it starts streaming for you too "
+       "(unless you're watching on your own)."),
     _s("torrents.start_mb", "int", 8, "Start playing after", TR,
        "How much of the film is fetched before it starts playing.", advanced=True, minimum=1, maximum=500,
        suffix=" MB"),

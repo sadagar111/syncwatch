@@ -277,6 +277,15 @@ class YouTubeTests(RoomTestCase):
         self.assertTrue(self.pump(until=lambda: self.alex.peer(self.marek).match == "same"))
         self.assertNotIn("SW-501", self.marek.ui.problems() + self.alex.ui.problems())
 
+    def test_members_stream_the_hosts_torrent(self):
+        magnet = "magnet:?xt=urn:btih:4b0c7aed0cff8b7804a5955b9d68b712369c4792&dn=Film.mkv"
+        self.alex.c.set_film("Film.mkv", 4_000_000, 0, magnet=magnet)
+        self.assertTrue(self.pump(until=lambda: ("follow_torrent", magnet) in self.marek.ui.events))
+        self.kuba.c.set_film("Film.mkv", 4_000_000, 7_200_000)     # he has the same film: nothing to stream
+        count = len([e for e in self.kuba.ui.events if e[0] == "follow_torrent"])
+        self.pump(2.5)
+        self.assertEqual(len([e for e in self.kuba.ui.events if e[0] == "follow_torrent"]), count)
+
     def test_a_film_and_a_video_arent_compared_by_length(self):
         self.alex.c.set_film("A test video", 0, 7_200_000, yt=self.VIDEO)
         self.kuba.c.set_attached(False)

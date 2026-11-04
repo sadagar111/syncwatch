@@ -77,7 +77,8 @@ POS = (int, True, (0, MAX_POSITION_MS))
 YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}")
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
-              "yt": (YOUTUBE_ID, False, None)}   # since 0.5: a YouTube video instead of a file
+              "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
+              "magnet": (str, False, 3000)}      # since 0.6: streamed from this torrent (checked again on use)
 QUEUE_ITEM: Spec = {"k": (int, True, (1, 1 << 31)), "yt": (YOUTUBE_ID, True, None), "title": (str, True, 120),
                     "dur": (int, False, (0, MAX_POSITION_MS)), "by": (str, False, 32)}
 QUEUE_RULES: Spec = {"add": (("everyone", "host"), True, None), "control": (("host", "everyone"), True, None)}

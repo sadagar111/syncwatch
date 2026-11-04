@@ -205,11 +205,14 @@ class Controller(RoomListener):
                 self.session.rename()
             self._send_profile()
 
-    def set_film(self, name: str, size: int, duration_ms: int, yt: str = "") -> None:
-        """What I have open. yt: a YouTube video's ID (then name is its title and size 0)."""
+    def set_film(self, name: str, size: int, duration_ms: int, yt: str = "", magnet: str = "") -> None:
+        """What I have open. yt: a YouTube video's ID (then name is its title and size 0).
+        magnet: the torrent it streams from (so others in the room can stream it too)."""
         film = {"name": name[:255], "size": int(size), "dur": max(0, int(duration_ms))}
         if yt:
             film["yt"] = yt
+        if magnet and len(magnet) <= 3000:
+            film["magnet"] = magnet
         if film == self.film:
             return
         self.film = film
@@ -986,13 +989,20 @@ class Controller(RoomListener):
         self.ui_queue_changed()
 
     def _follow_host_video(self, film: Dict) -> None:
-        """The host plays a YouTube video I don't have open: the window opens it (if I follow the room)."""
-        video = film.get("yt")
-        if not video or self.is_host or not self.attached or (self.film or {}).get("yt") == video:
+        """The host plays a YouTube video, or streams a torrent, that I don't have open: the window
+        opens the same (if I follow the room). A film I have under the same name and size counts."""
+        if self.is_host or not self.attached:
             return
-        follow = getattr(self.ui, "follow_youtube", None)
-        if follow is not None:
-            follow(video, film.get("name", ""))
+        video, magnet = film.get("yt"), film.get("magnet")
+        mine = self.film or {}
+        if video and mine.get("yt") != video:
+            follow = getattr(self.ui, "follow_youtube", None)
+            if follow is not None:
+                follow(video, film.get("name", ""))
+        elif magnet and not video and (mine.get("name"), mine.get("size")) != (film.get("name"), film.get("size")):
+            follow = getattr(self.ui, "follow_torrent", None)
+            if follow is not None:
+                follow(magnet, film.get("name", ""), int(film.get("size", 0)))
 
     def _on_req(self, peer: Peer, body: Dict) -> None:
         if not self.is_host:

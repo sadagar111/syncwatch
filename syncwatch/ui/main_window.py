@@ -39,6 +39,7 @@ from .sidebar import FriendEntry, PersonEntry, Sidebar, WaitingEntry
 from .subtitles_ui import Subtitles
 from .updates_ui import UpdateController
 from .sidebar import QueueEntry
+from ..library import films as library_films
 from .torrent_ui import Torrents
 from .youtube_ui import LinkBox, LinkDialog, TitleLookup, YouTube
 from ..torrent import links as torrent_links
@@ -180,6 +181,7 @@ class MainWindow(QMainWindow):
         self._follow_align = False     # the video was opened because the host plays it: line up after
         self._queue_autostart = False  # the next video of the queue: start everyone together once it's open
         self._following_id = ""        # the host's video I'm opening (its problems only go to the activity feed)
+        self._torrent_follow_tried: dict = {}   # magnet -> when following the host's torrent was last started
         self._last_resume_save = 0.0
         self._refresh_wanted = True
         self._was_maximized = False
@@ -625,6 +627,26 @@ class MainWindow(QMainWindow):
             self._following_id = video_id
             self.activity(f"The host plays a YouTube video: opening {title or video_id}", "friend")
 
+    def follow_torrent(self, magnet: str, name: str, size: int) -> None:
+        """The controller: the host streams a torrent I don't have open. A film of that name and size
+        in my library is opened instead (no download needed)."""
+        if not self.settings.get("torrents.follow_host") or not torrent_links.is_magnet(magnet):
+            return
+        if self.torrents.active and self.torrents.hash and self.torrents.hash == torrent_links.magnet_hash(magnet):
+            return   # already streaming it
+        if time.monotonic() - self._torrent_follow_tried.get(magnet, -1e9) < 60:
+            return   # tried a moment ago (e.g. it failed): don't start again on every heartbeat
+        self._torrent_follow_tried[magnet] = time.monotonic()
+        known = library_films.list_films(self.movies_dir()) + library_films.list_films(self.torrents.folder())
+        local = next((film.path for film in known if film.path.name == name and film.size == size), None)
+        self._follow_align = True
+        if local is not None:
+            self.activity(f"The host streams {name}: you have it in your library, opening that", "friend")
+            self.open_film(local)
+            return
+        self.activity(f"The host streams {name or 'a torrent'}: streaming it too", "friend")
+        self.torrents.open(magnet)
+
     def play_stream(self, stream, start_s: int = 0) -> None:
         """A YouTube video was found: play it like a film."""
         self._save_resume(force=True)
@@ -638,7 +660,7 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(self.video)
         self.subtitles.film_closed()
         if stream.kind == "torrent":
-            self.controller.set_film(stream.title, stream.size, 0)
+            self.controller.set_film(stream.title, stream.size, 0, magnet=self.torrents.magnet())
         else:
             self.controller.set_film(stream.label, 0, stream.duration_ms, yt=stream.id)
 
@@ -719,7 +741,10 @@ class MainWindow(QMainWindow):
             self.controller.align_on_next_state()
         self._apply_audio_preference()
         if stream is not None and stream.kind == "torrent":
-            self.controller.set_film(stream.title, stream.size, duration)
+            self.controller.set_film(stream.title, stream.size, duration, magnet=self.torrents.magnet())
+            if self._follow_align:
+                self._follow_align = False
+                self.controller.align_on_next_state()
             self.controller.queue_playing_elsewhere()
             self.activity(f"Opened {stream.title} ({fmt_time(duration)}), streaming from the torrent", "you")
         elif stream is not None:
