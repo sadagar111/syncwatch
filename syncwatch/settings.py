@@ -25,7 +25,7 @@ log = logging.getLogger("syncwatch.settings")
 
 FILE_VERSION = 1
 
-SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Interface",
+SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Torrents", "Interface",
             "Keyboard", "Updates", "Diagnostics"]
 
 
@@ -52,7 +52,7 @@ def _s(*args, **kwargs) -> Setting:
     return Setting(*args, **kwargs)
 
 
-P, PB, SB, WT, YT, UI, KB, UP, DG = SECTIONS
+P, PB, SB, WT, YT, TR, UI, KB, UP, DG = SECTIONS
 
 SCHEMA: List[Setting] = [
     # ---- Profile ----------------------------------------------------------------------
@@ -227,6 +227,26 @@ SCHEMA: List[Setting] = [
     _s("youtube.js_runtime", "path", "", "Deno program", YT,
        "yt-dlp needs a JavaScript program to read YouTube's pages: Deno, which comes with SyncWatch. "
        "Only set this to use another deno.exe. Empty means the one inside SyncWatch.", advanced=True),
+
+    # ---- Torrents (from 0.6) ----------------------------------------------------------
+    _s("torrents.folder", "path", "", "Download folder", TR,
+       "Where streamed films are saved. Empty means a 'Torrents' folder inside your library folder."),
+    _s("torrents.after", "choice", "keep", "When you close a streamed film", TR,
+       "Keep it: it stays in the download folder (and others can keep getting it from you while it's "
+       "open). Delete it: streaming only, nothing stays on your drive.",
+       choices=[("keep", "Keep the film"), ("delete", "Delete it")]),
+    _s("torrents.upload_kbps", "int", 0, "Upload limit", TR,
+       "How fast others may download from you while you stream. 0 = no limit.", minimum=0, maximum=100_000,
+       suffix=" KB/s"),
+    _s("torrents.incoming", "bool", True, "Let others connect to me", TR,
+       "Faster, and needed to share films with friends in a room. Windows asks once whether SyncWatch may "
+       "use the network. Off: SyncWatch only connects out."),
+    _s("torrents.start_mb", "int", 8, "Start playing after", TR,
+       "How much of the film is fetched before it starts playing.", advanced=True, minimum=1, maximum=500,
+       suffix=" MB"),
+    _s("torrents.dht", "bool", True, "Find others without trackers (DHT)", TR,
+       "Needed for most magnet links.", advanced=True),
+    _s("torrents.connections", "int", 200, "Connections at most", TR, advanced=True, minimum=10, maximum=2000),
 
     # ---- Interface --------------------------------------------------------------------
     _s("ui.show_advanced", "bool", False, "Show advanced options", UI),

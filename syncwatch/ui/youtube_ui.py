@@ -21,6 +21,7 @@ from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from .. import errors
+from ..torrent import links as torrent_links
 from ..youtube import links, resolve, streams
 
 log = logging.getLogger("syncwatch.youtube")
@@ -290,11 +291,12 @@ class LinkBox(QWidget):
     Emits submitted(VideoRef) (watch now) or queued(VideoRef)."""
     submitted = Signal(object)
     queued = Signal(object)
+    magnetSubmitted = Signal(str)     # a magnet link (from 0.6: torrents)
 
     def __init__(self, button_text: str = "▶  Watch", parent=None):
         super().__init__(parent)
         self.field = QLineEdit()
-        self.field.setPlaceholderText("Paste a YouTube link…")
+        self.field.setPlaceholderText("Paste a YouTube link or a magnet link…")
         self.field.setClearButtonEnabled(True)
         self.field.returnPressed.connect(self._submit)
         self.field.textChanged.connect(self._changed)
@@ -321,14 +323,20 @@ class LinkBox(QWidget):
 
     def _changed(self, text: str) -> None:
         ref = links.parse(text)
-        self.button.setEnabled(ref is not None)
+        magnet = torrent_links.is_magnet(text)
+        self.button.setEnabled(ref is not None or magnet)
         self.queue_button.setEnabled(ref is not None)
-        bad = bool(text.strip()) and ref is None
-        self.note.setText("That isn't a YouTube video link." if bad else "")
+        bad = bool(text.strip()) and ref is None and not magnet
+        self.note.setText("That isn't a YouTube video or magnet link." if bad else "")
         self.note.setVisible(bad)
 
     def _submit(self) -> None:
-        ref = links.parse(self.field.text())
+        text = self.field.text().strip()
+        ref = links.parse(text)
+        if ref is None and torrent_links.is_magnet(text):
+            self.field.clear()
+            self.magnetSubmitted.emit(text)
+            return
         if ref is None:
             return
         self.field.clear()

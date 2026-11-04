@@ -10,6 +10,8 @@ starting the next video at the end, Skip, and a video that can't be found being 
 1. Paste a link on the start screen: the video opens and plays.
 2. Queue two more (one of them "deleted"), then let the video end: the next one starts by itself.
 3. Skip: the broken one can't be opened, so the one after it plays.
+4. A torrent (from 0.6, if libtorrent is installed): a .torrent file of a short film, shared by a
+   libtorrent session in this process on 127.0.0.1, streams and plays; closing it stops the helper.
 Screenshots go to the output folder. Exit code 0 only if every check passes.
 """
 import functools
@@ -36,7 +38,9 @@ os.environ["no_proxy"] = os.environ["NO_PROXY"] = "127.0.0.1,localhost"
 profile_dir = data_dir / "profiles" / "default"
 profile_dir.mkdir(parents=True)
 (profile_dir / "settings.json").write_text(json.dumps(
-    {"_version": 1, "values": {"profile.name": "Alex", "ui.startup_checks": "never"}}), encoding="utf-8")
+    {"_version": 1, "values": {"profile.name": "Alex", "ui.startup_checks": "never", "torrents.dht": False,
+                               "torrents.incoming": False, "torrents.start_mb": 1,
+                               "torrents.folder": str(data_dir / "torrents")}}), encoding="utf-8")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -131,8 +135,53 @@ def run_script():
     CHECKS["broken video skipped, the next plays"] = spin(40, lambda: playing(window, THIRD))
     CHECKS["queue empty"] = window.controller.queue.items == []
     shot(window, "04_after_skip")
+    torrent_step(window)
     print("activity:", [window.sidebar.activity.list.item(i).text()
                         for i in range(window.sidebar.activity.list.count())][-8:])
+
+
+def torrent_step(window):
+    try:
+        import libtorrent as lt
+    except ImportError:
+        if os.environ.get("GITHUB_ACTIONS"):
+            CHECKS["libtorrent installed"] = False
+        return
+    import warnings
+    seed_dir = data_dir / "seed"
+    seed_dir.mkdir()
+    make_film(seed_dir / "Torrent Film.mkv", seconds=6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        storage = lt.file_storage()
+        lt.add_files(storage, str(seed_dir / "Torrent Film.mkv"))
+        maker = lt.create_torrent(storage, 16384)
+        lt.set_piece_hashes(maker, str(seed_dir))
+    torrent = data_dir / "Torrent Film.torrent"
+    torrent.write_bytes(lt.bencode(maker.generate()))
+    seeder = lt.session({"listen_interfaces": "127.0.0.1:0", "enable_dht": False, "enable_lsd": False,
+                         "enable_upnp": False, "enable_natpmp": False})
+    params = lt.add_torrent_params()
+    params.ti = lt.torrent_info(str(torrent))
+    params.save_path = str(seed_dir)
+    handle = seeder.add_torrent(params)
+    spin(10, lambda: handle.status().is_seeding)
+    window.open_torrent(str(torrent))
+    window.torrents.add_peer(f"127.0.0.1:{seeder.listen_port()}")
+    playing_torrent = lambda: (getattr(window.player, "stream", None) is not None
+                               and window.player.stream.kind == "torrent" and window.player.is_ready())
+    CHECKS["torrent streams and opens"] = spin(40, playing_torrent)
+    CHECKS["torrent film has its length"] = abs(window.player.duration() - 6000) < 400
+    spin(1.5)
+    CHECKS["download shown in the control bar"] = window.controls.source_label.text().startswith("⬇")
+    window.controller.toggle()
+    CHECKS["torrent film plays"] = spin(5, window.player.is_playing)
+    shot(window, "05_torrent")
+    window.close_film()
+    CHECKS["closing stops the torrent"] = not window.torrents.active
+    CHECKS["film kept (setting: keep)"] = (data_dir / "torrents" / "Torrent Film.mkv").is_file()
+    print("torrent activity:", [window.sidebar.activity.list.item(i).text()
+                                for i in range(window.sidebar.activity.list.count())][-4:])
 
 
 def scripted_exec(self):

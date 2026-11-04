@@ -30,3 +30,6 @@ yt-dlp-ejs==0.8.0 \
     --hash=sha256:79300e5fca7f937a1eeede11f0456862c1b41107ce1d726871e0207424f4bdb4
 deno==2.9.8 \
     --hash=sha256:60dd97e612b8bab67c8080712646a821071e3809909489f853763cea19617700
+# libtorrent: streaming torrents (from 0.6); one file with everything inside (OpenSSL included).
+libtorrent==2.1.1 \
+    --hash=sha256:fa11aa801d5b9184f067f559c465d3074a4e878d9c671b00dd4930d6dfce2b46

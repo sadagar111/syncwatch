@@ -178,6 +178,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             from .ui import players
             context.check_results.append(checks.player_check(window.player, players.fallback_reason or ""))
             context.check_results.append(checks.youtube_check(window.settings.get("youtube.js_runtime")))
+            context.check_results.append(checks.torrent_check())
 
     run_checks()
 

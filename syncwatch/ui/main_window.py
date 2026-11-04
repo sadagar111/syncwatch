@@ -17,6 +17,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import (QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QImage, QKeySequence,
                            QPainter, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+                               QPushButton,
                                QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import errors, log as log_module, paths
@@ -38,7 +39,9 @@ from .sidebar import FriendEntry, PersonEntry, Sidebar, WaitingEntry
 from .subtitles_ui import Subtitles
 from .updates_ui import UpdateController
 from .sidebar import QueueEntry
+from .torrent_ui import Torrents
 from .youtube_ui import LinkBox, LinkDialog, TitleLookup, YouTube
+from ..torrent import links as torrent_links
 from ..youtube import links as youtube_links
 
 log = logging.getLogger("syncwatch.window")
@@ -107,9 +110,10 @@ class IdleScreen(QWidget):
         card_layout.addWidget(self.library)
         youtube_card = QFrame()
         youtube_card.setObjectName("Card")
-        youtube_title = QLabel("YouTube")
+        youtube_title = QLabel("YouTube and torrents")
         youtube_title.setObjectName("LibraryTitle")
-        youtube_note = QLabel("Watch a YouTube video. In a room, everyone who follows the host opens it too.")
+        youtube_note = QLabel("Paste a YouTube link, or a magnet link to watch a torrent while it downloads. "
+                              "In a room, everyone who follows the host opens the same video.")
         youtube_note.setObjectName("Dim")
         youtube_note.setWordWrap(True)
         self.youtube_box = LinkBox()
@@ -119,6 +123,12 @@ class IdleScreen(QWidget):
         youtube_layout.addWidget(youtube_title)
         youtube_layout.addWidget(youtube_note)
         youtube_layout.addWidget(self.youtube_box)
+        self.torrent_file_button = QPushButton("📁  Open a .torrent file…")
+        self.torrent_file_button.setToolTip("Watch a torrent while it downloads (the part you're watching first)")
+        torrent_row = QHBoxLayout()
+        torrent_row.addWidget(self.torrent_file_button)
+        torrent_row.addStretch(1)
+        youtube_layout.addLayout(torrent_row)
         self.hint = QLabel("Tip: drop a film file (or a YouTube link from your browser) here to play it straight "
                            "away, without adding it to the library.")
         self.hint.setObjectName("Hint")
@@ -194,6 +204,12 @@ class MainWindow(QMainWindow):
         self.youtube.failed.connect(self._youtube_failed)
         self.idle.youtube_box.submitted.connect(self.open_youtube)
         self.idle.youtube_box.queued.connect(self.queue_youtube)
+        self.idle.youtube_box.magnetSubmitted.connect(self.open_torrent)
+        self.idle.torrent_file_button.clicked.connect(self.pick_torrent_file)
+        self.torrents = Torrents(self.settings, lambda: self.movies_dir() / "Torrents", self)
+        self.torrents.ready.connect(lambda source: self.play_stream(source, 0))
+        self.torrents.statusText.connect(self.controls.set_source_text)
+        self.torrents.message.connect(self.activity)
         self.titles = TitleLookup(self)
         self.titles.found.connect(lambda video, title: self.controller.queue_info(video, title, 0))
         queue_panel = self.sidebar.queue
@@ -517,6 +533,8 @@ class MainWindow(QMainWindow):
 
     def open_film(self, path: Path) -> None:
         self._save_resume(force=True)
+        if self.torrents.active and not (self.torrents.playing and path.name == self.torrents.playing.title):
+            self.torrents.stop()
         if self.player.load(path):
             try:
                 size = path.stat().st_size
@@ -610,14 +628,19 @@ class MainWindow(QMainWindow):
     def play_stream(self, stream, start_s: int = 0) -> None:
         """A YouTube video was found: play it like a film."""
         self._save_resume(force=True)
+        if stream.kind != "torrent" and self.torrents.active:
+            self.torrents.stop()            # something else plays now
         if not self.player.load_stream(stream):
             return
-        self._film_key = f"yt:{stream.id}"
+        self._film_key = film_key(stream.title, stream.size) if stream.kind == "torrent" else f"yt:{stream.id}"
         self._start_at_ms = max(0, int(start_s)) * 1000
         self.setWindowTitle(f"SyncWatch: {stream.label}")
         self.stack.setCurrentWidget(self.video)
         self.subtitles.film_closed()
-        self.controller.set_film(stream.label, 0, stream.duration_ms, yt=stream.id)
+        if stream.kind == "torrent":
+            self.controller.set_film(stream.title, stream.size, 0)
+        else:
+            self.controller.set_film(stream.label, 0, stream.duration_ms, yt=stream.id)
 
     def _youtube_busy(self, text: str) -> None:
         if text:
@@ -641,9 +664,25 @@ class MainWindow(QMainWindow):
         title = problem.title if problem else code
         self.activity(f"Couldn't open the host's YouTube video {video_id}: {title} ({code})", "warn")
 
+    # ---------------------------------------------------------------- torrents (0.6)
+    def open_torrent(self, source: str) -> None:
+        """A magnet link or a .torrent file: stream it (the part being watched first)."""
+        self.torrents.open(source)
+
+    def pick_torrent_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Open a torrent file", str(Path.home() / "Downloads"),
+                                              "Torrent files (*.torrent)")
+        if path:
+            self.open_torrent(path)
+
     def _paste_link(self) -> None:
         """Ctrl+V outside a text field: a YouTube link from the clipboard opens."""
-        ref = youtube_links.find(QApplication.clipboard().text())
+        text = QApplication.clipboard().text()
+        magnet = torrent_links.find_magnet(text)
+        if magnet is not None:
+            self.open_torrent(magnet)
+            return
+        ref = youtube_links.find(text)
         if ref is not None:
             self._open_or_queue(ref)
 
@@ -651,6 +690,7 @@ class MainWindow(QMainWindow):
         """Close the open film (e.g. before it's removed from the library): back to the start screen."""
         self._save_resume(force=True)
         self.player.unload()
+        self.torrents.stop()
         self.subtitles.film_closed()
         self._film_key = ""
         self.setWindowTitle("SyncWatch")
@@ -678,7 +718,11 @@ class MainWindow(QMainWindow):
             self._follow_align = False
             self.controller.align_on_next_state()
         self._apply_audio_preference()
-        if stream is not None:
+        if stream is not None and stream.kind == "torrent":
+            self.controller.set_film(stream.title, stream.size, duration)
+            self.controller.queue_playing_elsewhere()
+            self.activity(f"Opened {stream.title} ({fmt_time(duration)}), streaming from the torrent", "you")
+        elif stream is not None:
             self.controller.set_film(stream.label, 0, duration or stream.duration_ms, yt=stream.id)
             self.controller.queue_info(stream.id, stream.label, duration or stream.duration_ms)
             if self._queue_autostart:
@@ -1168,9 +1212,16 @@ class MainWindow(QMainWindow):
             if path.suffix.lower() in VIDEO_EXTENSIONS:
                 self.open_film(path)
                 return
+            if torrent_links.is_torrent_file(path):
+                self.open_torrent(str(path))
+                return
             if path.suffix.lower() in (".srt", ".vtt", ".ass", ".ssa") and self.player.path:
                 self.subtitles.load_external(path)
                 return
+        magnet = torrent_links.find_magnet(data.text()) if data.hasText() else None
+        if magnet is not None:
+            self.open_torrent(magnet)
+            return
         ref = youtube_links.find(data.text()) if data.hasText() else None
         if ref is not None:   # a link dragged as text
             self._open_or_queue(ref)
@@ -1206,6 +1257,7 @@ class MainWindow(QMainWindow):
         self.films.save_if_dirty()
         self.subtitles.stop()
         self.youtube.stop()
+        self.torrents.stop()
         self.library.shutdown()
         self.controller.shutdown()
         self.player.shutdown()

@@ -44,6 +44,10 @@ class ControlBar(QFrame):
         row1 = QHBoxLayout()
         row1.addWidget(self.time_label)
         row1.addWidget(self.seek, 1)
+        self.source_label = QLabel("")      # e.g. a torrent: "⬇ 45 % · 3.2 MB/s · 18 people"
+        self.source_label.setObjectName("Dim")
+        self.source_label.hide()
+        row1.addWidget(self.source_label)
         row1.addWidget(self.right_label)
 
         self.back = IconButton("back", "⏪ 10", "Skip back")
@@ -129,6 +133,10 @@ class ControlBar(QFrame):
             self.play.set_face("pause", "⏸  Pause")
         else:
             self.play.set_face("play", "▶  Play")
+
+    def set_source_text(self, text: str) -> None:
+        self.source_label.setText(text)
+        self.source_label.setVisible(bool(text))
 
     def set_times(self, position: float, duration: int, show_remaining: bool, show_end: bool) -> None:
         self.time_label.setText(fmt_time(position))

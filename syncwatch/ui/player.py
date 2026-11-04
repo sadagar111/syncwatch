@@ -183,12 +183,12 @@ class Player(QObject):
     def load_stream(self, stream) -> bool:
         """A YouTube video. Qt's player can't join separate picture and sound streams, so SyncWatch
         asks yt-dlp for one with both (lower quality: that's what YouTube offers)."""
-        if stream.audio_url:
-            errors.report("SW-609", "Qt's player needs one stream with picture and sound")
+        if getattr(stream, "audio_url", ""):
+            errors.report(stream.problem, "Qt's player needs one stream with picture and sound")
             return False
         self.path, self.stream = None, stream
-        self._open(QUrl(stream.video_url))
-        log.info("loading YouTube video %s (%s)", stream.id, stream.describe())
+        self._open(QUrl(stream.address()))
+        log.info("loading %s %s (%s)", stream.kind, stream.id, stream.describe())
         return True
 
     def _open(self, url: QUrl) -> None:
@@ -281,7 +281,7 @@ class Player(QObject):
             self.loaded.emit()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia and not self._error_reported:
             self._error_reported = True
-            errors.report("SW-609" if self.stream is not None else "SW-205",
+            errors.report(self.stream.problem if self.stream is not None else "SW-205",
                           f"Qt reports invalid media: {self.mp.errorString() or '-'}")
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.ended.emit()

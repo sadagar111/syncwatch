@@ -353,14 +353,15 @@ class MpvPlayer(QObject):
         return True
 
     def load_stream(self, stream) -> bool:
-        """A YouTube video found by youtube/resolve.py: picture and sound joined in one EDL."""
+        """A stream: a YouTube video (picture and sound joined in one EDL) or a torrent that streams
+        from the torrent helper's local web server. Anything with address(), headers, header_fields()."""
         if self.core is None:
             return False
         self.path, self.stream = None, stream
         self._set_headers(stream.headers.get("User-Agent", ""), stream.header_fields())
-        if not self._open(stream.address(), "SW-609"):
+        if not self._open(stream.address(), stream.problem):
             return False
-        log.info("loading YouTube video %s (%s)", stream.id, stream.describe())
+        log.info("loading %s %s (%s)", stream.kind, stream.id, stream.describe())
         return True
 
     def _set_headers(self, user_agent: str, fields: List[str]) -> None:
@@ -392,7 +393,7 @@ class MpvPlayer(QObject):
         return True
 
     def _load_problem(self) -> str:
-        return "SW-609" if self.stream is not None else "SW-205"
+        return self.stream.problem if self.stream is not None else "SW-205"
 
     def unload(self) -> None:
         self._async("stop")

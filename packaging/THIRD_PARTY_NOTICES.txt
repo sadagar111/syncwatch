@@ -34,6 +34,11 @@ Deno (deno.exe in Lib\site-packages\bin: runs YouTube's JavaScript for yt-dlp, f
   MIT License. https://deno.com/  Source code: https://github.com/denoland/deno
   Installed from the "deno" package on PyPI, which holds the official deno.exe.
 
+libtorrent (Lib\site-packages\libtorrent: streaming torrents, from SyncWatch 0.6)
+  BSD 3-Clause. https://libtorrent.org/  Source code: https://github.com/arvidn/libtorrent
+  The official Windows build from PyPI. It contains Boost (Boost Software License 1.0) and
+  OpenSSL (Apache License 2.0, https://www.openssl.org/).
+
 Qt for Python (PySide6, shiboken6) and the Qt libraries it contains
   GNU Lesser General Public License v3 (LGPLv3). https://www.qt.io/qt-for-python
   These are the unmodified official builds from PyPI, loaded as separate,

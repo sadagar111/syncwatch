@@ -36,6 +36,9 @@ class Stream:
     headers: Dict[str, str] = field(default_factory=dict)
     expires: float = 0.0
 
+    kind = "youtube"
+    problem = "SW-609"           # reported if the player can't play it
+
     @property
     def duration_ms(self) -> int:
         return int(self.duration_s * 1000)

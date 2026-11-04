@@ -1,3 +1,19 @@
+# Test checklist for 0.6 (torrents), branch `try/0.6-torrent`
+
+Use a legal torrent, e.g. Big Buck Bunny or Sintel (Blender's open films) or a film from the
+Internet Archive's public-domain collection: their pages have a magnet link or a .torrent file.
+
+## T1. Streaming
+- [ ] `git switch try/0.6-torrent`, `SyncWatch.bat` (installs libtorrent once). Startup checks: **Torrents: libtorrent installed**
+- [ ] Paste a magnet link on the start screen → *Watch*: the activity says *Streaming <file>*, and the film starts after a
+      short while; the control bar shows *⬇ … % · … MB/s · … people*
+- [ ] Jump to the middle, then near the end: it continues after a short wait, not after the whole download
+- [ ] Windows asks once whether SyncWatch may use the network: allow it (or turn off *Let others connect to me*)
+- [ ] Close the film (or open another): the download stops. *Keep the film*: it's in `movies\Torrents`; *Delete it*: gone
+- [ ] Drop a .torrent file onto SyncWatch; Ctrl+V with a magnet link in the clipboard: both start streaming
+
+---
+
 # Test checklist for 0.5 (YouTube together), branch `try/0.5-youtube`
 
 Nothing here could be tried with the real YouTube from where it was built (YouTube is blocked

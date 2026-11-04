@@ -105,6 +105,14 @@ def youtube_check(js_setting: str = "") -> CheckResult:
     return CheckResult("Video", "YouTube", OK, f"yt-dlp {version} with Deno")
 
 
+def torrent_check() -> CheckResult:
+    """Streaming torrents (from 0.6): libtorrent, which runs in its own process."""
+    import importlib.util  # noqa: PLC0415
+    if importlib.util.find_spec("libtorrent") is None:
+        return CheckResult("Video", "Torrents", WARN, "libtorrent is missing", "SW-624")
+    return CheckResult("Video", "Torrents", OK, "libtorrent installed")
+
+
 def player_check(player, fallback_reason: str = "") -> CheckResult:
     """Which video player plays films: mpv (normal), or Qt's (chosen, or because mpv failed)."""
     if player.engine == "mpv":

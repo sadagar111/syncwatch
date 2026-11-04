@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0 (in progress: torrents, branch `try/0.6-torrent`, built on 0.5)
+**Watch a torrent while it downloads**
+- Paste a magnet link on the start screen (or Ctrl+V, or drop a link or a .torrent file onto SyncWatch), or click *Open a .torrent file…*. SyncWatch picks the film in it (the biggest video file) and starts playing after the first few MB.
+- The part you're watching comes first: SyncWatch fetches the pieces just ahead of where you are. Jump to the middle or the end, and those pieces are fetched next, so you don't wait for the whole film.
+- The control bar shows how far it is: *⬇ 45 % · 3.2 MB/s · 18 people · about 2 min left*.
+- Settings > Torrents: download folder (default: *Torrents* in your library folder), keep or delete the film when you close it, upload limit, whether others may connect to you (Windows asks once), and advanced ones.
+- Only what you open yourself: SyncWatch doesn't search for films anywhere.
+- libtorrent comes with SyncWatch (about 5 MB more). It runs in its own process, like the converter.
+- New problems with plain explanations: SW-620 to SW-626.
+
 ## 0.5.0 (in progress: YouTube together)
 **Watch YouTube together**
 - Paste a YouTube link on the start screen (or press Ctrl+L, or Ctrl+V anywhere, or drag a link from your browser onto SyncWatch). Watch links, youtu.be, Shorts and `&t=` start times all work.

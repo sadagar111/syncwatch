@@ -14,3 +14,5 @@ av>=14
 # holds deno.exe.
 yt-dlp[default]>=2026.10.26
 deno>=2.9.8
+# Streaming torrents (from 0.6): libtorrent, in a process of its own (syncwatch/torrent/engine.py).
+libtorrent>=2.0.9

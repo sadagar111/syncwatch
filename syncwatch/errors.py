@@ -412,6 +412,41 @@ CATALOG: Dict[str, Problem] = {
         "The host's settings decide who may add videos, skip, remove and reorder.",
         ["Ask the host, or watch on your own (click \"Following the room\")."], INFO),
 
+    # ---- 62x: torrents ------------------------------------------------------
+    "SW-620": Problem(
+        "That isn't a magnet link or torrent file",
+        "SyncWatch streams magnet links (magnet:?xt=urn:btih:...) and .torrent files.",
+        ["Copy the whole magnet link again, or pick the .torrent file you downloaded."], INFO),
+    "SW-621": Problem(
+        "Nobody seems to share this torrent",
+        "SyncWatch couldn't get the torrent's description from anyone, so it can't start.",
+        ["Try again later, or another torrent.",
+         "Settings > Torrents (advanced): *Find others without trackers* should be on."], WARNING),
+    "SW-622": Problem(
+        "This torrent has no video",
+        "None of the files in the torrent is a film SyncWatch can play.",
+        ["Pick another torrent."], WARNING),
+    "SW-623": Problem(
+        "Not enough space to stream this film",
+        "The download folder's drive doesn't have room for the film.",
+        ["Free up some space, or choose another download folder: Settings > Torrents."]),
+    "SW-624": Problem(
+        "The torrent part is missing",
+        "This copy of SyncWatch can't stream torrents, because libtorrent isn't there.",
+        ["If you run SyncWatch from its source code, start it with SyncWatch.bat once: it installs "
+         "what's missing.",
+         "Otherwise download the full SyncWatch zip again and unzip it over this folder."]),
+    "SW-625": Problem(
+        "Streaming the torrent stopped",
+        "Something went wrong while downloading.",
+        ["Try again. If it keeps happening, click \"Copy details\" and send them to whoever gave you "
+         "SyncWatch."]),
+    "SW-626": Problem(
+        "Couldn't play the film from the torrent",
+        "The film started downloading, but the player couldn't play it.",
+        ["Wait a little and open it again: more of it may be needed first.",
+         "Try another torrent (another release of the film)."]),
+
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(
         "Couldn't check for updates",
