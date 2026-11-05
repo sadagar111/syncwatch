@@ -49,6 +49,19 @@ def find_magnet(text: str) -> Optional[str]:
     return None
 
 
+def valid_address(text: str) -> bool:
+    """'1.2.3.4:5678' or '[2001:db8::1]:5678' with a real IP and port (nothing else is connected to)."""
+    import ipaddress  # noqa: PLC0415
+    host, _, port = (text or "").rpartition(":")
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        return False
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return not (ip.is_unspecified or ip.is_multicast or ip.is_loopback)
+
+
 def is_torrent_file(path: Path) -> bool:
     try:
         return path.suffix.lower() == ".torrent" and 0 < path.stat().st_size <= MAX_TORRENT_FILE

@@ -286,6 +286,32 @@ class YouTubeTests(RoomTestCase):
         self.pump(2.5)
         self.assertEqual(len([e for e in self.kuba.ui.events if e[0] == "follow_torrent"]), count)
 
+    def test_sharing_a_film_with_someone_who_doesnt_have_it(self):
+        events = lambda person, kind: [e[1] for e in person.ui.events if e[0] == kind]
+        self.alex.c.set_film("Dune.mkv", 4_200_000_000, 9_000_000)
+        self.kuba.c.set_film("Dune.mkv", 4_200_000_000, 9_000_000)       # Kuba has it
+        self.assertTrue(self.pump(until=lambda: self.marek.c.can_ask_for_film() is not None
+                                  and self.kuba.peer(self.alex) is not None and self.kuba.peer(self.alex).known))
+        self.pump(until=lambda: self.kuba.peer(self.alex).match == "same")
+        self.assertIsNone(self.kuba.c.can_ask_for_film())
+        self.assertTrue(self.marek.c.ask_for_film(["198.51.100.7:6881"]))
+        self.assertTrue(self.pump(until=lambda: events(self.alex, "share_requested")))
+        self.assertEqual(events(self.alex, "share_requested")[0], ("Marek", ("198.51.100.7:6881",)))
+        self.marek.c.ask_for_film([])                                     # asking again at once: ignored
+        self.pump(1.0)
+        self.assertEqual(len(events(self.alex, "share_requested")), 1)
+        magnet = "magnet:?xt=urn:btih:4b0c7aed0cff8b7804a5955b9d68b712369c4792&dn=Dune.mkv"
+        self.alex.c.share_ready(magnet, "Dune.mkv", 4_200_000_000, ["203.0.113.5:50000", "192.168.1.20:50000"])
+        self.assertTrue(self.pump(until=lambda: events(self.marek, "receive_share")))
+        self.assertEqual(events(self.marek, "receive_share")[0][3], ("203.0.113.5:50000", "192.168.1.20:50000"))
+        self.assertEqual(events(self.kuba, "receive_share"), [])          # he didn't ask
+        self.marek.c.share_addresses(["198.51.100.7:6881"])
+        self.assertTrue(self.pump(until=lambda: events(self.alex, "share_peer")))
+        # a broken address makes the whole message invalid: dropped, not passed on
+        self.alex.c.session.send_room("share", magnet=magnet, name="Dune.mkv", size=1, addrs=["999.1.1.1:1;rm"])
+        self.pump(1.0)
+        self.assertEqual(len(events(self.marek, "receive_share")), 1)
+
     def test_a_film_and_a_video_arent_compared_by_length(self):
         self.alex.c.set_film("A test video", 0, 7_200_000, yt=self.VIDEO)
         self.kuba.c.set_attached(False)

@@ -40,7 +40,8 @@ profile_dir.mkdir(parents=True)
 (profile_dir / "settings.json").write_text(json.dumps(
     {"_version": 1, "values": {"profile.name": "Alex", "ui.startup_checks": "never", "torrents.dht": False,
                                "torrents.incoming": False, "torrents.start_mb": 1,
-                               "torrents.folder": str(data_dir / "torrents")}}), encoding="utf-8")
+                               "torrents.folder": str(data_dir / "torrents"),
+                               "paths.movies_dir": str(data_dir / "library")}}), encoding="utf-8")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -179,7 +180,8 @@ def torrent_step(window):
     shot(window, "05_torrent")
     window.close_film()
     CHECKS["closing stops the torrent"] = not window.torrents.active
-    CHECKS["film kept (setting: keep)"] = (data_dir / "torrents" / "Torrent Film.mkv").is_file()
+    CHECKS["finished film moved into the library"] = (data_dir / "library" / "Torrent Film.mkv").is_file() \
+        and not (data_dir / "torrents" / "Torrent Film.mkv").exists()
     print("torrent activity:", [window.sidebar.activity.list.item(i).text()
                                 for i in range(window.sidebar.activity.list.count())][-4:])
 

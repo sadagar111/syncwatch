@@ -47,8 +47,9 @@ class Hex:
 
 @dataclass(frozen=True)
 class Pattern:
-    """Text that must match ``regex`` completely (e.g. a YouTube video ID)."""
+    """Text that must match ``regex`` completely (e.g. a YouTube video ID). ``example``: a valid one."""
     regex: str
+    example: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,9 @@ NONCE = (B64(16), True, None)
 SEQ = (int, True, (0, MAX_CLOCK))
 CLOCK = (int, True, (0, MAX_CLOCK))
 POS = (int, True, (0, MAX_POSITION_MS))
-YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}")
+YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}", "dQw4w9WgXcQ")
+# "ip:port" or "[ipv6]:port" where someone in the room can be reached (checked again before use)
+ADDRESS = Pattern(r"(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]{2,45}\]):\d{1,5}", "192.0.2.10:6881")
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
               "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
@@ -145,6 +148,13 @@ ROOM: Dict[str, Spec] = {
     # the YouTube queue (0.5): the host's app sends all of it after every change; members ask
     "queue": {"no": SEQ, "items": (ListOf(QUEUE_ITEM, 50), True, None), "now": (QUEUE_ITEM, False, None),
               "rules": (QUEUE_RULES, True, None)},
+    # sharing a film with the room (0.6): someone asks, the one who has it shares it as a private
+    # torrent and says where to connect; addresses only ever travel inside the encrypted room
+    "share_req": {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
+                  "addrs": (ListOf(ADDRESS, 8), False, None)},
+    "share": {"magnet": (str, True, 3000), "name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
+              "addrs": (ListOf(ADDRESS, 8), True, None)},
+    "share_peer": {"addrs": (ListOf(ADDRESS, 8), True, None)},
     "qreq": {"op": (("add", "remove", "skip", "play", "move"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},

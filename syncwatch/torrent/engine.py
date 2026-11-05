@@ -6,9 +6,13 @@
 Talks in JSON lines (ASCII): commands come in on stdin, events go out on stdout.
 
 Commands                                         Events
-  {"cmd": "add", "source": magnet or path}         {"ev": "added", "hash": ...}
+  {"cmd": "add", "source": magnet or path,         {"ev": "added", "hash": ...}
+   "private": true = announce it nowhere}
   {"cmd": "select", "index": n}                    {"ev": "files", "name", "hash", "files": [{index, path, size}]}
   {"cmd": "peer", "address": "1.2.3.4:5678"}       {"ev": "ready", "url": ..., "index", "size", "name"}
+  {"cmd": "share", "path": a film on this PC}      {"ev": "hashing", "done", "total"}  then
+                                                   {"ev": "shared", "magnet", "hash", "name", "size"}
+                                                   {"ev": "addresses", "list": ["ip:port", ...]}
   {"cmd": "quit", "delete": true/false}            {"ev": "status", "state", "progress", "down", "up",
                                                           "peers", "seeds", "buffered", "have", "size"}
                                                    {"ev": "done", "path": ...}   the chosen file is complete
@@ -24,6 +28,15 @@ so those pieces are fetched early too.
 The bytes come from libtorrent itself (read_piece), not from the file on disk: a piece counts as
 "there" once its checksum is right, which can be a moment before it's written to the file.
 
+Sharing ("share"): a film on this PC becomes a torrent that's announced nowhere (no DHT, no
+trackers, no local discovery, no peer exchange: only people who are told its hash and where to
+connect can get it; the fetcher adds it with "private": true, which does the same on their side;
+it isn't marked "private" in the torrent itself, because then libtorrent wouldn't hand its
+description to the fetcher, and it's too big to send through the room), its description is remembered
+in --cache so the next time it starts at once, and it's offered to whoever connects. "addresses"
+lists where others can reach this PC (its addresses on the local network, the public address
+others report, and a port the router opened for it if UPnP/NAT-PMP worked).
+
 The web server only listens on 127.0.0.1 and only answers addresses with the secret token, so
 neither other PCs nor web pages in a browser can read from it.
 """
@@ -31,16 +44,20 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import http.server
+import ipaddress
 import json
 import math
 import os
 import queue
 import secrets
 import shutil
+import socket
 import sys
 import threading
 import time
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 from urllib.parse import quote, unquote
@@ -55,6 +72,27 @@ PIECE_WAIT_S = 90.0                  # a read waits this long for a piece, then 
 SPACE_MARGIN = 200 * 1024 * 1024
 CACHE_BYTES = 64 * 1024 * 1024       # pieces kept in memory for mpv (the last ones read, and ahead)
 READ_AHEAD_PIECES = 4
+
+
+def local_addresses() -> List[str]:
+    """This PC's main addresses on the local network (no packet is sent: a UDP socket only asks
+    the system which address it would use)."""
+    found = []
+    for family, target in ((socket.AF_INET, ("192.0.2.1", 9)), (socket.AF_INET6, ("2001:db8::1", 9))):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as probe:
+                probe.connect(target)
+                address = probe.getsockname()[0]
+        except OSError:
+            continue
+        ip = ipaddress.ip_address(address.split("%")[0])
+        if not (ip.is_loopback or ip.is_unspecified or ip.is_link_local):
+            found.append(str(ip))
+    return found
+
+
+def joined(ip: str, port: int) -> str:
+    return f"[{ip}]:{port}" if ":" in ip else f"{ip}:{port}"
 
 
 def say(message: Dict) -> None:
@@ -80,6 +118,11 @@ class Engine:
         self.folder.mkdir(parents=True, exist_ok=True)
         self.start_bytes = max(1, args.start_mb) * 1024 * 1024
         self.metadata_timeout = args.metadata_timeout
+        self.cache = Path(args.cache) if args.cache else None
+        self.external_ip = ""
+        self.mapped_port = 0
+        self.told_addresses: List[str] = []
+        self.sharing = False
         self.token = secrets.token_urlsafe(24)
         public = not args.listen.startswith("127.")
         self.session = lt.session({
@@ -90,7 +133,7 @@ class Engine:
             "connections_limit": max(10, args.connections),
             "user_agent": "SyncWatch",
             "alert_mask": (lt.alert.category_t.status_notification | lt.alert.category_t.error_notification
-                           | lt.alert.category_t.storage_notification),
+                           | lt.alert.category_t.storage_notification | lt.alert.category_t.port_mapping_notification),
         })
         self.handle = None
         self.info = None
@@ -113,7 +156,13 @@ class Engine:
         threading.Thread(target=self.http.serve_forever, name="torrent-http", daemon=True).start()
 
     # ------------------------------------------------------------ commands
-    def add(self, source: str) -> None:
+    QUIET = ("disable_dht", "disable_lsd", "disable_pex")   # torrent flags: announced nowhere
+
+    def _quiet(self, params) -> None:
+        for name in self.QUIET:
+            params.flags |= getattr(self.lt.torrent_flags, name)
+
+    def add(self, source: str, private: bool = False) -> None:
         lt = self.lt
         if self.handle is not None:
             say({"ev": "error", "kind": "bad_source", "message": "one torrent at a time"})
@@ -128,6 +177,8 @@ class Engine:
                 params = lt.add_torrent_params()
                 params.ti = lt.torrent_info(str(path))
             params.save_path = str(self.folder)
+            if private:
+                self._quiet(params)
             params.flags |= lt.torrent_flags.sequential_download
             params.flags &= ~lt.torrent_flags.auto_managed
             params.flags &= ~lt.torrent_flags.paused
@@ -157,6 +208,69 @@ class Engine:
         priorities[index] = 4
         self.handle.prioritize_files(priorities)
         self._prioritize(0, ends=True)
+
+    def share(self, path_text: str) -> None:
+        """Make the film a private torrent (or reuse the one made before) and offer it."""
+        lt = self.lt
+        path = Path(path_text)
+        if self.handle is not None:
+            say({"ev": "error", "kind": "bad_source", "message": "one torrent at a time"})
+            return
+        try:
+            stat = path.stat()
+        except OSError as exc:
+            say({"ev": "error", "kind": "bad_source", "message": f"{type(exc).__name__}: {exc}"})
+            return
+        key = hashlib.sha1(f"{path.resolve()}|{stat.st_size}|{int(stat.st_mtime)}".encode("utf-8")).hexdigest()[:24]
+        remembered = self.cache / f"{key}.torrent" if self.cache else None
+        if remembered is not None and remembered.is_file():
+            data = remembered.read_bytes()
+        else:
+            with warnings.catch_warnings():   # the newer way of making torrents isn't in every version yet
+                warnings.simplefilter("ignore")
+                storage = lt.file_storage()
+                lt.add_files(storage, str(path))
+                maker = lt.create_torrent(storage)   # piece size chosen by libtorrent
+                maker.set_creator("SyncWatch")
+                total = maker.num_pieces()
+                say({"ev": "hashing", "done": 0, "total": total})
+
+                def progress(index):
+                    if index % 16 == 0 or index == total - 1:
+                        say({"ev": "hashing", "done": index + 1, "total": total})
+                lt.set_piece_hashes(maker, str(path.parent), progress)
+            data = lt.bencode(maker.generate())
+            if remembered is not None:
+                remembered.parent.mkdir(parents=True, exist_ok=True)
+                remembered.write_bytes(data)
+        params = lt.add_torrent_params()
+        params.ti = lt.torrent_info(lt.bdecode(data))
+        params.save_path = str(path.parent)
+        params.flags |= lt.torrent_flags.seed_mode       # just checked: no need to check again
+        self._quiet(params)
+        params.flags &= ~lt.torrent_flags.auto_managed
+        params.flags &= ~lt.torrent_flags.paused
+        self.handle = self.session.add_torrent(params)
+        self.info = params.ti
+        self.sharing = True
+        say({"ev": "shared", "magnet": lt.make_magnet_uri(self.handle), "name": path.name, "size": stat.st_size,
+             "hash": str(self.handle.info_hashes().get_best())})
+        self._tell_addresses(force=True)
+
+    def addresses(self) -> List[str]:
+        port = self.session.listen_port()
+        found = [joined(ip, port) for ip in local_addresses()]
+        if self.external_ip:
+            found.append(joined(self.external_ip, port))
+            if self.mapped_port and self.mapped_port != port:
+                found.append(joined(self.external_ip, self.mapped_port))
+        return list(dict.fromkeys(found))[:8]
+
+    def _tell_addresses(self, force: bool = False) -> None:
+        found = self.addresses()
+        if force or found != self.told_addresses:
+            self.told_addresses = found
+            say({"ev": "addresses", "list": found})
 
     def connect(self, address: str) -> None:
         host, _, port = address.rpartition(":")
@@ -320,7 +434,8 @@ class Engine:
             return
         status = self.handle.status()
         message = {"ev": "status", "state": str(status.state).split(".")[-1], "down": int(status.download_rate),
-                   "up": int(status.upload_rate), "peers": int(status.num_peers), "seeds": int(status.num_seeds)}
+                   "up": int(status.upload_rate), "peers": int(status.num_peers), "seeds": int(status.num_seeds),
+                   "sharing": self.sharing, "uploaded": int(status.total_upload)}
         if self.index is not None:
             have = self.handle.file_progress(flags=self.lt.torrent_handle.piece_granularity)[self.index]
             message.update(have=int(have), size=self.file_size, progress=round(have / max(1, self.file_size), 4),
@@ -348,6 +463,14 @@ class Engine:
                     self._piece_read(alert)
                 elif kind == "metadata_received_alert":
                     self._metadata()
+                elif kind == "external_ip_alert":
+                    self.external_ip = str(alert.external_address).strip("[]")
+                    self._tell_addresses()
+                elif kind == "portmap_alert":
+                    self.mapped_port = int(getattr(alert, "external_port", 0) or 0)
+                    self._tell_addresses()
+                elif kind == "listen_succeeded_alert":
+                    self._tell_addresses()
                 elif kind in ("file_error_alert", "torrent_error_alert"):
                     say({"ev": "error", "kind": "disk" if "space" in alert.message().lower() else "other",
                          "message": alert.message()[:500]})
@@ -377,11 +500,13 @@ class Engine:
     def _do(self, command: Dict) -> None:
         name = command.get("cmd")
         if name == "add" and isinstance(command.get("source"), str):
-            self.add(command["source"])
+            self.add(command["source"], bool(command.get("private")))
         elif name == "select" and isinstance(command.get("index"), int):
             self.select(command["index"])
         elif name == "peer" and isinstance(command.get("address"), str):
             self.connect(command["address"])
+        elif name == "share" and isinstance(command.get("path"), str):
+            self.share(command["path"])
         elif name == "quit":
             self.quit(bool(command.get("delete")))
 
@@ -476,6 +601,7 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--dht", choices=("yes", "no"), default="yes")
     parser.add_argument("--start-mb", type=int, default=8)
     parser.add_argument("--metadata-timeout", type=float, default=120.0)
+    parser.add_argument("--cache", default="", help="where descriptions of shared films are remembered")
     args = parser.parse_args(argv)
     args.dht = args.dht == "yes"
     try:

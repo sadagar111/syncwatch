@@ -65,7 +65,7 @@ def example(spec_entry, rng=None):
     if isinstance(kind, Hex):
         return "0" * kind.chars
     if isinstance(kind, Pattern):
-        return "dQw4w9WgXcQ"     # the only pattern so far: a YouTube video ID
+        return kind.example
     if isinstance(kind, tuple):
         return kind[0]
     if kind is bool:

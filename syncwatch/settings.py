@@ -241,6 +241,13 @@ SCHEMA: List[Setting] = [
     _s("torrents.incoming", "bool", True, "Let others connect to me", TR,
        "Faster, and needed to share films with friends in a room. Windows asks once whether SyncWatch may "
        "use the network. Off: SyncWatch only connects out."),
+    _s("torrents.share", "choice", "ask", "When someone in the room asks for my film", TR,
+       "When you host, friends without the film can ask to get it straight from you (it plays for them while "
+       "it downloads; your PC sends it, nothing goes through the relay).",
+       choices=[("ask", "Ask me each time"), ("yes", "Share it"), ("no", "Don't share")]),
+    _s("torrents.into_library", "bool", True, "Move finished films into my library", TR,
+       "A streamed film that downloaded completely moves from the download folder into your library "
+       "when you close it (if you keep films)."),
     _s("torrents.follow_host", "bool", True, "Stream the torrents the host streams", TR,
        "In a room, when the host streams a torrent you don't have, it starts streaming for you too "
        "(unless you're watching on your own)."),

@@ -62,6 +62,13 @@ class LinkTests(unittest.TestCase):
                          [True, False, False, False])
         shutil.rmtree(folder)
 
+    def test_addresses(self):
+        good = ("203.0.113.5:6881", "[2001:db8::1]:50000", "192.168.1.20:1")
+        bad = ("127.0.0.1:6881", "0.0.0.0:1", "203.0.113.5:0", "203.0.113.5:70000", "example.com:80", "1.2.3.4",
+               "224.0.0.1:5000", "[::1]:80", "")
+        self.assertEqual([links.valid_address(a) for a in good], [True] * len(good))
+        self.assertEqual([links.valid_address(a) for a in bad], [False] * len(bad))
+
     def test_choosing_the_film(self):
         files = [{"index": 0, "path": "Film/sample.mkv", "size": 20_000_000},
                  {"index": 1, "path": "Film/Film.2001.mkv", "size": 4_000_000_000},
@@ -215,6 +222,46 @@ class EngineTests(unittest.TestCase):
         self.helper = Helper(self.down)
         self.helper.send(cmd="add", source=str(torrent))
         self.assertEqual(self.helper.until("error")["kind"], "no_video")
+
+
+@unittest.skipUnless(HAVE_LT or ON_GITHUB, "libtorrent isn't installed")
+class SharingTests(unittest.TestCase):
+    """A film on one PC, shared as a private torrent, streamed by another helper."""
+
+    def test_share_and_fetch(self):
+        folder = Path(tempfile.mkdtemp())
+        try:
+            (folder / "mine").mkdir()
+            film = folder / "mine" / "Our Film.mkv"
+            data = os.urandom(3 * 1024 * 1024 + 777)
+            film.write_bytes(data)
+            sharer = Helper(folder / "unused", "--cache", folder / "cache")
+            sharer.send(cmd="share", path=str(film))
+            hashing = sharer.until("hashing")
+            shared = sharer.until("shared")
+            addresses = sharer.until("addresses")
+            self.assertGreater(hashing["total"], 0)
+            self.assertEqual((shared["name"], shared["size"]), ("Our Film.mkv", len(data)))
+            self.assertTrue(links.is_magnet(shared["magnet"]))
+            port = addresses["list"][0].rsplit(":", 1)[1] if addresses["list"] else None
+            self.assertIsNotNone(port, "the sharer should know at least one of its addresses")
+            fetcher = Helper(folder / "down", "--start-mb", "1")
+            fetcher.send(cmd="add", source=shared["magnet"], private=True)
+            fetcher.send(cmd="peer", address=f"127.0.0.1:{port}")
+            files = fetcher.until("files")        # the description comes from the sharer (private torrent)
+            fetcher.send(cmd="select", index=files["files"][0]["index"])
+            ready = fetcher.until("ready")
+            self.assertEqual(read(ready["url"], None, None, timeout=60)[1], data)
+            fetcher.quit()
+            sharer.quit()
+            self.assertTrue(film.is_file(), "sharing never deletes the film")
+            again = Helper(folder / "unused", "--cache", folder / "cache")   # the second time: no hashing
+            again.send(cmd="share", path=str(film))
+            self.assertEqual(again.until("shared")["magnet"], shared["magnet"])
+            self.assertNotIn("hashing", [e["ev"] for e in again.events])
+            again.quit()
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
 
 
 @unittest.skipUnless((HAVE_LT or ON_GITHUB), "libtorrent isn't installed")

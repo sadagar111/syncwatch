@@ -71,6 +71,7 @@ MAX_JUMP_AHEAD_MS = 2000.0
 JUMP_ANSWER_WAIT_S = 3.0     # after my jump, I wait this long (plus "wait for slow PCs") for the host
 SEND_JUMP_WAIT_S = 2.0       # "Keep playing": a jump is sent once my film shows the new spot, but no later
 MATCH_TOLERANCE_MS = 1000    # films whose lengths differ by less than this count as the same
+SHARE_ASK_GAP_S = 10.0       # someone may ask for the film at most this often
 QREQ_RATE = 6                # the host takes at most this many queue requests per person ...
 QREQ_WINDOW_S = 10.0         # ... in this many seconds (more are dropped)
 QUEUE_RESEND_S = 15.0        # the host repeats the queue now and then (for people who just came in)
@@ -179,6 +180,9 @@ class Controller(RoomListener):
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
+        self._share_asked: Dict[bytes, float] = {}   # (host) who asked for the film when
+        self._share_waiting = False                    # (member) I asked the host for their film
+        self._share_magnet = ""                        # (member) the film I'm getting from the host
         subscribe = getattr(settings, "subscribe", None)
         if subscribe is not None:          # the host changed who may add/skip: tell the room now
             subscribe("youtube.queue_", lambda _key, _value: self._queue_rules_changed())
@@ -368,6 +372,8 @@ class Controller(RoomListener):
         self._warned_films.clear()
         self.rules = Rules()
         self._qreq_times.clear()
+        self._share_waiting, self._share_magnet = False, ""
+        self._share_asked.clear()
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -987,6 +993,69 @@ class Controller(RoomListener):
             if item.key not in before and before and item.by != self.name:
                 self.ui.activity(f"{item.by or 'Someone'} added {item.title} to the queue", "friend")
         self.ui_queue_changed()
+
+    # ================================================================ sharing a film (0.6)
+    def can_ask_for_film(self) -> Optional[Dict]:
+        """The host's film, if I could ask for it: they play a file (not YouTube or a torrent) that
+        I don't have (not the same name and size, and not a file of the same length)."""
+        host = self.host_peer
+        if self.is_host or host is None or not self.attached or not host.film:
+            return None
+        film = host.film
+        if film.get("yt") or film.get("magnet") or not film.get("size") or host.match in ("same", "similar"):
+            return None
+        return film
+
+    def ask_for_film(self, my_addresses: List[str]) -> bool:
+        film = self.can_ask_for_film()
+        if film is None:
+            return False
+        self._share_waiting = True
+        self.session.send_room("share_req", name=film["name"], size=film["size"], addrs=my_addresses[:8])
+        self.ui.activity(f"You asked {self.host_peer.name} for {film['name']}", "you")
+        return True
+
+    def share_ready(self, magnet: str, name: str, size: int, addresses: List[str]) -> None:
+        """(the one sharing) the film is ready to be fetched: tell the room where."""
+        if self.connected:
+            self.session.send_room("share", magnet=magnet, name=name[:255], size=int(size), addrs=addresses[:8])
+
+    def share_addresses(self, addresses: List[str]) -> None:
+        """(the one fetching) where the sharer can reach me (a second way in, through other routers)."""
+        if self.connected and addresses:
+            self.session.send_room("share_peer", addrs=addresses[:8])
+
+    def _on_share_req(self, peer: Peer, body: Dict) -> None:
+        if not self.is_host or not self.film:
+            return
+        now = self.clock()
+        if now - self._share_asked.get(peer.id, -1e9) < SHARE_ASK_GAP_S:
+            return   # asked a moment ago
+        self._share_asked[peer.id] = now
+        if (body["name"], body["size"]) != (self.film["name"], self.film["size"]):
+            return   # asking for a film I don't have open (any more)
+        handler = getattr(self.ui, "share_requested", None)
+        if handler is not None:
+            handler(peer.name, list(body.get("addrs", [])))
+
+    def _on_share(self, peer: Peer, body: Dict) -> None:
+        """The host shares: the film I asked for, or new addresses for the one I'm already getting."""
+        if self.is_host or not peer.is_host:
+            return
+        if not self._share_waiting and body["magnet"] != self._share_magnet:
+            return
+        self._share_waiting = False
+        self._share_magnet = body["magnet"]
+        handler = getattr(self.ui, "receive_share", None)
+        if handler is not None:
+            handler(body["magnet"], body["name"], body["size"], list(body["addrs"]))
+
+    def _on_share_peer(self, peer: Peer, body: Dict) -> None:
+        if not self.is_host:
+            return
+        handler = getattr(self.ui, "share_peer", None)
+        if handler is not None:
+            handler(peer.name, list(body["addrs"]))
 
     def _follow_host_video(self, film: Dict) -> None:
         """The host plays a YouTube video, or streams a torrent, that I don't have open: the window

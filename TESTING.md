@@ -11,6 +11,14 @@ Internet Archive's public-domain collection: their pages have a magnet link or a
 - [ ] Windows asks once whether SyncWatch may use the network: allow it (or turn off *Let others connect to me*)
 - [ ] Close the film (or open another): the download stops. *Keep the film*: it's in `movies\Torrents`; *Delete it*: gone
 - [ ] Drop a .torrent file onto SyncWatch; Ctrl+V with a magnet link in the clipboard: both start streaming
+- [ ] A film streamed to the end, then closed: it's in your library now (*Your films*)
+
+## T2. In a room (two PCs, ideally in different homes)
+- [ ] The host streams a magnet link: the guest's SyncWatch streams it too and lines up
+- [ ] The host plays a film from the library that the guest doesn't have: the guest sees *Get it from <host>*
+      in the sidebar → the host is asked → the film plays for the guest while it downloads (control bar: ⬇ …)
+- [ ] The host's control bar shows *⬆ sharing … · … people*. Send me how fast it was and whether you're on
+      the same Wi-Fi or in different homes (the most interesting test: different homes)
 
 ---
 

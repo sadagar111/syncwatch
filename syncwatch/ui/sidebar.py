@@ -480,6 +480,34 @@ class ActivityPanel(Panel):
         self.list.scrollToBottom()
 
 
+class ShareBanner(QFrame):
+    """(0.6) "Alex is watching Dune.mkv (4.2 GB), you don't have it: [Get it from Alex]"."""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        self.text = QLabel("")
+        self.text.setWordWrap(True)
+        self.button = QPushButton("Get it")
+        self.button.setObjectName("Accent")
+        self.button.clicked.connect(self.clicked)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(10, 8, 10, 8)
+        column.setSpacing(6)
+        column.addWidget(self.text)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self.button)
+        column.addLayout(row)
+        self.setVisible(False)
+
+    def offer(self, text: str, button: str) -> None:
+        self.text.setText(text)
+        self.button.setText(button)
+        self.setVisible(bool(text))
+
+
 class UpdateBanner(QFrame):
     """Shown at the top of the sidebar when a new version is available or downloaded."""
     clicked = Signal()
@@ -539,6 +567,7 @@ class Sidebar(QWidget):
         header.addWidget(version)
         header.addStretch(1)
         self.update_banner = UpdateBanner()
+        self.share_banner = ShareBanner()
         self.room = RoomPanel(last_code)
         self.people = PeoplePanel()
         self.queue = QueuePanel()
@@ -549,6 +578,7 @@ class Sidebar(QWidget):
         layout.setContentsMargins(6, 8, 8, 8)
         layout.addLayout(header)
         layout.addWidget(self.update_banner)
+        layout.addWidget(self.share_banner)
         layout.addWidget(self.room)
         layout.addWidget(self.people)
         layout.addWidget(self.queue)

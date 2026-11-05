@@ -112,6 +112,15 @@ class RecorderUI:
     def follow_youtube(self, video_id, title=""):
         self._add(("follow", video_id))
 
+    def share_requested(self, who, addresses):
+        self._add(("share_requested", (who, tuple(addresses))))
+
+    def receive_share(self, magnet, name, size, addresses):
+        self._add(("receive_share", (magnet, name, size, tuple(addresses))))
+
+    def share_peer(self, who, addresses):
+        self._add(("share_peer", (who, tuple(addresses))))
+
     def follow_torrent(self, magnet, name="", size=0):
         self._add(("follow_torrent", magnet))
 

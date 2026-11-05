@@ -40,6 +40,7 @@ from .subtitles_ui import Subtitles
 from .updates_ui import UpdateController
 from .sidebar import QueueEntry
 from ..library import films as library_films
+from ..units import human_size
 from .torrent_ui import Torrents
 from .youtube_ui import LinkBox, LinkDialog, TitleLookup, YouTube
 from ..torrent import links as torrent_links
@@ -208,7 +209,13 @@ class MainWindow(QMainWindow):
         self.idle.youtube_box.queued.connect(self.queue_youtube)
         self.idle.youtube_box.magnetSubmitted.connect(self.open_torrent)
         self.idle.torrent_file_button.clicked.connect(self.pick_torrent_file)
-        self.torrents = Torrents(self.settings, lambda: self.movies_dir() / "Torrents", self)
+        self.torrents = Torrents(self.settings, lambda: self.movies_dir() / "Torrents", self,
+                                 cache=self.ctx.profile.cache_dir / "shared-films", library=self.movies_dir)
+        self.torrents.shared.connect(lambda magnet, name, size: self.controller.share_ready(
+            magnet, name, size, self.torrents.addresses))
+        self.torrents.addressesChanged.connect(self._my_addresses_changed)
+        self.sidebar.share_banner.clicked.connect(self._ask_for_film)
+        self._getting_shared = ""      # the magnet of a film I'm getting from the host
         self.torrents.ready.connect(lambda source: self.play_stream(source, 0))
         self.torrents.statusText.connect(self.controls.set_source_text)
         self.torrents.message.connect(self.activity)
@@ -691,6 +698,67 @@ class MainWindow(QMainWindow):
         """A magnet link or a .torrent file: stream it (the part being watched first)."""
         self.torrents.open(source)
 
+    # sharing a film with the room
+    def _refresh_share_banner(self) -> None:
+        film = self.controller.can_ask_for_film()
+        host = self.controller.host_peer
+        if film is None or host is None or self._getting_shared or self.torrents.active:
+            self.sidebar.share_banner.offer("", "")
+            return
+        self.sidebar.share_banner.offer(
+            f"{host.name} is watching {film['name']} ({human_size(film['size'])}). You don't have it: get it "
+            f"straight from {host.name}? It plays while it downloads.", f"Get it from {host.name}")
+
+    def _ask_for_film(self) -> None:
+        if self.controller.ask_for_film(self.torrents.addresses):
+            self.sidebar.share_banner.offer("", "")
+
+    def share_requested(self, who: str, their_addresses: list) -> None:
+        """The controller (I host): someone in the room asks for my film."""
+        path = self.player.path
+        if path is None or not path.is_file():
+            return
+        answer = self.settings.get("torrents.share")
+        if answer == "no":
+            self.activity(f"{who} asked for {path.name} (sharing is off: Settings > Torrents)", "info")
+            return
+        if answer == "ask":
+            reply = QMessageBox.question(
+                self, "Share your film?",
+                f"{who} doesn't have {path.name}. Send it to them straight from your PC? It plays for them "
+                "while it downloads. Nothing goes through the relay.")
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        if not (self.torrents.active and self.torrents.mode == "share" and self.torrents.name == path.name):
+            self.torrents.share(path)
+        elif self.torrents._share_info is not None:   # already shared: tell the room again
+            self.controller.share_ready(*self.torrents._share_info, self.torrents.addresses)
+        self.share_peer(who, their_addresses)
+
+    def share_peer(self, who: str, addresses: list) -> None:
+        """Where someone who fetches my film can be reached: connect to them too (another way in)."""
+        if self.torrents.active and self.torrents.mode == "share":
+            for address in addresses:
+                if torrent_links.valid_address(address):
+                    self.torrents.add_peer(address)
+
+    def receive_share(self, magnet: str, name: str, size: int, addresses: list) -> None:
+        """The controller: the host shares the film I asked for. Stream it, from the host."""
+        if not torrent_links.is_magnet(magnet):
+            return
+        if self._getting_shared != magnet or not self.torrents.active:
+            self._getting_shared = magnet
+            self._follow_align = True
+            self.activity(f"Getting {name} ({human_size(size)}) from the host…", "friend")
+            self.torrents.open(magnet, private=True)
+        for address in addresses:
+            if torrent_links.valid_address(address):
+                self.torrents.add_peer(address)
+
+    def _my_addresses_changed(self, addresses: list) -> None:
+        if self._getting_shared and self.torrents.mode == "stream":
+            self.controller.share_addresses(addresses)
+
     def pick_torrent_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Open a torrent file", str(Path.home() / "Downloads"),
                                               "Torrent files (*.torrent)")
@@ -890,6 +958,7 @@ class MainWindow(QMainWindow):
                 if estimate is not None:
                     markers.append((int(estimate), self.ctx.theme.colors["marker"][:7], peer.name))
         self.sidebar.people.update_people(entries)
+        self._refresh_share_banner()
         self.controls.seek.set_markers(markers)
         self._refresh_friends()
         rules = c.effective_rules()

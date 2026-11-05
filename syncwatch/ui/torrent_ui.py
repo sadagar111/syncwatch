@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -139,15 +140,25 @@ class TorrentEngine(QObject):
 
 
 class Torrents(QObject):
-    """The window's torrent part. ``ready(TorrentSource)`` when the film can start playing."""
+    """The window's torrent part. ``ready(TorrentSource)`` when the film can start playing.
+    Also sharing a film with the room: ``shared(magnet, name, size)`` once others can fetch it."""
     ready = Signal(object)
     statusText = Signal(str)        # for the control bar ("" = nothing streaming)
     message = Signal(str, str)      # (text, kind) for the activity feed
+    shared = Signal(str, str, int)
+    addressesChanged = Signal(list)
 
-    def __init__(self, settings, default_folder, parent=None):
+    def __init__(self, settings, default_folder, parent=None, cache: Optional[Path] = None, library=None):
         super().__init__(parent)
         self.settings = settings
         self.default_folder = default_folder        # a function: the library's Torrents folder
+        self.cache = cache                          # descriptions of films shared before
+        self.library = library                      # a function: the library folder (finished films go there)
+        self.mode = ""                              # "stream" or "share"
+        self.addresses: List[str] = []
+        self.done = False
+        self._share_info: Optional[tuple] = None
+        self._hashing_started = 0.0
         self.engine: Optional[TorrentEngine] = None
         self.source_text = ""
         self.hash = ""
@@ -166,8 +177,9 @@ class Torrents(QObject):
         chosen = self.settings.get("torrents.folder")
         return Path(chosen) if chosen else Path(self.default_folder())
 
-    def open(self, source: str) -> bool:
-        """A magnet link or a .torrent file's path. Stops whatever streamed before."""
+    def open(self, source: str, private: bool = False) -> bool:
+        """A magnet link or a .torrent file's path. Stops whatever streamed before.
+        private: a film shared in the room (announced nowhere, only fetched from those in the room)."""
         source = source.strip()
         if not (links.is_magnet(source) or links.is_torrent_file(Path(source))):
             errors.report("SW-620", source[:200])
@@ -176,25 +188,44 @@ class Torrents(QObject):
             errors.report("SW-624", "libtorrent not found")
             return False
         self.stop()
+        self._start_engine("stream")
+        self.engine.send(cmd="add", source=source, private=private)
+        self.source_text = source
+        self.hash = links.magnet_hash(source) or ""
+        self.name = links.magnet_name(source) or (Path(source).stem if not links.is_magnet(source) else "")
+        self.message.emit(f"Starting the torrent {self.name or self.hash[:12]}…", "you")
+        self.statusText.emit("⬇ finding the torrent…")
+        return True
+
+    def share(self, path: Path) -> bool:
+        """Offer a film on this PC to the room (a private torrent; see torrent/engine.py)."""
+        if not libtorrent_installed():
+            errors.report("SW-624", "libtorrent not found")
+            return False
+        self.stop()
+        self._start_engine("share")
+        self.name, self.source_text, self.hash = path.name, "", ""
+        self._hashing_started = time.monotonic()
+        self.engine.send(cmd="share", path=str(path))
+        self.message.emit(f"Preparing {path.name} for sharing…", "you")
+        return True
+
+    def _start_engine(self, mode: str) -> None:
         listen = "0.0.0.0:0,[::]:0" if self.settings.get("torrents.incoming") else "127.0.0.1:0"
         arguments = ["--folder", str(self.folder()), "--listen", listen,
                      "--upload-kbps", str(int(self.settings.get("torrents.upload_kbps"))),
                      "--connections", str(int(self.settings.get("torrents.connections"))),
                      "--dht", "yes" if self.settings.get("torrents.dht") else "no",
                      "--start-mb", str(int(self.settings.get("torrents.start_mb")))]
+        if self.cache is not None:
+            arguments += ["--cache", str(self.cache)]
         self.engine = TorrentEngine(arguments, self)
         self.engine.event.connect(self._event)
         self.engine.stopped.connect(self._engine_stopped)
-        self.source_text = source
-        self.hash = links.magnet_hash(source) or ""
-        self.name = links.magnet_name(source) or (Path(source).stem if not links.is_magnet(source) else "")
+        self.mode, self.done, self.addresses, self._share_info = mode, False, [], None
         self.files, self.chosen, self.playing, self.last_status = [], None, None, {}
         self.started = time.monotonic()
         self.engine.start()
-        self.engine.send(cmd="add", source=source)
-        self.message.emit(f"Starting the torrent {self.name or self.hash[:12]}…", "you")
-        self.statusText.emit("⬇ finding the torrent…")
-        return True
 
     def magnet(self) -> str:
         """A magnet link for what streams now: the one opened, or one made from the info-hash."""
@@ -215,10 +246,29 @@ class Torrents(QObject):
             return
         engine, self.engine = self.engine, None
         engine.stopped.disconnect(self._engine_stopped)
-        engine.stop(delete=self.settings.get("torrents.after") == "delete")
+        delete = self.mode == "stream" and self.settings.get("torrents.after") == "delete"
+        engine.stop(delete=delete)   # never deletes a film that was only shared
         engine.deleteLater()
+        if self.mode == "stream" and self.done and not delete:
+            self._into_library()
         self.playing = None
+        self.mode = ""
         self.statusText.emit("")
+
+    def _into_library(self) -> None:
+        """A completely downloaded film moves from the download folder into the library."""
+        if not (self.settings.get("torrents.into_library") and self.library and self.chosen):
+            return
+        from ..library import films as library_films  # noqa: PLC0415
+        source = self.folder() / self.chosen["path"]
+        try:
+            target = library_films.unique_path(Path(self.library()), source.name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(target))   # a rename on the same drive, else a copy
+        except OSError as exc:
+            log.warning("couldn't move %s into the library: %s", source, exc)
+            return
+        self.message.emit(f"{target.name} is in your library now", "info")
 
     def _engine_stopped(self) -> None:
         if self.engine is not None and self.sender() is self.engine:
@@ -233,10 +283,29 @@ class Torrents(QObject):
             self._files(message)
         elif kind == "ready":
             self._ready(message)
+        elif kind == "hashing":
+            total, done = max(1, int(message.get("total", 1))), int(message.get("done", 0))
+            took = time.monotonic() - self._hashing_started
+            left = f" · {human_time(took / done * (total - done))}" if done and took > 2 else ""
+            self.statusText.emit(f"⬆ preparing {self.name} for sharing: {done * 100 // total} %{left}")
+        elif kind == "shared":
+            self._share_info = (str(message.get("magnet", "")), str(message.get("name", self.name)),
+                                int(message.get("size", 0)))
+            self.hash = str(message.get("hash", ""))
+        elif kind == "addresses":
+            self.addresses = [a for a in message.get("list", []) if isinstance(a, str) and links.valid_address(a)]
+            self.addressesChanged.emit(list(self.addresses))
+            if self._share_info is not None:     # shared: tell the room (and again when addresses change)
+                self.shared.emit(*self._share_info)
         elif kind == "status":
             self.last_status = message
-            self.statusText.emit(status_text(message, self.started))
+            if message.get("sharing"):
+                self.statusText.emit(f"⬆ sharing {self.name} · {human_size(message.get('up', 0))}/s · "
+                                     f"{message.get('peers', 0)} people")
+            else:
+                self.statusText.emit(status_text(message, self.started))
         elif kind == "done":
+            self.done = True
             self.message.emit(f"{self.chosen['path'] if self.chosen else 'The film'} is downloaded completely", "info")
         elif kind == "error":
             code = PROBLEMS.get(message.get("kind", "other"), "SW-625")
