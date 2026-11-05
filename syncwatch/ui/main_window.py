@@ -236,7 +236,7 @@ class MainWindow(QMainWindow):
         self.torrents.shared.connect(lambda magnet, name, size: self.controller.share_ready(
             magnet, name, size, self.torrents.addresses))
         self.torrents.addressesChanged.connect(self._my_addresses_changed)
-        self.sidebar.share_banner.clicked.connect(self._ask_for_film)
+        self.sidebar.share_banner.clicked.connect(self._share_banner_clicked)
         self._getting_shared = ""      # the magnet of a film I'm getting from the host
         self.torrents.ready.connect(lambda source: self.play_stream(source, 0))
         self.torrents.statusText.connect(self.controls.set_source_text)
@@ -766,12 +766,30 @@ class MainWindow(QMainWindow):
     def _refresh_share_banner(self) -> None:
         film = self.controller.can_ask_for_film()
         host = self.controller.host_peer
+        self._my_copy = None
         if film is None or host is None or self._getting_shared or self.torrents.active:
             self.sidebar.share_banner.offer("", "")
+            return
+        from ..discover.names import find_copy
+        from ..library import films as library_files
+        copy = find_copy(((f.name, f.size, f.path) for f in library_files.list_films(self.library.folder())),
+                         film["name"], int(film["size"]))
+        if copy is not None and copy != self.player.path:     # it's in my library, maybe under another name
+            self._my_copy = copy
+            self.sidebar.share_banner.offer(
+                f"{host.name} is watching {film['name']}. You have it in your library: {copy.name}.", "Open my copy")
             return
         self.sidebar.share_banner.offer(
             f"{host.name} is watching {film['name']} ({human_size(film['size'])}). You don't have it: get it "
             f"straight from {host.name}? It plays while it downloads.", f"Get it from {host.name}")
+
+    def _share_banner_clicked(self) -> None:
+        copy = getattr(self, "_my_copy", None)
+        if copy is not None and copy.is_file():
+            self.sidebar.share_banner.offer("", "")
+            self.open_film(copy)
+        else:
+            self._ask_for_film()
 
     def _ask_for_film(self) -> None:
         if self.controller.ask_for_film(self.torrents.addresses):

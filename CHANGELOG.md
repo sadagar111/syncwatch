@@ -27,6 +27,7 @@
 - Only what you open yourself: SyncWatch doesn't search for films anywhere.
 - libtorrent comes with SyncWatch (about 5 MB more). It runs in its own process, like the converter.
 - New problems with plain explanations: SW-620 to SW-626.
+- **Auto-detect what you need** (with 0.7): when the host plays a film you have in your library under another name, or another release of it (*The.Matrix.1999.1080p…* and *Matrix (1999) 720p*), the sidebar offers **Open my copy** instead of downloading it. A film that won the film vote and that the host has: members without it are told they can get it from the host once it plays.
 
 ## 0.5.0 (in progress: YouTube together)
 **Watch YouTube together**

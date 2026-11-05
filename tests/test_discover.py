@@ -76,6 +76,22 @@ class NameTests(unittest.TestCase):
         self.assertEqual(a.label, "The Matrix (1999)")
 
 
+class CopyTests(unittest.TestCase):
+    """"Auto-detect what to download": the host's film may be in my library under another name."""
+    MINE = [("Matrix (1999) 720p.mkv", 1_400_000_000, "a"), ("Inception.2010.mkv", 2_000_000_000, "b"),
+            ("renamed.mkv", 4_321_000_000, "c"), ("Dune.2021.mkv", 3_000_000_000, "d")]
+
+    def test_the_same_file_or_the_same_film(self):
+        self.assertEqual(names.find_copy(self.MINE, "Inception.2010.mkv", 2_000_000_000), "b")
+        self.assertEqual(names.find_copy(self.MINE, "Some.Film.2015.1080p.mkv", 4_321_000_000), "c")  # renamed
+        self.assertEqual(names.find_copy(self.MINE, "The.Matrix.1999.1080p.BluRay.x264.mkv", 9), "a")  # other release
+        self.assertIsNone(names.find_copy(self.MINE, "Dune.Part.Two.2024.mkv", 5))
+        self.assertIsNone(names.find_copy(self.MINE, "Dune.1984.mkv", 5))      # the other Dune
+        self.assertEqual(names.find_copy(self.MINE, "Dune.mkv", 5), "d")      # no year: the title counts
+        self.assertIsNone(names.find_copy([], "Dune.mkv", 5))
+        self.assertTrue(names.same_film("Film (2020) {tmdb-5}.mkv", "Other Name [tmdbid-5].mkv"))
+
+
 class TmdbTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -100,3 +100,37 @@ def guess(file_name: str) -> Optional[Guess]:
     if title == title.lower():
         title = title.title()
     return Guess(title[:200], year, tmdb)
+
+
+def same_film(a: str, b: str) -> bool:
+    """Do these two file names mean the same film (title, and year if both have one)?"""
+    first, second = guess(a), guess(b)
+    if first is None or second is None or not simplify(first.title):
+        return False
+    if first.tmdb and second.tmdb:
+        return first.tmdb == second.tmdb
+    return _core(first.title) == _core(second.title) and (
+        not first.year or not second.year or first.year == second.year)
+
+
+def _core(title: str) -> str:
+    """'The Matrix' and 'Matrix' are the same name: without a leading article."""
+    return re.sub(r"^(the|a|an) ", "", simplify(title))
+
+
+def find_copy(films, name: str, size: int):
+    """My copy of a film someone else plays, from (file name, size, path) of my films: the same file
+    (by name and size, or only by size, i.e. renamed), else the same film by title and year (another
+    release, which lines up as "similar"). None if I don't have it."""
+    films = list(films)
+    for mine, my_size, path in films:
+        if mine == name and (not size or my_size == size):
+            return path
+    if size > 50_000_000:             # a big file of exactly the same size is the same file, renamed
+        for _mine, my_size, path in films:
+            if my_size == size:
+                return path
+    for mine, _my_size, path in films:
+        if same_film(mine, name):
+            return path
+    return None
