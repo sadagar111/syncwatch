@@ -1,3 +1,30 @@
+# Test checklist for 0.7 (what should we watch?), branch `try/0.7-discover`
+
+It needs a free TMDB key: themoviedb.org → sign up → Settings → API → request a key (personal use,
+fill in anything sensible) → copy the **API Read Access Token**. TMDB was out of reach where this was
+built, so everything was tested against a stand-in; this list is the test with the real thing.
+
+## D1. Ideas (alone)
+- [ ] Settings → Discover → paste the token. Start screen → **💡 Ideas**: *For you* fills within a few
+      seconds (the first time it looks up each film once), with posters and *Because you have …*
+- [ ] Are the recommendations sensible for your films? Any of your films matched wrongly? (*Your films*
+      shows what each file was taken for; send me the file names that went wrong)
+- [ ] Click a film: length, rating, description, *Streaming on …* for your country; **Trailer** plays it;
+      **Where to watch** opens TMDB's page; a film from your library has **▶ Play**
+- [ ] *Trending*, *Find a film…*, **🎲 Pick one for me**
+- [ ] A wrong key (change one letter): a plain message, nothing breaks. No key: *Your films* still lists the
+      library, and the note says how to get a key
+
+## D2. Film vote (two PCs, or two windows with `--profile`)
+- [ ] Host a room, the other joins. Guest: **🗳 Film vote**, or *Suggest for the vote* on a film: the
+      *Film vote* panel appears for both
+- [ ] Both suggest films and vote (double-click; again = take it back). The panel shows the votes and
+      *Have it: …* for a film that's in someone's library
+- [ ] The host clicks **Close the vote**: both see *🏆 … won*; whoever has it gets **▶ Play it**
+- [ ] Settings → Discover → *Tell the room which suggested films I have* off: you no longer show under *Have it*
+
+---
+
 # Test checklist for 0.6 (torrents), branch `try/0.6-torrent`
 
 Use a legal torrent, e.g. Big Buck Bunny or Sintel (Blender's open films) or a film from the

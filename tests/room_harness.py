@@ -136,6 +136,15 @@ class RecorderUI:
     def played_items(self):
         return [e[1] for e in self.events if e[0] == "play_item"]
 
+    def vote_changed(self):
+        self._add(("vote", None))
+
+    def vote_won(self, choice):
+        self._add(("vote_won", choice.title))
+
+    def winners(self):
+        return [e[1] for e in self.events if e[0] == "vote_won"]
+
     def join_request(self, knock):
         self.requests.append(knock)
 

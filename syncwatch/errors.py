@@ -446,6 +446,30 @@ CATALOG: Dict[str, Problem] = {
         "The film started downloading, but the player couldn't play it.",
         ["Wait a little and open it again: more of it may be needed first.",
          "Try another torrent (another release of the film)."]),
+    # ---- 63x: what should we watch? (TMDB, the film vote; 0.7) ----------------
+    "SW-631": Problem(
+        "Add a TMDB key for recommendations",
+        "Recommendations, posters and trailers come from TMDB (The Movie Database). It's free, but needs a key.",
+        ["Sign up at themoviedb.org, open Settings > API and ask for a key (personal use).",
+         "Copy the \"API Read Access Token\" into SyncWatch: Settings > Discover > TMDB key."], INFO, popup=False),
+    "SW-632": Problem(
+        "TMDB didn't accept the key",
+        "The key in Settings > Discover isn't right, or TMDB withdrew it.",
+        ["Copy it again from themoviedb.org > Settings > API: the long \"API Read Access Token\" or the "
+         "\"API Key\" (32 letters and digits)."], WARNING, popup=False),
+    "SW-633": Problem(
+        "Couldn't reach TMDB",
+        "SyncWatch got no answer from themoviedb.org. Your own films and the film vote still work.",
+        ["Check your internet connection and try again.",
+         "Some networks (school, work, antivirus web protection) block it: try another network."], INFO, popup=False),
+    "SW-634": Problem(
+        "TMDB is busy",
+        "TMDB asked SyncWatch to wait a moment.",
+        ["Try again in a minute."], INFO, popup=False),
+    "SW-635": Problem(
+        "TMDB sent something unexpected",
+        "Part of TMDB's answer didn't make sense, so it was left out.",
+        ["Try again later. If it keeps happening, send the log to whoever gave you SyncWatch."], INFO, popup=False),
 
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(

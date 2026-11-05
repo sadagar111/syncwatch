@@ -320,6 +320,79 @@ class YouTubeTests(RoomTestCase):
         self.assertNotIn("SW-501", self.alex.ui.problems())
 
 
+class FilmVoteTests(RoomTestCase):
+    """The film vote (0.7): anyone suggests and votes, the host's app holds it and closes it."""
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex")
+        self.marek = self.room.person("Marek")
+        self.kuba = self.room.person("Kuba")
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.kuba.c.votes.have_check = lambda choices: [c.key for c in choices if c.title == "Inception"]
+
+    def titles(self, person):
+        return [choice.title for choice in person.c.votes.vote.choices]
+
+    def choice(self, person, title):
+        return next(c for c in person.c.votes.vote.choices if c.title == title)
+
+    def test_suggest_vote_and_the_host_closes_it(self):
+        self.marek.c.votes.suggest("The Matrix", 1999, 603, "/matrix.jpg")    # starts the vote too
+        self.assertTrue(self.pump(until=lambda: self.titles(self.kuba) == ["The Matrix"]))
+        self.assertTrue(self.kuba.c.votes.vote.open)
+        self.assertTrue(any("Marek suggested The Matrix (1999)" in t for t in self.alex.ui.activities()))
+        self.kuba.c.votes.suggest("Inception", 2010, 27205)
+        self.assertTrue(self.pump(until=lambda: self.titles(self.marek) == ["The Matrix", "Inception"]))
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+        matrix, inception = self.choice(self.marek, "The Matrix").key, self.choice(self.marek, "Inception").key
+        self.alex.c.votes.cast(matrix)
+        self.marek.c.votes.cast(inception)
+        self.kuba.c.votes.cast(inception)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.marek, "Inception").voters == ["Kuba", "Marek"]
+                                  and self.choice(self.kuba, "The Matrix").voters == ["Alex"]))
+        self.assertEqual(self.marek.c.votes.my_vote, inception)
+        self.marek.c.votes.cast(inception)                                    # again: taken back
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").voters == ["Kuba"]))
+        self.marek.c.votes.cast(inception)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").voters == ["Kuba", "Marek"]))
+        self.marek.c.votes.close()                                            # members can't close
+        self.marek.c.session.send_room("vreq", op="close")                   # not even a modified app
+        self.pump(0.5)
+        self.assertTrue(self.alex.c.votes.vote.open)
+        self.alex.c.votes.close()
+        for person in (self.alex, self.marek, self.kuba):
+            self.assertTrue(self.pump(until=lambda p=person: p.ui.winners() == ["Inception"]), person.name)
+            self.assertFalse(person.c.votes.vote.open)
+        self.assertTrue(any("Inception (2010) won (2 votes)" in t for t in self.kuba.ui.activities()))
+
+    def test_limits_taking_back_and_leaving(self):
+        for n in range(4):                                                    # three each
+            self.marek.c.votes.suggest(f"Marek's film {n}")
+        self.assertTrue(self.pump(until=lambda: len(self.titles(self.alex)) == 3))
+        self.assertTrue(self.pump(until=lambda: any("enough films" in t for t in self.marek.ui.activities())))
+        first = self.choice(self.kuba, "Marek's film 0").key
+        self.kuba.c.votes.withdraw(first)                                     # not his
+        self.assertTrue(self.pump(until=lambda: any("take it out" in t for t in self.kuba.ui.activities())))
+        self.assertEqual(len(self.titles(self.alex)), 3)
+        self.marek.c.votes.withdraw(first)                                    # his own: fine
+        self.assertTrue(self.pump(until=lambda: "Marek's film 0" not in self.titles(self.kuba)))
+        second = self.choice(self.kuba, "Marek's film 1").key
+        self.kuba.c.votes.cast(second)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Marek's film 1").voters == ["Kuba"]))
+        self.kuba.c.leave()
+        self.assertTrue(self.pump(until=lambda: self.choice(self.marek, "Marek's film 1").voters == []))
+        self.assertEqual(self.kuba.c.votes.vote.choices, [])                  # his copy went with him
+
+    def test_flooding_the_host_is_dropped(self):
+        for index in range(30):
+            self.kuba.c.session.send_room("vreq", op="suggest", title=f"Film {index}")
+        self.pump(1.5)
+        self.assertLessEqual(len(self.alex.c.votes.vote.choices), 3)
+        self.alex.c.votes.cancel()
+        self.assertTrue(self.pump(until=lambda: not self.marek.c.votes.vote.active))
+
+
 class QueueTests(RoomTestCase):
     """The YouTube queue (0.5): the host's app holds it, members ask, everyone sees it."""
     A, B, C, D = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"

@@ -47,6 +47,7 @@ from ..room.context import Rooms
 from ..room.friends import Friends
 from ..room.session import JOINING, Member, RoomListener, RoomSession
 from ..youtube.queue import Item, Queue, QueueFull
+from .film_vote import FilmVoteRoom
 
 log = logging.getLogger("syncwatch.sync")
 
@@ -177,6 +178,7 @@ class Controller(RoomListener):
         self.queue = Queue()
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
+        self.votes = FilmVoteRoom(self)     # the film vote (0.7)
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
@@ -374,6 +376,7 @@ class Controller(RoomListener):
         self._qreq_times.clear()
         self._share_waiting, self._share_magnet = False, ""
         self._share_asked.clear()
+        self.votes.reset()
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -547,6 +550,8 @@ class Controller(RoomListener):
         if self.connected and self.is_host and (self._queue_dirty or (
                 now - self._queue_sent_at > QUEUE_RESEND_S and (self.queue.items or self.queue.now))):
             self._send_queue(now)
+        if self.connected:
+            self.votes.tick(now)
         if self.connected and now >= self._next_heartbeat:
             self._next_heartbeat = now + (HEARTBEAT_HOST_S if self.is_host else HEARTBEAT_MEMBER_S)
             self._send_heartbeat()
@@ -981,6 +986,12 @@ class Controller(RoomListener):
         if self._queue_do(op, peer, **fields) == "busy":
             self._reject(peer, "queue", "busy")
 
+    def _on_vote(self, peer: Peer, body: Dict) -> None:
+        self.votes.on_vote(peer, body)
+
+    def _on_vreq(self, peer: Peer, body: Dict) -> None:
+        self.votes.on_vreq(peer, body)
+
     def _on_queue(self, peer: Peer, body: Dict) -> None:
         if self.is_host or not peer.is_host:
             return
@@ -1188,6 +1199,10 @@ class Controller(RoomListener):
         if not peer.is_host or body["to"] != self.rooms.identity.public.key_id:
             return
         reason = body["reason"]
+        if body["action"] == "vote":
+            self.ui.activity("The vote has enough films (12 in all, 3 each)" if reason == "busy"
+                             else "Only the one who suggested a film (or the host) can take it out", "warn")
+            return
         if body["action"] == "queue":
             if reason == "host_only":
                 self.ui.problem("SW-610")

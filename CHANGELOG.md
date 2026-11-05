@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0 (proposal, branch try/0.7-discover: what should we watch?)
+**Ideas for what to watch**
+- New card on the start screen, *What should we watch?* → **💡 Ideas** opens a window with posters:
+  - **For you**: recommendations from the films in your library and the ones you watched (lately watched count more). A film several of yours point to comes first, with *Because you have The Matrix and Inception*.
+  - **Trending** this week, **Your films** (your library with posters and ratings) and **Find a film…**.
+  - Click a film: rating, length, genres, the description, **where to watch it** in your country (Netflix, HBO Max, to rent on…), **▶ Trailer** (plays in SyncWatch; in a room, everyone following you sees it) and **▶ Play** if it's in your library. **🎲 Pick one for me** chooses one of the best few.
+- The data comes from TMDB (The Movie Database), free with a key you get at themoviedb.org: Settings > **Discover** > TMDB key. It's only sent to TMDB, never logged. Without a key, *Your films* still works (titles from the file names) and so does the vote. Answers are kept for a while, so it opens quickly.
+- SyncWatch reads films' titles and years from their file names (`The.Matrix.1999.1080p.BluRay.x264.mkv` → *The Matrix (1999)*).
+
+**Film vote (in a room)**
+- **🗳 Film vote** (start screen) or *Suggest for the vote* (on any film in the Ideas window): everyone in the room suggests films (3 each, 12 in all) and votes; votes are open and can be changed. The sidebar shows the films, the votes and **who already has each film**, so you can pick one nobody needs to get first.
+- The host closes the vote: the winner is announced for everyone, and whoever has it gets **▶ Play it**.
+- Settings > Discover: *Tell the room which suggested films I have* (on by default; only the suggested films are compared, nothing else about your library is sent).
+- New problems: SW-631 to SW-635 (TMDB key missing or not accepted, TMDB unreachable or busy).
+
 ## 0.6.0 (in progress: torrents, branch `try/0.6-torrent`, built on 0.5)
 **Watch a torrent while it downloads**
 - Paste a magnet link on the start screen (or Ctrl+V, or drop a link or a .torrent file onto SyncWatch), or click *Open a .torrent file…*. SyncWatch picks the film in it (the biggest video file) and starts playing after the first few MB.

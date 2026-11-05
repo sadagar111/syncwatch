@@ -81,6 +81,11 @@ class FilmMemory:
         with self._lock:
             return dict(self._films.get(key, {}))
 
+    def entries(self) -> list:
+        """(key, fields) of every film remembered (a copy)."""
+        with self._lock:
+            return [(key, dict(entry)) for key, entry in self._films.items()]
+
     def update(self, key: str, **fields: Any) -> None:
         with self._lock:
             entry = self._films.setdefault(key, {})

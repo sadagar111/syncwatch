@@ -214,6 +214,8 @@ class SettingsDialog(QDialog):
         line = QLineEdit()
         line.setMaxLength(setting.max_len)
         line.editingFinished.connect(lambda l=line: self._set(key, l.text()))
+        if kind == "secret":
+            line.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
         if kind == "path":
             wrapper = QWidget()
             row = QHBoxLayout(wrapper)

@@ -17,8 +17,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import (QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QImage, QKeySequence,
                            QPainter, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QPushButton,
-                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+                               QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import errors, log as log_module, paths
 from ..filmstate import film_key
@@ -44,6 +43,7 @@ from ..units import human_size
 from .torrent_ui import Torrents
 from .youtube_ui import LinkBox, LinkDialog, TitleLookup, YouTube
 from ..torrent import links as torrent_links
+from .discover_ui import Discover, VotePanel
 from ..youtube import links as youtube_links
 
 log = logging.getLogger("syncwatch.window")
@@ -131,6 +131,27 @@ class IdleScreen(QWidget):
         torrent_row.addWidget(self.torrent_file_button)
         torrent_row.addStretch(1)
         youtube_layout.addLayout(torrent_row)
+        ideas_card = QFrame()                      # what should we watch? (0.7)
+        ideas_card.setObjectName("Card")
+        ideas_title = QLabel("What should we watch?")
+        ideas_title.setObjectName("LibraryTitle")
+        ideas_note = QLabel("Ideas from the films you have and watched, trending films, trailers and where to "
+                            "watch them. In a room: a film vote.")
+        ideas_note.setObjectName("Dim")
+        ideas_note.setWordWrap(True)
+        self.ideas_button = QPushButton("💡  Ideas")
+        self.ideas_button.setToolTip("Recommendations, trending films and your library, with posters (TMDB)")
+        self.vote_button = QPushButton("🗳  Film vote")
+        self.vote_button.setToolTip("Everyone in the room suggests films and votes (host or join a room first)")
+        ideas_text = QVBoxLayout()
+        ideas_text.setSpacing(4)
+        ideas_text.addWidget(ideas_title)
+        ideas_text.addWidget(ideas_note)
+        ideas_layout = QHBoxLayout(ideas_card)
+        ideas_layout.setContentsMargins(18, 14, 18, 14)
+        ideas_layout.addLayout(ideas_text, 1)
+        ideas_layout.addWidget(self.ideas_button)
+        ideas_layout.addWidget(self.vote_button)
         self.hint = QLabel("Tip: drop a film file (or a YouTube link from your browser) here to play it straight "
                            "away, without adding it to the library.")
         self.hint.setObjectName("Hint")
@@ -144,6 +165,7 @@ class IdleScreen(QWidget):
         column_layout.addWidget(logo)
         column_layout.addWidget(card)
         column_layout.addWidget(youtube_card)
+        column_layout.addWidget(ideas_card)
         column_layout.addWidget(self.hint)
         row = QHBoxLayout()   # the column as wide as it may be, the rest split evenly on both sides
         row.addStretch(1)
@@ -227,6 +249,18 @@ class MainWindow(QMainWindow):
         queue_panel.moveRequested.connect(self.controller.queue_move)
         queue_panel.skipClicked.connect(self.controller.queue_skip)
         queue_panel.addClicked.connect(lambda: self.ask_youtube_link(queue=True))
+        self.discover = Discover(self)                     # what should we watch? the film vote (0.7)
+        votes, vote_panel = self.controller.votes, self.sidebar.vote
+        votes.have_check = self.discover.have_keys
+        vote_panel.voteRequested.connect(votes.cast)
+        vote_panel.withdrawRequested.connect(votes.withdraw)
+        vote_panel.suggestClicked.connect(lambda: self.discover.open())
+        vote_panel.closeClicked.connect(votes.close)
+        vote_panel.cancelClicked.connect(votes.cancel)
+        vote_panel.playClicked.connect(self.discover.play_winner)
+        vote_panel.whereClicked.connect(self.discover.where_winner)
+        self.idle.ideas_button.clicked.connect(lambda: self.discover.open())
+        self.idle.vote_button.clicked.connect(self.start_film_vote)
         self.player.ended.connect(self._media_ended)
         self.settings.subscribe("ui.panel_queue", lambda k, v: self.queue_changed())
         self._wire()
@@ -273,6 +307,9 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.controls)
 
         self.sidebar = Sidebar(self.settings.get("room.last_code"))
+        self.sidebar.vote = VotePanel()                    # the film vote, under "Up next" (0.7)
+        self.sidebar.vote.hide()
+        self.sidebar.layout().insertWidget(self.sidebar.layout().indexOf(self.sidebar.queue) + 1, self.sidebar.vote)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.addWidget(left)
         self.splitter.addWidget(self.sidebar)
@@ -356,6 +393,33 @@ class MainWindow(QMainWindow):
     def status(self, text: str, connected: bool) -> None:
         self.sidebar.room.set_status(text, connected)
         self._refresh_soon()
+        if hasattr(self, "discover"):
+            self.discover.vote_changed()
+
+    # the film vote (0.7): the controller tells, the Discover part shows
+    def vote_changed(self) -> None:
+        if hasattr(self, "discover"):
+            self.discover.vote_changed()
+
+    def vote_won(self, choice) -> None:
+        self.discover.vote_won(choice)
+
+    def start_film_vote(self) -> None:
+        if not self.controller.connected:
+            self.activity("A film vote is for rooms: host a room or join one first", "info")
+            return
+        self.controller.votes.start()
+        self.discover.open("you")
+
+    def play_trailer(self, video_id: str) -> None:
+        """A film's trailer: played here (in a room, for everyone following me), or, as a member following
+        the host, in the browser (the host decides what plays in the room)."""
+        c = self.controller
+        if c.connected and not c.is_host and c.attached:
+            from .discover_ui import open_link
+            open_link(f"https://www.youtube.com/watch?v={video_id}")
+            return
+        self.open_youtube(youtube_links.VideoRef(video_id))
 
     def activity(self, text: str, kind: str = "info") -> None:
         self.sidebar.activity.add(text, kind)
@@ -1352,6 +1416,7 @@ class MainWindow(QMainWindow):
         self.subtitles.stop()
         self.youtube.stop()
         self.torrents.stop()
+        self.discover.shutdown()
         self.library.shutdown()
         self.controller.shutdown()
         self.player.shutdown()

@@ -56,6 +56,7 @@ class Pattern:
 class ListOf:
     item: Any
     max_items: int
+    item_limit: Any = None     # for a list of plain values: each one's limit (as in the tables)
 
 
 # field name -> (kind, required, limit)
@@ -78,12 +79,17 @@ POS = (int, True, (0, MAX_POSITION_MS))
 YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}", "dQw4w9WgXcQ")
 # "ip:port" or "[ipv6]:port" where someone in the room can be reached (checked again before use)
 ADDRESS = Pattern(r"(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]{2,45}\]):\d{1,5}", "192.0.2.10:6881")
+TMDB_IMAGE = Pattern(r"/[A-Za-z0-9_-]{1,80}\.(jpg|jpeg|png|webp)", "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg")
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
               "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
               "magnet": (str, False, 3000)}      # since 0.6: streamed from this torrent (checked again on use)
 QUEUE_ITEM: Spec = {"k": (int, True, (1, 1 << 31)), "yt": (YOUTUBE_ID, True, None), "title": (str, True, 120),
                     "dur": (int, False, (0, MAX_POSITION_MS)), "by": (str, False, 32)}
+VOTE_CHOICE: Spec = {"k": (int, True, (1, 1 << 31)), "title": (str, True, 120), "year": (int, False, (0, 2200)),
+                     "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
+                     "by": (str, False, 32), "voters": (ListOf(str, 64, 32), False, None),
+                     "have": (ListOf(str, 64, 32), False, None)}
 QUEUE_RULES: Spec = {"add": (("everyone", "host"), True, None), "control": (("host", "everyone"), True, None)}
 RULES: Spec = {"host_only": (bool, True, None), "cd_pp": (float, False, (0, 3600)),
                "cd_sync": (float, False, (0, 3600)),
@@ -158,6 +164,13 @@ ROOM: Dict[str, Spec] = {
     "qreq": {"op": (("add", "remove", "skip", "play", "move"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
+    # the film vote (0.7): the host's app sends all of it after every change; members ask
+    "vote": {"no": SEQ, "open": (bool, True, None), "choices": (ListOf(VOTE_CHOICE, 12), True, None),
+             "winner": (int, False, (0, 1 << 31))},
+    "vreq": {"op": (("start", "suggest", "withdraw", "cast", "have"), True, None),
+             "k": (int, False, (0, 1 << 31)), "title": (str, False, 120), "year": (int, False, (0, 2200)),
+             "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
+             "keys": (ListOf(int, 12, (1, 1 << 31)), False, None)},
 }
 
 COMMON: Spec = {"s": (Hex(16), True, None), "n": SEQ}
@@ -171,7 +184,7 @@ def _check_value(name: str, value: Any, kind: Any, limit: Any) -> Any:
     if isinstance(kind, ListOf):
         if not isinstance(value, list) or len(value) > kind.max_items:
             raise BadMessage(f"{name}: expected a list of at most {kind.max_items}")
-        return [_check_value(f"{name}[{i}]", item, kind.item, None) for i, item in enumerate(value)]
+        return [_check_value(f"{name}[{i}]", item, kind.item, kind.item_limit) for i, item in enumerate(value)]
     if isinstance(kind, B64):
         if not isinstance(value, str) or len(value) > (kind.size + 2) // 3 * 4:
             raise BadMessage(f"{name}: expected base64")
