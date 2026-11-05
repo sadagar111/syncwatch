@@ -59,13 +59,13 @@ def example(spec_entry, rng=None):
     if isinstance(kind, dict):
         return {name: example(entry) for name, entry in kind.items() if entry[1]}
     if isinstance(kind, ListOf):
-        return [example((kind.item, True, None))]
+        return [example((kind.item, True, kind.item_limit))]
     if isinstance(kind, B64):
         return base64.b64encode(bytes(kind.size)).decode("ascii")
     if isinstance(kind, Hex):
         return "0" * kind.chars
     if isinstance(kind, Pattern):
-        return "dQw4w9WgXcQ"     # the only pattern so far: a YouTube video ID
+        return kind.example
     if isinstance(kind, tuple):
         return kind[0]
     if kind is bool:
@@ -113,7 +113,7 @@ def conforms(value, entry) -> bool:
             conforms(v, kind[k]) for k, v in value.items())
     if isinstance(kind, ListOf):
         return isinstance(value, list) and len(value) <= kind.max_items and all(
-            conforms(v, (kind.item, True, None)) for v in value)
+            conforms(v, (kind.item, True, kind.item_limit)) for v in value)
     if isinstance(kind, B64):
         return isinstance(value, bytes) and len(value) == kind.size
     if isinstance(kind, Hex):

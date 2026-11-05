@@ -30,6 +30,10 @@ PyAV (the built-in converter, from SyncWatch 0.4.2) and the FFmpeg libraries it 
 yt-dlp and yt-dlp-ejs (finding YouTube videos' streams, from SyncWatch 0.5)
   The Unlicense (public domain). https://github.com/yt-dlp/yt-dlp and https://github.com/yt-dlp/ejs
 
+Film data (from SyncWatch 0.7, only with your own TMDB key): The Movie Database (TMDB)
+  This product uses the TMDB API but is not endorsed or certified by TMDB. https://www.themoviedb.org/
+  Where-to-watch data comes from JustWatch (https://www.justwatch.com/), through TMDB.
+
 Deno (deno.exe in Lib\site-packages\bin: runs YouTube's JavaScript for yt-dlp, from SyncWatch 0.5)
   MIT License. https://deno.com/  Source code: https://github.com/denoland/deno
   Installed from the "deno" package on PyPI, which holds the official deno.exe.

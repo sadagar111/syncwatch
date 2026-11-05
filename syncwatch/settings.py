@@ -25,14 +25,14 @@ log = logging.getLogger("syncwatch.settings")
 
 FILE_VERSION = 1
 
-SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Interface",
+SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Discover", "Interface",
             "Keyboard", "Updates", "Diagnostics"]
 
 
 @dataclass(frozen=True)
 class Setting:
     key: str
-    kind: str              # bool | int | float | choice | str | color | path | font | keys
+    kind: str              # bool | int | float | choice | str | secret | color | path | font | keys
     default: Any
     label: str
     section: str
@@ -52,7 +52,7 @@ def _s(*args, **kwargs) -> Setting:
     return Setting(*args, **kwargs)
 
 
-P, PB, SB, WT, YT, UI, KB, UP, DG = SECTIONS
+P, PB, SB, WT, YT, DC, UI, KB, UP, DG = SECTIONS
 
 SCHEMA: List[Setting] = [
     # ---- Profile ----------------------------------------------------------------------
@@ -228,6 +228,20 @@ SCHEMA: List[Setting] = [
        "yt-dlp needs a JavaScript program to read YouTube's pages: Deno, which comes with SyncWatch. "
        "Only set this to use another deno.exe. Empty means the one inside SyncWatch.", advanced=True),
 
+    # ---- Discover (0.7): what should we watch? --------------------------------------
+    _s("discover.tmdb_key", "secret", "", "TMDB key", DC,
+       "For recommendations, posters and trailers (free): sign up at themoviedb.org, open Settings > API, "
+       "ask for a key for personal use and copy the \"API Read Access Token\" here. It's only sent to TMDB. "
+       "Without it, Discover shows your own films and the film vote still works.", max_len=1500),
+    _s("discover.tell_have", "bool", True, "Tell the room which suggested films I have", DC,
+       "During a film vote, so everyone sees which film is ready to play. Only for the suggested films."),
+    _s("discover.use_history", "bool", True, "Use the films I watched for recommendations", DC,
+       "Besides the films in your library, the ones you opened from elsewhere.", advanced=True),
+    _s("discover.region", "str", "", "Country for where to watch", DC,
+       "Two letters, e.g. NL, SK or CZ. Empty means the country Windows is set to.", advanced=True, max_len=2),
+    _s("discover.language", "str", "en-US", "Language for titles and descriptions", DC,
+       "TMDB's language code, e.g. en-US, sk-SK or cs-CZ.", advanced=True, max_len=5),
+
     # ---- Interface --------------------------------------------------------------------
     _s("ui.show_advanced", "bool", False, "Show advanced options", UI),
     _s("ui.settings_help_inline", "bool", False, "Show explanations under the settings", UI,
@@ -333,7 +347,7 @@ def coerce(setting: Setting, value: Any) -> Tuple[bool, Any]:
             return (True, value) if value in allowed else (False, setting.default)
         if kind == "color":
             return (True, value.upper()) if isinstance(value, str) and _COLOR.match(value) else (False, setting.default)
-        if kind in ("str", "path", "font", "keys"):
+        if kind in ("str", "secret", "path", "font", "keys"):
             if not isinstance(value, str):
                 return False, setting.default
             value = value.replace("\x00", "")
