@@ -349,6 +349,25 @@ class FilmVoteTests(RoomTestCase):
         self.assertTrue(self.pump(until=lambda: self.choice(self.marek, "Marek's film 1").voters == []))
         self.assertEqual(self.kuba.c.votes.vote.choices, [])                  # his copy went with him
 
+    def test_have_floods_are_dropped_and_a_lost_one_is_made_good(self):
+        from syncwatch.sync import film_vote
+        saved = film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S
+        film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S = 0.3, 1.0
+        try:
+            self.alex.c.votes.suggest("Inception", 2010)
+            self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+            key = self.choice(self.alex, "Inception").key
+            before = self.alex.c.votes.vote.version
+            for n in range(40):                                      # a modified app floods "have"
+                self.marek.c.session.send_room("vreq", op="have", keys=[key] if n % 2 else [])
+            self.pump(1.0)
+            self.assertLessEqual(self.alex.c.votes.vote.version - before, film_vote.HAVE_RATE + 1)
+            self.alex.c.votes.vote.mark_have(self.kuba.id, "Kuba", [])      # as if Kuba's message got lost
+            self.alex.c.votes._changed()
+            self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+        finally:
+            film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S = saved
+
     def test_flooding_the_host_is_dropped(self):
         for index in range(30):
             self.kuba.c.session.send_room("vreq", op="suggest", title=f"Film {index}")
