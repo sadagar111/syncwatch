@@ -364,7 +364,9 @@ class FilmVoteTests(RoomTestCase):
             self.assertLessEqual(self.alex.c.votes.vote.version - before, film_vote.HAVE_RATE + 1)
             self.alex.c.votes.vote.mark_have(self.kuba.id, "Kuba", [])      # as if Kuba's message got lost
             self.alex.c.votes._changed()
-            self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+            self.assertNotIn("Kuba", self.choice(self.alex, "Inception").have)
+            # (Marek's own app puts his right too, once his 10 s of flooding are over: not waited for)
+            self.assertTrue(self.pump(until=lambda: "Kuba" in self.choice(self.alex, "Inception").have))
         finally:
             film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S = saved
 
