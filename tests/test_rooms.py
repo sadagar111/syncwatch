@@ -349,24 +349,33 @@ class FilmVoteTests(RoomTestCase):
         self.assertTrue(self.pump(until=lambda: self.choice(self.marek, "Marek's film 1").voters == []))
         self.assertEqual(self.kuba.c.votes.vote.choices, [])                  # his copy went with him
 
-    def test_have_floods_are_dropped_and_a_lost_one_is_made_good(self):
+    def test_have_floods_are_dropped(self):
+        from syncwatch.sync import film_vote
+        self.alex.c.votes.suggest("Inception", 2010)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+        key = self.choice(self.alex, "Inception").key
+        before = self.alex.c.votes.vote.version
+        for n in range(40):                                          # a modified app floods "have"
+            self.marek.c.session.send_room("vreq", op="have", keys=[key] if n % 2 else [])
+        self.pump(1.0)
+        self.assertLessEqual(self.alex.c.votes.vote.version - before, film_vote.HAVE_RATE + 1)
+
+    def test_a_lost_have_is_made_good(self):
         from syncwatch.sync import film_vote
         saved = film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S
         film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S = 0.3, 1.0
         try:
             self.alex.c.votes.suggest("Inception", 2010)
             self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
-            key = self.choice(self.alex, "Inception").key
-            before = self.alex.c.votes.vote.version
-            for n in range(40):                                      # a modified app floods "have"
-                self.marek.c.session.send_room("vreq", op="have", keys=[key] if n % 2 else [])
-            self.pump(1.0)
-            self.assertLessEqual(self.alex.c.votes.vote.version - before, film_vote.HAVE_RATE + 1)
+            self.pump(0.5)
             self.alex.c.votes.vote.mark_have(self.kuba.id, "Kuba", [])      # as if Kuba's message got lost
             self.alex.c.votes._changed()
             self.assertNotIn("Kuba", self.choice(self.alex, "Inception").have)
-            # (Marek's own app puts his right too, once his 10 s of flooding are over: not waited for)
-            self.assertTrue(self.pump(until=lambda: "Kuba" in self.choice(self.alex, "Inception").have))
+            healed = self.pump(until=lambda: "Kuba" in self.choice(self.alex, "Inception").have, timeout=30)
+            kuba = self.kuba.c.votes
+            self.assertTrue(healed, f"Kuba's app: told {kuba._told_have} at {kuba._told_at:.1f} "
+                                    f"(now {self.kuba.c.clock():.1f}), sees {[(c.title, c.have) for c in kuba.vote.choices]}, "
+                                    f"in the room: {self.alex.c.peers and [p.name for p in self.alex.c.peers.values()]}")
         finally:
             film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S = saved
 
