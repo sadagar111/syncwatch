@@ -232,6 +232,7 @@ class DiscoverWindow(QDialog):
         top.addWidget(self.surprise)
 
         self.note = QLabel("")
+        self.note.setTextFormat(Qt.TextFormat.PlainText)
         self.note.setObjectName("Hint")
         self.note.setWordWrap(True)
         self.note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -314,6 +315,8 @@ class DiscoverWindow(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(text)
+        for label in (self.title, self.meta, self.why, self.tagline, self.overview, self.where):
+            label.setTextFormat(Qt.TextFormat.PlainText)     # titles and names from TMDB and friends: never HTML
         layout = QVBoxLayout(side)
         layout.addWidget(self.poster, 0, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(scroll, 1)
@@ -506,6 +509,7 @@ class VotePanel(QFrame):
         self.heading = QLabel("FILM VOTE")
         self.heading.setObjectName("PanelTitle")
         self.status = QLabel("")
+        self.status.setTextFormat(Qt.TextFormat.PlainText)    # friends' names and titles: never HTML
         self.status.setObjectName("Dim")
         self.status.setWordWrap(True)
         self.list = QListWidget()

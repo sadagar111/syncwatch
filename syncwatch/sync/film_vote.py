@@ -22,6 +22,8 @@ log = logging.getLogger("syncwatch.vote")
 VREQ_RATE = 8               # the host takes at most this many vote requests per person ...
 VREQ_WINDOW_S = 10.0        # ... in this many seconds (more are dropped)
 VOTE_RESEND_S = 20.0        # the host repeats the vote now and then (for people who just came in)
+HAVE_RATE = 6               # "I have these films" messages the host takes per person in VREQ_WINDOW_S
+HAVE_GAP_S = 5.0            # a member says it again (if the host's vote still shows it wrong) after this
 
 
 class FilmVoteRoom:
@@ -35,7 +37,9 @@ class FilmVoteRoom:
         self._dirty = False
         self._sent_at = -1e9
         self._times: Dict[bytes, Deque[float]] = {}
+        self._have_times: Dict[bytes, Deque[float]] = {}
         self._told_have: Optional[Tuple[int, Tuple[int, ...]]] = None   # (round, keys) last sent to the host
+        self._told_at = -1e9
         self._round = 0                      # counts votes started (a new vote: tell "have" again)
 
     # ------------------------------------------------------------ for the window
@@ -97,7 +101,7 @@ class FilmVoteRoom:
 
     def library_changed(self) -> None:
         """The library changed: maybe I have one of the films now."""
-        self._tell_have(force=False)
+        self._tell_have()
 
     # ------------------------------------------------------------ the host's side
     def _me(self) -> bytes:
@@ -132,7 +136,7 @@ class FilmVoteRoom:
                 return "bad"
             if len(self.vote.choices) > before:
                 self.c.ui.activity(f"{'You' if mine else who} suggested {choice.label}", "you" if mine else "friend")
-                self._tell_have(force=True)
+                self._tell_have()
         elif op == "withdraw":
             choice = self.vote.find(int(fields.get("k") or 0))
             if choice is None:
@@ -156,9 +160,11 @@ class FilmVoteRoom:
         if not self.decides:
             return
         now = self.c.clock()
-        times = self._times.setdefault(peer.id, collections.deque(maxlen=VREQ_RATE))
-        if len(times) == VREQ_RATE and now - times[0] < VREQ_WINDOW_S and body["op"] != "have":
-            return   # flood protection: silently dropped ("have" is small and sent by the app itself)
+        have = body["op"] == "have"     # (sent by the app itself, counted on its own)
+        rate = HAVE_RATE if have else VREQ_RATE
+        times = (self._have_times if have else self._times).setdefault(peer.id, collections.deque(maxlen=rate))
+        if len(times) == rate and now - times[0] < VREQ_WINDOW_S:
+            return   # flood protection: silently dropped
         times.append(now)
         fields = {name: body[name] for name in ("k", "title", "year", "tmdb", "poster", "keys") if name in body}
         why = self._do(body["op"], peer, **fields)
@@ -196,12 +202,13 @@ class FilmVoteRoom:
             self.my_vote = 0
         if not self.vote.open and self.vote.winner and self.vote.winner != old_winner:
             self._announce(self.vote.find(self.vote.winner), peer)
-        self._tell_have(force=False)
+        self._tell_have()
         self._changed_here()
 
     def reset(self) -> None:
         """Leaving a room: a member's copy of the host's vote goes; a host's own vote ends."""
         self._times.clear()
+        self._have_times.clear()
         self._from_host = False
         self.vote.reset()
         self.my_vote = 0
@@ -209,7 +216,10 @@ class FilmVoteRoom:
         self._changed_here()
 
     # ------------------------------------------------------------ shared
-    def _tell_have(self, force: bool) -> None:
+    def _tell_have(self) -> None:
+        """Which suggested films I have: the host's app notes its own; a member tells the host when the
+        host's vote shows it differently (again after HAVE_GAP_S if it still does: the host repeats
+        the vote every VOTE_RESEND_S, so a lost message is made good)."""
         if not self.vote.open or not self.c.connected:
             return
         try:
@@ -217,14 +227,16 @@ class FilmVoteRoom:
         except Exception:  # noqa: BLE001 - the library check must never break the room
             log.exception("checking the library for the vote's films failed")
             return
-        if not force and self._told_have == (self._round, keys):
-            return
-        self._told_have = (self._round, keys)
         if self.decides:
             if self.vote.mark_have(self._me(), self.c.name, keys):
                 self._changed()
-        else:
-            self.c.session.send_room("vreq", op="have", keys=list(keys))
+            return
+        shown = tuple(sorted(c.key for c in self.vote.choices if self.c.name in c.have))
+        now = self.c.clock()
+        if keys == shown or (self._told_have == (self._round, keys) and now - self._told_at < HAVE_GAP_S):
+            return
+        self._told_have, self._told_at = (self._round, keys), now
+        self.c.session.send_room("vreq", op="have", keys=list(keys))
 
     def _announce(self, winner: Optional[Choice], peer) -> None:
         if winner is None:
