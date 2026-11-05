@@ -36,6 +36,9 @@ def check_ui(out: Path) -> bool:
                    if line.startswith("PLAYER:")), "")
     if player and os.environ.get("GITHUB_ACTIONS"):   # shown on the pull request page
         print(f"::notice title=Video player in the app check ({sys.platform})::{player}", flush=True)
+    if result.returncode != 0:
+        print(f"ui check failed (exit code {result.returncode}); end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
     return result.returncode == 0
 
 
