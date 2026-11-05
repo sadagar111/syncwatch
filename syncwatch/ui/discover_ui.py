@@ -859,6 +859,13 @@ class Discover(QObject):
         panel.update_vote(vote.open, vote.choices, vote.winner, votes.my_vote, c.name, c.is_host,
                           self.have_keys(vote.choices) if vote.active else [])
         panel.setVisible(c.connected and vote.active)
+        won = vote.find(vote.winner) if not vote.open else None
+        if won is not None and not c.is_host and hasattr(self.window, "torrents") \
+                and self.have_film(won.title, won.year, won.tmdb) is None:
+            host = next((peer.name for peer in c.peers.values() if peer.is_host), "")
+            if host and host in won.have:     # the host has it: room downloads (0.6) bring it here
+                panel.status.setText(f"{panel.status.text()} When {host} plays it, you can get it straight from "
+                                     f"{host}: it plays while it downloads.")
         if self.dialog is not None:
             self.dialog.refresh_buttons()
 
