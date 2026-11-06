@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-from .links import is_video_id
+from .links import LIST_RE, is_video_id
 
 EXPIRY_MARGIN_S = 15 * 60        # ask YouTube again when an address has less than this left
 
@@ -120,3 +120,39 @@ def from_json(raw: Dict[str, Any]) -> Stream:
         video_url=_url(video.get("url")), audio_url=_url(audio["url"]) if audio.get("url") else "",
         video_codec=_text(video, "codec", 64), audio_codec=_text(audio, "codec", 64) if audio else "",
         height=max(0, height), fps=max(0.0, fps), headers=clean_headers, expires=expires)
+
+
+MAX_PLAYLIST = 50
+
+
+@dataclass(frozen=True)
+class PlaylistEntry:
+    id: str
+    title: str = ""
+    duration_s: float = 0.0
+
+
+@dataclass(frozen=True)
+class Playlist:
+    id: str
+    title: str
+    entries: Tuple[PlaylistEntry, ...] = ()
+
+
+def playlist_from_json(raw: Dict[str, Any]) -> Playlist:
+    """resolve.py --playlist's "ok" object -> Playlist (checked)."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("playlist"), str) or not LIST_RE.match(raw["playlist"]):
+        raise BadStream("bad playlist ID")
+    entries, seen = [], set()
+    for entry in raw.get("entries") or []:
+        if not isinstance(entry, dict) or not is_video_id(entry.get("id") or "") or entry["id"] in seen:
+            continue
+        seen.add(entry["id"])
+        try:
+            duration = max(0.0, min(172800.0, float(entry.get("duration") or 0)))
+        except (TypeError, ValueError):
+            duration = 0.0
+        entries.append(PlaylistEntry(entry["id"], _text(entry, "title", 200), duration))
+        if len(entries) >= MAX_PLAYLIST:
+            break
+    return Playlist(raw["playlist"], _text(raw, "title", 200), tuple(entries))

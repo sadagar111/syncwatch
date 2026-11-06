@@ -106,7 +106,7 @@ class ResolveJob(QObject):
             message = {}
         if "ok" in message:
             try:
-                self._finish("", "", streams.from_json(message["ok"]))
+                self._finish("", "", self._parse_ok(message["ok"]))
             except streams.BadStream as exc:
                 self._finish("other", f"odd answer from resolve.py: {exc}")
             return
@@ -115,17 +115,30 @@ class ResolveJob(QObject):
         self._finish(kind if kind in PROBLEMS else "other", text)
 
 
+    def _parse_ok(self, raw):
+        return streams.from_json(raw)
+
+
+class PlaylistJob(ResolveJob):
+    """One run of resolve.py --playlist: found(Playlist) or failed(kind, message)."""
+
+    def _parse_ok(self, raw):
+        return streams.playlist_from_json(raw)
+
+
 class YouTube(QObject):
     """The window's YouTube part. ``opened(stream, start_s)`` when a video is ready to play."""
     opened = Signal(object, int)
     busy = Signal(str)             # "Finding …" text for the status line ("" = done)
     quietFailure = Signal(str, str)   # (video ID, problem code) of a video opened quietly (following the host)
     failed = Signal(str, str)         # (video ID, problem code) of any video that couldn't be opened
+    playlistListed = Signal(object, object)    # (PlaylistRef, Playlist)
 
     def __init__(self, settings, cache_dir: Path, engine: Callable[[], str], parent=None):
         super().__init__(parent)
         self.settings = settings
         self.cache_dir = cache_dir
+        self._playlist_jobs: set = set()
         self.engine = engine                     # "mpv" or "qt": Qt's player needs one stream with both
         self._cache: Dict[str, streams.Stream] = {}
         self._job: Optional[ResolveJob] = None
@@ -188,9 +201,10 @@ class YouTube(QObject):
 
     def stop(self) -> None:
         self._drop_job()
-        for job in list(self._prefetch.values()):
+        for job in list(self._prefetch.values()) + list(self._playlist_jobs):
             job.cancel()
         self._prefetch.clear()
+        self._playlist_jobs.clear()
 
     # ------------------------------------------------------------ results
     def _new_job(self, video_id: str) -> ResolveJob:
@@ -204,6 +218,24 @@ class YouTube(QObject):
         if self.engine() == "qt":
             arguments.append("--combined")
         return ResolveJob(video_id, arguments, int(self.settings.get("youtube.timeout_s")), self)
+
+    def list_playlist(self, ref: links.PlaylistRef) -> None:
+        """Ask yt-dlp for a playlist's videos (IDs and titles only); playlistListed or failed comes."""
+        arguments = ["--playlist", "--timeout", str(self.settings.get("youtube.timeout_s")),
+                     "--cache", str(self.cache_dir / "yt-dlp")]
+        job = PlaylistJob(ref.id, arguments, int(self.settings.get("youtube.timeout_s")) + 15, self)
+        job.found.connect(lambda playlist, r=ref, j=job: (self._playlist_jobs.discard(j),
+                                                         self.playlistListed.emit(r, playlist)))
+        job.failed.connect(lambda kind, text, r=ref, j=job: (self._playlist_jobs.discard(j),
+                                                            self._playlist_failed(r, kind, text)))
+        self._playlist_jobs.add(job)
+        self.busy.emit("Reading the playlist…")
+        job.start()
+
+    def _playlist_failed(self, ref: links.PlaylistRef, kind: str, text: str) -> None:
+        log.info("playlist %s: %s (%s)", ref.id, kind, text[:300])
+        self.busy.emit("")
+        self.failed.emit(ref.id, PROBLEMS.get(kind, "SW-601"))
 
     def _cached(self, video_id: str) -> Optional[streams.Stream]:
         stream = self._cache.get(video_id)
@@ -290,6 +322,7 @@ class LinkBox(QWidget):
     Emits submitted(VideoRef) (watch now) or queued(VideoRef)."""
     submitted = Signal(object)
     queued = Signal(object)
+    playlistSubmitted = Signal(object, bool)      # (PlaylistRef, play: False = only into the queue)
 
     def __init__(self, button_text: str = "▶  Watch", parent=None):
         super().__init__(parent)
@@ -320,7 +353,7 @@ class LinkBox(QWidget):
         self._changed("")
 
     def _changed(self, text: str) -> None:
-        ref = links.parse(text)
+        ref = links.parse(text) or links.parse_playlist(text)
         self.button.setEnabled(ref is not None)
         self.queue_button.setEnabled(ref is not None)
         bad = bool(text.strip()) and ref is None
@@ -328,18 +361,21 @@ class LinkBox(QWidget):
         self.note.setVisible(bad)
 
     def _submit(self) -> None:
-        ref = links.parse(self.field.text())
-        if ref is None:
-            return
-        self.field.clear()
-        self.submitted.emit(ref)
+        self._send(play=True)
 
     def _queue(self) -> None:
-        ref = links.parse(self.field.text())
-        if ref is None:
+        self._send(play=False)
+
+    def _send(self, play: bool) -> None:
+        text = self.field.text()
+        playlist, ref = links.parse_playlist(text), links.parse(text)
+        if playlist is None and ref is None:
             return
         self.field.clear()
-        self.queued.emit(ref)
+        if playlist is not None:
+            self.playlistSubmitted.emit(playlist, play)
+        else:
+            (self.submitted if play else self.queued).emit(ref)
 
 
 class LinkDialog(QDialog):
@@ -351,6 +387,7 @@ class LinkDialog(QDialog):
         self.box = LinkBox()
         self.box.submitted.connect(lambda ref: self._chosen(ref, "watch"))
         self.box.queued.connect(lambda ref: self._chosen(ref, "queue"))
+        self.box.playlistSubmitted.connect(lambda ref, play: self._chosen(ref, "playlist" if play else "playlist-queue"))
         self.ref: Optional[links.VideoRef] = None
         self.mode = "watch"
         hint = QLabel("In a room, everyone who follows you opens the same video.")

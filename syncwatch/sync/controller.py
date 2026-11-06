@@ -802,9 +802,9 @@ class Controller(RoomListener):
         """"add" or "control" (skip, remove others' videos, reorder, play now) allowed for me?"""
         return self.decides_queue or self.queue_rules.get(what) == "everyone"
 
-    def queue_add(self, video_id: str, title: str = "", dur: int = 0) -> bool:
+    def queue_add(self, video_id: str, title: str = "", dur: int = 0, quiet: bool = False) -> bool:
         if self.decides_queue:
-            return self._queue_do("add", None, yt=video_id, title=title, dur=dur) is None
+            return self._queue_do("add", None, yt=video_id, title=title, dur=dur, quiet=quiet) is None
         if not self.can_queue("add"):
             self.ui.problem("SW-610")
             return False
@@ -892,8 +892,9 @@ class Controller(RoomListener):
                     self.ui.activity("The queue is full (50 videos)", "warn")
                 return "busy"
             item.by_id = peer.id if peer is not None else None
-            self.ui.activity(f"{'You' if peer is None else who} added {item.title} to the queue",
-                             "you" if peer is None else "friend")
+            if not fields.get("quiet"):     # (a playlist says it once for all of its videos)
+                self.ui.activity(f"{'You' if peer is None else who} added {item.title} to the queue",
+                                 "you" if peer is None else "friend")
             self._queue_changed()
             if len(self.queue.items) == 1 and self._idle_for_queue():
                 self._queue_start(self.queue.advance())   # nothing (more) playing: start right away

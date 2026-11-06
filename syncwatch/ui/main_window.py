@@ -191,9 +191,11 @@ class MainWindow(QMainWindow):
         self.youtube.opened.connect(self.play_stream)
         self.youtube.busy.connect(self._youtube_busy)
         self.youtube.quietFailure.connect(self._youtube_follow_failed)
+        self.youtube.playlistListed.connect(self._playlist_listed)
         self.youtube.failed.connect(self._youtube_failed)
         self.idle.youtube_box.submitted.connect(self.open_youtube)
         self.idle.youtube_box.queued.connect(self.queue_youtube)
+        self.idle.youtube_box.playlistSubmitted.connect(self.open_playlist)
         self.titles = TitleLookup(self)
         self.titles.found.connect(lambda video, title: self.controller.queue_info(video, title, 0))
         queue_panel = self.sidebar.queue
@@ -578,6 +580,50 @@ class MainWindow(QMainWindow):
         if self.controller.queue_add(ref.id, "", 0) and self.controller.decides_queue:
             self.overlay.toast("Added to the queue", "info")
 
+    def open_playlist(self, playlist, play: bool = True) -> None:
+        """A playlist link: its video plays (if it named one) and the rest go into Up next
+        (Settings > YouTube: ask / all / only the one video). Members add only the one video."""
+        mode = self.settings.get("youtube.playlists")
+        if mode == "video" or not self.controller.decides_queue:
+            if playlist.video is not None:
+                (self.open_youtube if play else self.queue_youtube)(playlist.video)
+            if not self.controller.decides_queue and mode != "video":
+                self.activity("Only the host adds whole playlists: send them the link", "info")
+            return
+        if playlist.video is not None and play:
+            self.open_youtube(playlist.video)
+        self._playlist_play = play and playlist.video is None
+        self.youtube.list_playlist(playlist)
+
+    def _playlist_listed(self, ref, playlist) -> None:
+        from ..youtube.queue import MAX_ITEMS
+        self.youtube.busy.emit("")
+        entries = [entry for entry in playlist.entries if not (ref.video and entry.id == ref.video.id)]
+        name = f"“{playlist.title}”" if playlist.title else "The playlist"
+        if not entries:
+            self.activity(f"{name} has no other videos SyncWatch can play", "info")
+            return
+        play_first = getattr(self, "_playlist_play", False)
+        if self.settings.get("youtube.playlists") == "ask":
+            count = len(entries) - (1 if play_first else 0)
+            answer = QMessageBox.question(
+                self, "Playlist", f"{name} has {len(entries)} video{'s' if len(entries) != 1 else ''}."
+                + (f" Add {'the other ' if play_first else ''}{count} to Up next?" if count else ""),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if answer != QMessageBox.StandardButton.Yes:
+                if play_first:
+                    self.open_youtube(youtube_links.VideoRef(entries[0].id))
+                return
+        if play_first:
+            first = entries.pop(0)
+            self.open_youtube(youtube_links.VideoRef(first.id))
+        room = max(0, MAX_ITEMS - len(self.controller.queue.items))
+        added = sum(1 for entry in entries[:room]
+                    if self.controller.queue_add(entry.id, entry.title, int(entry.duration_s), quiet=True))
+        left = len(entries) - room
+        self.activity(f"Added {added} video{'s' if added != 1 else ''} from {name} to Up next"
+                      + (f" ({left} didn't fit: the queue holds {MAX_ITEMS})" if left > 0 else ""), "you")
+
     def _open_or_queue(self, ref) -> None:
         """Ctrl+V or a dropped link: queue it if something from YouTube plays (or is queued), else play it."""
         youtube_on = getattr(self.player, "stream", None) is not None and self.player.has_media()
@@ -593,7 +639,9 @@ class MainWindow(QMainWindow):
             return
         dialog = LinkDialog(self)
         if dialog.exec() and dialog.ref is not None:
-            if dialog.mode == "queue" or queue:
+            if dialog.mode.startswith("playlist"):
+                self.open_playlist(dialog.ref, play=dialog.mode == "playlist" and not queue)
+            elif dialog.mode == "queue" or queue:
                 self.queue_youtube(dialog.ref)
             else:
                 self.open_youtube(dialog.ref)
@@ -675,7 +723,13 @@ class MainWindow(QMainWindow):
 
     def _paste_link(self) -> None:
         """Ctrl+V outside a text field: a YouTube link from the clipboard opens."""
-        ref = youtube_links.find(QApplication.clipboard().text())
+        text = QApplication.clipboard().text()
+        playlist = youtube_links.find_playlist(text)
+        if playlist is not None:
+            youtube_on = getattr(self.player, "stream", None) is not None and self.player.has_media()
+            self.open_playlist(playlist, play=not (youtube_on or self.controller.queue.items))
+            return
+        ref = youtube_links.find(text)
         if ref is not None:
             self._open_or_queue(ref)
 
@@ -1197,6 +1251,10 @@ class MainWindow(QMainWindow):
         data = event.mimeData()
         for url in data.urls():
             if not url.isLocalFile():
+                playlist = youtube_links.parse_playlist(url.toString())
+                if playlist is not None:
+                    self.open_playlist(playlist)
+                    return
                 ref = youtube_links.parse(url.toString())
                 if ref is not None:
                     self._open_or_queue(ref)
