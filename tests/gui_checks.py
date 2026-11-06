@@ -20,7 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 FILM = HERE / "media" / "demo.mkv"
-ENV = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+ENV = dict(os.environ, QT_QPA_PLATFORM="offscreen", SYNCWATCH_FAULTS_TO_STDERR="1")   # a crash shows where
 if sys.platform.startswith("linux"):
     ENV.setdefault("QT_AUDIO_BACKEND", "pulseaudio")  # avoids a PipeWire crash without a sound server
 
