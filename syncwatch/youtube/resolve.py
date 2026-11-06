@@ -2,11 +2,14 @@
 
     python -E -P resolve.py <video ID> [--height 1080] [--codecs compatible|any] [--combined]
                             [--js deno=<path>] [--cache <folder>] [--timeout 30]
+    python -E -P resolve.py <playlist ID> --playlist [--cache <folder>] [--timeout 30]
 
 Prints exactly one line of JSON (ASCII only) and exits:
     {"ok": {"id", "title", "channel", "duration", "live", "thumbnail", "height",
             "video": {"url", "codec", "height", "fps"}, "audio": {"url", "codec"} or null,
             "headers": {...}, "expires": <unix time>}}            exit code 0
+    {"ok": {"playlist", "title", "entries": [{"id", "title", "duration"}, ...]}}   (--playlist: at
+            most MAX_PLAYLIST videos, only their IDs and titles; nothing is looked up per video)
     {"error": "<kind>", "message": "<yt-dlp's text>"}                exit code 1
 
 Kinds: unavailable, private, signin (age-restricted / members only), bot (YouTube wants proof
@@ -32,6 +35,10 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlsplit
 
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+LIST_RE = re.compile(r"^[A-Za-z0-9_-]{10,64}$")          # a playlist ID (PL…, UU…, OLAK5uy_…, RD…)
+MAX_PLAYLIST = 50                                        # as many as the queue holds
+_IN_URL = re.compile(r"(?:[?&]v=|youtu\.be/|/embed/|/shorts/|/live/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])")
+_GONE = ("[private video]", "[deleted video]", "[unavailable video]")
 DEFAULT_LIFETIME_S = 5 * 3600     # YouTube's stream addresses usually work about 6 hours
 MAX_TITLE = 200
 HEADERS_KEPT = ("User-Agent", "Accept", "Accept-Language", "Referer", "Origin")
@@ -153,6 +160,43 @@ def resolve(target: str, options: Dict[str, Any]) -> Dict[str, Any]:
         return summarize(ydl.sanitize_info(info))
 
 
+def summarize_playlist(info: Dict[str, Any], limit: int = MAX_PLAYLIST) -> Dict[str, Any]:
+    """yt-dlp's flat playlist (IDs and titles only) -> our answer; private/deleted videos left out."""
+    entries, seen = [], set()
+    for entry in info.get("entries") or []:
+        if not isinstance(entry, dict):
+            continue
+        video = entry.get("id") if isinstance(entry.get("id"), str) and ID_RE.match(entry["id"]) else ""
+        if not video and isinstance(entry.get("url"), str):
+            match = _IN_URL.search(entry["url"])
+            video = match.group(1) if match else ""
+        title = entry.get("title") if isinstance(entry.get("title"), str) else ""
+        if not video or video in seen or title.strip().lower() in _GONE:
+            continue
+        seen.add(video)
+        duration = entry.get("duration")
+        duration = float(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) else 0.0
+        entries.append({"id": video, "title": title[:MAX_TITLE], "duration": max(0.0, min(duration, 172800.0))})
+        if len(entries) >= limit:
+            break
+    title = info.get("title") if isinstance(info.get("title"), str) else ""
+    return {"title": title[:MAX_TITLE], "entries": entries}
+
+
+def playlist_options(cache: Optional[str], timeout: float) -> Dict[str, Any]:
+    return {"quiet": True, "no_warnings": True, "noprogress": True, "skip_download": True,
+            "socket_timeout": timeout, "color": {"stdout": "never", "stderr": "never"},
+            "remote_components": [], "cachedir": cache or False,
+            "extract_flat": "in_playlist", "playlistend": MAX_PLAYLIST, "lazy_playlist": True}
+
+
+def list_playlist(target: str, options: Dict[str, Any]) -> Dict[str, Any]:
+    import yt_dlp  # noqa: PLC0415 - only in this process
+    with yt_dlp.YoutubeDL(options) as ydl:
+        info = ydl.extract_info(target, download=False)
+        return summarize_playlist(ydl.sanitize_info(info))
+
+
 def say(message: Dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(message, ensure_ascii=True) + "\n")
     sys.stdout.flush()
@@ -161,7 +205,8 @@ def say(message: Dict[str, Any]) -> None:
 def main(argv: List[str]) -> int:
     import argparse  # noqa: PLC0415
     parser = argparse.ArgumentParser(prog="resolve.py", description=__doc__.split("\n\n")[0])
-    parser.add_argument("video", help="11-character YouTube video ID")
+    parser.add_argument("video", help="11-character YouTube video ID (with --playlist: a playlist ID)")
+    parser.add_argument("--playlist", action="store_true", help="list a playlist's videos instead")
     parser.add_argument("--height", type=int, default=1080)
     parser.add_argument("--codecs", choices=("compatible", "any"), default="compatible")
     parser.add_argument("--combined", action="store_true", help="one stream with picture and sound (Qt's player)")
@@ -170,6 +215,8 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--test-url", default="", help=argparse.SUPPRESS)   # tests only: a local address
     args = parser.parse_args(argv)
+    if args.playlist:
+        return _main_playlist(args)
     if not ID_RE.match(args.video):
         say({"error": "other", "message": "not a YouTube video ID"})
         return 2
@@ -190,6 +237,27 @@ def main(argv: List[str]) -> int:
         say({"error": classify(text), "message": text[:2000]})
         return 1
     result["id"] = args.video
+    say({"ok": result})
+    return 0
+
+
+def _main_playlist(args) -> int:
+    if not LIST_RE.match(args.video):
+        say({"error": "other", "message": "not a YouTube playlist ID"})
+        return 2
+    target = args.test_url or f"https://www.youtube.com/playlist?list={args.video}"
+    try:
+        import yt_dlp  # noqa: F401, PLC0415
+    except ImportError as exc:
+        say({"error": "missing", "message": f"yt-dlp isn't installed ({exc})"})
+        return 1
+    try:
+        result = list_playlist(target, playlist_options(args.cache or None, args.timeout))
+    except Exception as exc:  # noqa: BLE001 - everything yt-dlp can throw ends up here
+        text = f"{type(exc).__name__}: {exc}"
+        say({"error": classify(text), "message": text[:2000]})
+        return 1
+    result["playlist"] = args.video
     say({"ok": result})
     return 0
 

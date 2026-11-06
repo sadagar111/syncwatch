@@ -9,7 +9,8 @@ starting the next video at the end, Skip, and a video that can't be found being 
 
 1. Paste a link on the start screen: the video opens and plays.
 2. Queue two more (one of them "deleted"), then let the video end: the next one starts by itself.
-3. Skip: the broken one can't be opened, so the one after it plays.
+3. Skip: the broken one can't be opened, so the one after it plays. Then a playlist link: its videos
+   (read by yt-dlp from a page with them embedded) go into Up next.
 4. A torrent (from 0.6, if libtorrent is installed): a .torrent file of a short film, shared by a
    libtorrent session in this process on 127.0.0.1, streams and plays; closing it stops the helper.
 Screenshots go to the output folder. Exit code 0 only if every check passes.
@@ -41,7 +42,8 @@ profile_dir.mkdir(parents=True)
     {"_version": 1, "values": {"profile.name": "Alex", "ui.startup_checks": "never", "torrents.dht": False,
                                "torrents.incoming": False, "torrents.start_mb": 1,
                                "torrents.folder": str(data_dir / "torrents"),
-                               "paths.movies_dir": str(data_dir / "library")}}), encoding="utf-8")
+                               "paths.movies_dir": str(data_dir / "library"),
+                               "youtube.playlists": "all"}}), encoding="utf-8")
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
@@ -78,6 +80,22 @@ def _local_job(self, video_id):
 
 youtube_ui.YouTube._new_job = _local_job
 youtube_ui.find_js_runtime = lambda setting: setting or "/no/deno/needed/for/local/files"
+
+# Playlists (0.5): the playlist is a page with the videos embedded, read by yt-dlp's real code
+PLAYLIST = "PLsyncwatchtest1"
+(web_dir / f"{PLAYLIST}.html").write_text(
+    "<html><head><title>Harness playlist</title></head><body>"
+    + "".join(f'<iframe src="https://www.youtube.com/embed/{v}"></iframe>' for v in (FIRST, SECOND, THIRD))
+    + "</body></html>", encoding="utf-8")
+_playlist_start = youtube_ui.PlaylistJob.start
+
+
+def _local_playlist(self):
+    self._arguments += ["--test-url", f"{BASE}/{self.video_id}.html"]
+    _playlist_start(self)
+
+
+youtube_ui.PlaylistJob.start = _local_playlist
 
 
 def spin(seconds, until=None):
@@ -136,6 +154,14 @@ def run_script():
     CHECKS["broken video skipped, the next plays"] = spin(40, lambda: playing(window, THIRD))
     CHECKS["queue empty"] = window.controller.queue.items == []
     shot(window, "04_after_skip")
+
+    # 3b. a playlist link while a video plays: all its videos go into Up next (setting: all)
+    window.open_playlist(youtube_ui.links.PlaylistRef(PLAYLIST), play=False)
+    CHECKS["playlist into the queue"] = spin(30, lambda: [i.id for i in window.controller.queue.items]
+                                             == [FIRST, SECOND, THIRD])
+    CHECKS["said once for the playlist"] = any("Added 3 videos from “Harness playlist”" in
+                                               window.sidebar.activity.list.item(i).text()
+                                               for i in range(window.sidebar.activity.list.count()))
     torrent_step(window)
     print("activity:", [window.sidebar.activity.list.item(i).text()
                         for i in range(window.sidebar.activity.list.count())][-8:])
