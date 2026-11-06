@@ -17,6 +17,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlsplit
 
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+LIST_RE = re.compile(r"^[A-Za-z0-9_-]{10,64}$")       # a playlist ID (PL…, UU…, OLAK5uy_…, RD… mixes)
 _HOSTS = ("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com",
           "youtube-nocookie.com", "www.youtube-nocookie.com", "youtu.be", "www.youtu.be")
 _PATH_PREFIXES = ("shorts", "live", "embed", "v", "e")
@@ -90,7 +91,44 @@ def parse(text: str) -> Optional[VideoRef]:
 def find(text: str) -> Optional[VideoRef]:
     """The first YouTube video in a longer text (a chat message, a whole clipboard)."""
     for word in re.split(r"\s+", text or ""):
-        ref = parse(word.strip("<>()[]\"'.,;"))
+        ref = parse(word.strip("<>()[]\"'.,;!?"))
+        if ref:
+            return ref
+    return None
+
+
+@dataclass(frozen=True)
+class PlaylistRef:
+    """A playlist link: the playlist, and the video it pointed at inside it (if any)."""
+    id: str
+    video: Optional[VideoRef] = None
+
+    @property
+    def url(self) -> str:
+        return f"https://www.youtube.com/playlist?list={self.id}"
+
+
+def parse_playlist(text: str) -> Optional[PlaylistRef]:
+    """youtube.com/playlist?list=…, watch?v=…&list=…, youtu.be/…?list=… -> PlaylistRef, else None."""
+    text = (text or "").strip()
+    if not text or len(text) > 2000:
+        return None
+    try:
+        parts = urlsplit(text if "://" in text else "https://" + text)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or (parts.hostname or "").lower() not in _HOSTS:
+        return None
+    list_id = (parse_qs(parts.query).get("list") or [""])[0]
+    if not LIST_RE.match(list_id):
+        return None
+    return PlaylistRef(list_id, parse(text))
+
+
+def find_playlist(text: str) -> Optional[PlaylistRef]:
+    """The first YouTube playlist link in a longer text."""
+    for word in re.split(r"\s+", text or ""):
+        ref = parse_playlist(word.strip("<>()[]\"'.,;!?"))
         if ref:
             return ref
     return None

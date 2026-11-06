@@ -30,6 +30,8 @@ is the real test.
 - [ ] The guest tries Skip: *Only the host can do that* (SW-610). Host: Settings → YouTube → *Who can skip*
       → Everyone: now the guest's Skip works
 - [ ] Queue a deleted/private video: it's skipped with a line in Activity, the next one plays
+- [ ] Paste a playlist link (a music album, or any `…&list=…` link): it asks, then the other videos appear in
+      Up next with their titles; a playlist of more than 50 says how many didn't fit
 
 ---
 

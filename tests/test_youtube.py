@@ -79,6 +79,58 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(links.parse_time("999999h"), links.MAX_START_S)
 
 
+class PlaylistTests(unittest.TestCase):
+    """Playlists into the queue (0.5): links, what yt-dlp lists, the checked answer."""
+
+    def test_playlist_links(self):
+        cases = {
+            "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf": ("PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf", None),
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLrAXtmErZgOeiKm4sgN&index=3": ("PLrAXtmErZgOeiKm4sgN", ID),
+            "youtu.be/dQw4w9WgXcQ?list=OLAK5uy_kXyz1234567890": ("OLAK5uy_kXyz1234567890", ID),
+            "https://music.youtube.com/playlist?list=RDCLAK5uy_abcdefghij": ("RDCLAK5uy_abcdefghij", None),
+        }
+        for link, (list_id, video) in cases.items():
+            with self.subTest(link):
+                ref = links.parse_playlist(link)
+                self.assertEqual(ref.id, list_id)
+                self.assertEqual(ref.video.id if ref.video else None, video)
+        for link in ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://evil.example/playlist?list=PLabcdefghij",
+                     "https://www.youtube.com/playlist?list=short", "https://www.youtube.com/playlist?list=PL<script>xx",
+                     "", "javascript:alert(1)//youtube.com/playlist?list=PLabcdefghij"):
+            with self.subTest(link):
+                self.assertIsNone(links.parse_playlist(link))
+        found = links.find_playlist("watch this (https://youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgN)!")
+        self.assertEqual(found.id, "PLrAXtmErZgOeiKm4sgN")
+        self.assertEqual(found.url, "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgN")
+
+    def test_what_ytdlp_lists(self):
+        info = {"title": "Mix " + "x" * 300, "entries": [
+            {"id": "dQw4w9WgXcQ", "title": "First", "duration": 212},
+            {"id": "dQw4w9WgXcQ", "title": "First again"},                       # twice: once
+            {"id": "aaaaaaaaaaa", "title": "[Private video]", "duration": None},
+            {"id": "bbbbbbbbbbb", "title": "[Deleted video]"},
+            {"url": "https://www.youtube.com/embed/ccccccccccc", "title": None},   # no id: from the address
+            {"id": "not an id", "url": "https://evil.example/x"},
+            "junk", {"id": "ddddddddddd", "duration": True}, {"id": "eeeeeeeeeee", "duration": 1e9}]}
+        result = resolve.summarize_playlist(info)
+        self.assertEqual([e["id"] for e in result["entries"]], ["dQw4w9WgXcQ", "ccccccccccc", "ddddddddddd",
+                                                                 "eeeeeeeeeee"])
+        self.assertEqual([e["duration"] for e in result["entries"]], [212.0, 0.0, 0.0, 172800.0])
+        self.assertEqual(len(result["title"]), 200)
+        many = {"entries": [{"id": f"{n:011d}"} for n in range(80)]}
+        self.assertEqual(len(resolve.summarize_playlist(many)["entries"]), resolve.MAX_PLAYLIST)
+
+    def test_the_answer_is_checked(self):
+        playlist = streams.playlist_from_json({"playlist": "PLrAXtmErZgOeiKm4sgN", "title": "T",
+                                               "entries": [{"id": ID, "title": "A", "duration": "x"},
+                                                           {"id": "bad"}, {"id": ID}]})
+        self.assertEqual((playlist.id, playlist.title, len(playlist.entries)), ("PLrAXtmErZgOeiKm4sgN", "T", 1))
+        self.assertEqual(playlist.entries[0].duration_s, 0.0)
+        for bad in ({"playlist": "x"}, {"entries": []}, "list", {"playlist": "PL../../etc/xx"}):
+            with self.subTest(bad=bad), self.assertRaises(streams.BadStream):
+                streams.playlist_from_json(bad)
+
+
 class ClassifyTests(unittest.TestCase):
     def test_kinds(self):
         cases = {
@@ -243,6 +295,21 @@ class ResolverProcessTests(unittest.TestCase):
         stream = streams.from_json(message["ok"])
         self.assertEqual(stream.id, ID)
         self.assertEqual(stream.address(), f"{self.base}/clip.mkv")
+
+    def test_a_playlist_through_ytdlp(self):
+        """yt-dlp's real flat-playlist path (its generic extractor reads a page with embedded videos)."""
+        (self.dir / "list.html").write_text(
+            "<html><head><title>Test list</title></head><body>"
+            + "".join(f'<iframe src="https://www.youtube.com/embed/{v}"></iframe>' for v in (ID, "abcdefghijk"))
+            + "</body></html>", encoding="utf-8")
+        code, message = self.run_resolver("PLrAXtmErZgOeiKm4sgN", "--playlist", "--test-url", f"{self.base}/list.html",
+                                          "--timeout", "10")
+        self.assertEqual(code, 0, message)
+        playlist = streams.playlist_from_json(message["ok"])
+        self.assertEqual([e.id for e in playlist.entries], [ID, "abcdefghijk"])
+        self.assertEqual(playlist.title, "Test list")
+        code, message = self.run_resolver("not a list!", "--playlist")
+        self.assertEqual((code, message["error"]), (2, "other"))
 
     def test_not_found(self):
         code, message = self.run_resolver(ID, "--test-url", f"{self.base}/missing.mkv", "--timeout", "10")

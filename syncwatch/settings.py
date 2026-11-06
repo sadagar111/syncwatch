@@ -217,6 +217,11 @@ SCHEMA: List[Setting] = [
        "When you host: the next video starts for everyone together, once all have it open (slow "
        "PCs are named after this long, and it starts anyway).", advanced=True, minimum=5, maximum=120,
        suffix=" s"),
+    _s("youtube.playlists", "choice", "ask", "When a link is a playlist", YT,
+       "A link with a playlist in it (…&list=…): ask, add all its videos to Up next (at most 50), or only "
+       "play the one video. Only the host (or someone alone) adds a whole playlist.",
+       choices=[("ask", "Ask (recommended)"), ("all", "Add all its videos to Up next"),
+                ("video", "Only the one video")]),
     _s("youtube.codecs", "choice", "compatible", "Video formats", YT,
        "Most compatible avoids AV1, which older PCs can't decode smoothly. Any also allows AV1: a bit "
        "sharper for the same internet speed, but needs a newer PC or graphics card.", advanced=True,
