@@ -53,6 +53,19 @@ CHANNELS = {1: "mono", 2: "stereo", 6: "5.1", 8: "7.1"}
 VIDEO_OUTPUTS = ("window", "opengl", "none")
 
 
+
+# mpv's own Lua scripts (console, menus, auto profiles...) aren't used: SyncWatch has its own controls.
+# Off, they can't run Lua at all: on Windows every Lua error, even one a script catches itself,
+# shows up as a "fatal exception" (0xE24C4A02, LuaJIT's way of unwinding), and Python's crash
+# logger then wrote out every thread while they ran, which could itself crash SyncWatch.
+LUA_SCRIPTS_OFF = (
+    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_positioning": "no",   # mpv 0.40+
+     "load_context_menu": "no", "load_auto_profiles": "no"},
+    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_auto_profiles": "no"},   # 0.39
+    {"load_osd_console": "no", "load_auto_profiles": "no"},                                         # 0.33-0.38
+    {},
+)
+
 class StartFailed(Exception):
     """mpv couldn't be started; the window falls back to the Qt player (SW-209)."""
 
@@ -216,6 +229,15 @@ class MpvPlayer(QObject):
             self.widget = NativeVideo(background, self.video_output == "window", parent)
         return self.widget
 
+    def _lua_choices(self):
+        """Which LUA_SCRIPTS_OFF this libmpv knows (by its client API: 2.5 = mpv 0.40, 2.4 = 0.39), then older ones."""
+        try:
+            version = tuple(self.module._mpv_client_api_version())
+        except Exception:  # noqa: BLE001 - unknown: try them all
+            version = (9, 9)
+        start = 0 if version >= (2, 5) else 1 if version >= (2, 4) else 2
+        return LUA_SCRIPTS_OFF[start:]
+
     def start(self) -> None:
         """Start mpv, after the video widget has its place in the window. Raises StartFailed."""
         options = {
@@ -235,10 +257,16 @@ class MpvPlayer(QObject):
         else:
             options["vo"], options["ao"], options["hwdec"] = "null", "null", "no"
             self.hwdec = "no"
-        try:
-            self.core = self.module.MPV(log_handler=self._log_from_mpv, loglevel="warn", **options)
-        except Exception as exc:  # noqa: BLE001 - whatever libmpv says, we fall back
-            raise StartFailed(errors.describe_exception(exc)) from exc
+        self.core = None
+        failure = None
+        for lua_off in self._lua_choices():
+            try:   # (the Lua options go first: an mpv that doesn't know one stops before it gets a window)
+                self.core = self.module.MPV(log_handler=self._log_from_mpv, loglevel="warn", **{**lua_off, **options})
+                break
+            except Exception as exc:  # noqa: BLE001 - whatever libmpv says, we try the next or fall back
+                failure = exc           # (python-mpv frees the half-made mpv itself when it's collected)
+        if self.core is None:
+            raise StartFailed(errors.describe_exception(failure)) from failure
         try:
             self.core["drag-and-drop"] = "no"   # dropped files go to SyncWatch, not straight to mpv
         except Exception:  # noqa: BLE001 - option only exists in newer mpv versions

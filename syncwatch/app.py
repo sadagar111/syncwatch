@@ -65,11 +65,14 @@ def _install_crash_handlers(profile: paths.Profile) -> Optional[str]:
     try:
         if profile.crash_file.exists() and profile.crash_file.stat().st_size > 0:
             previous = profile.crash_file.read_text(encoding="utf-8", errors="replace")[-20_000:]
-        if os.environ.get("SYNCWATCH_FAULTS_TO_STDERR"):    # the app checks: where every thread was, on screen
-            faulthandler.enable(file=sys.stderr, all_threads=True)
+        # Windows reports even exceptions that are caught (mpv's Lua does that), and writing out every
+        # other thread then reads them while they run: that can crash. So there: only the thread itself.
+        every_thread = sys.platform != "win32"
+        if os.environ.get("SYNCWATCH_FAULTS_TO_STDERR"):    # the app checks: on screen
+            faulthandler.enable(file=sys.stderr, all_threads=every_thread)
         else:
             handle = open(profile.crash_file, "w", encoding="utf-8")
-            faulthandler.enable(file=handle, all_threads=True)
+            faulthandler.enable(file=handle, all_threads=every_thread)
             _install_crash_handlers.handle = handle  # type: ignore[attr-defined]
     except OSError:
         pass
