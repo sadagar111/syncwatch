@@ -20,7 +20,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 FILM = HERE / "media" / "demo.mkv"
-ENV = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+ENV = dict(os.environ, QT_QPA_PLATFORM="offscreen", SYNCWATCH_FAULTS_TO_STDERR="1")   # a crash shows where
 if sys.platform.startswith("linux"):
     ENV.setdefault("QT_AUDIO_BACKEND", "pulseaudio")  # avoids a PipeWire crash without a sound server
 
@@ -36,6 +36,9 @@ def check_ui(out: Path) -> bool:
                    if line.startswith("PLAYER:")), "")
     if player and os.environ.get("GITHUB_ACTIONS"):   # shown on the pull request page
         print(f"::notice title=Video player in the app check ({sys.platform})::{player}", flush=True)
+    if result.returncode != 0:
+        print(f"ui check failed (exit code {result.returncode}); end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
     return result.returncode == 0
 
 
