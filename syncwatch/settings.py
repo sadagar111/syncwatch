@@ -136,6 +136,14 @@ SCHEMA: List[Setting] = [
        choices=[("ask", "Ask me every time"), ("friends_direct", "Friends join directly, ask me about others"),
                 ("friends_only", "Only friends may ask"),
                 ("open", "Anyone with the code joins directly (not recommended)")]),
+    _s("chat.over_video", "choice", "hidden", "Chat messages over the video", WT,
+       "Friends' messages show for a few seconds at the top of the video: while the sidebar is hidden "
+       "(fullscreen, or after Tab), always, or never. The sidebar always has them.",
+       choices=[("hidden", "While the sidebar is hidden"), ("always", "Always"), ("never", "Never")]),
+    _s("chat.reactions", "bool", True, "Show reactions over the video", WT,
+       "Friends' emoji (😂 🔥 🍿 …) float up over the video for a few seconds."),
+    _s("chat.number_keys", "bool", True, "Number keys 1–8 send reactions", WT,
+       "1 😂  2 😮  3 😍  4 😱  5 😢  6 👏  7 🔥  8 🍿 (not while you type).", advanced=True),
     _s("room.max_people", "int", 10, "Room size limit", WT,
        "How many people (you included) may be in your room.", advanced=True, minimum=2, maximum=20),
     _s("room.rejoin", "bool", True, "Let people back in after a dropped connection", WT,
@@ -320,6 +328,7 @@ SCHEMA: List[Setting] = [
     _s("keys.sidebar", "keys", "Tab", "Show/hide sidebar", KB, advanced=True),
     _s("keys.open", "keys", "Ctrl+O", "Library (your films)", KB, advanced=True),
     _s("keys.youtube", "keys", "Ctrl+L", "Open a YouTube link", KB, advanced=True),
+    _s("keys.chat", "keys", "T", "Write in the room chat", KB, advanced=True),
     _s("keys.settings", "keys", "Ctrl+,", "Settings", KB, advanced=True),
     _s("keys.help", "keys", "F1", "Keyboard shortcuts", KB, advanced=True),
 

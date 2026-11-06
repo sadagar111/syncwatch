@@ -48,6 +48,7 @@ from ..room.friends import Friends
 from ..room.session import JOINING, Member, RoomListener, RoomSession
 from ..youtube.queue import Item, Queue, QueueFull
 from .film_vote import FilmVoteRoom
+from .chat import RoomChat
 
 log = logging.getLogger("syncwatch.sync")
 
@@ -179,6 +180,7 @@ class Controller(RoomListener):
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
         self.votes = FilmVoteRoom(self)     # the film vote (0.7)
+        self.chat = RoomChat(self)          # chat and reactions (0.8)
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
@@ -377,6 +379,7 @@ class Controller(RoomListener):
         self._share_waiting, self._share_magnet = False, ""
         self._share_asked.clear()
         self.votes.reset()
+        self.chat.reset()
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -991,6 +994,11 @@ class Controller(RoomListener):
 
     def _on_vreq(self, peer: Peer, body: Dict) -> None:
         self.votes.on_vreq(peer, body)
+    def _on_chat(self, peer: Peer, body: Dict) -> None:
+        self.chat.on_chat(peer, body)
+
+    def _on_react(self, peer: Peer, body: Dict) -> None:
+        self.chat.on_react(peer, body)
 
     def _on_queue(self, peer: Peer, body: Dict) -> None:
         if self.is_host or not peer.is_host:

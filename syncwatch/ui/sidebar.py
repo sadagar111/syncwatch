@@ -457,8 +457,21 @@ class FriendsPanel(Panel):
 
 
 # ============================================================================ activity
+class ChatBox(QLineEdit):
+    """Where a chat message is written (Enter sends it, Esc goes back to the video)."""
+    leave = Signal()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if event.key() == Qt.Key.Key_Escape:
+            self.leave.emit()
+            return
+        super().keyPressEvent(event)
+
+
 class ActivityPanel(Panel):
+    """What happens in the room, and (in a room, 0.8) the chat: a box under the list."""
     COLOURS = {"you": "#9BE8B4", "friend": "#9CC9FF", "warn": "#FFC46B", "error": "#FF8A9B", "info": None}
+    chatSubmitted = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__("Activity", parent)
@@ -467,7 +480,19 @@ class ActivityPanel(Panel):
         self.list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.body.addWidget(self.list, 1)
+        self.chat_box = ChatBox()
+        self.chat_box.setPlaceholderText("Say something to the room… (T, Enter sends)")
+        from ..net.protocol import CHAT_TEXT
+        self.chat_box.setMaxLength(CHAT_TEXT)
+        self.chat_box.returnPressed.connect(lambda: self.chatSubmitted.emit(self.chat_box.text()))
+        self.chat_box.hide()
+        self.body.addWidget(self.chat_box)
         self.max_items = 200
+
+    def set_chat(self, on: bool) -> None:
+        """The chat box shows in a room only."""
+        self.chat_box.setVisible(on)
+        self.heading.setText("ACTIVITY AND CHAT" if on else "ACTIVITY")
 
     def add(self, text: str, kind: str = "info") -> None:
         item = QListWidgetItem(f"{time.strftime('%H:%M')}  {text}")

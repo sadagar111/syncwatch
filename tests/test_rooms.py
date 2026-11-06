@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from syncwatch.sync import chat as chat_module  # noqa: E402
 from room_harness import Room  # noqa: E402
 
 from syncwatch import PROTOCOL_VERSION  # noqa: E402
@@ -421,6 +422,54 @@ class FilmVoteTests(RoomTestCase):
         self.assertLessEqual(len(self.alex.c.votes.vote.choices), 3)
         self.alex.c.votes.cancel()
         self.assertTrue(self.pump(until=lambda: not self.marek.c.votes.vote.active))
+
+
+class ChatTests(RoomTestCase):
+    """Chat and reactions (0.8): to everyone in the room, in order, floods dropped."""
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex")
+        self.marek = self.room.person("Marek")
+        self.kuba = self.room.person("Kuba")
+        self.room.let_in(self.alex, self.marek, self.kuba)
+
+    def test_messages_and_reactions_reach_everyone(self):
+        self.assertTrue(self.marek.c.chat.say("  hello   everyone "))
+        self.assertTrue(self.kuba.c.chat.say("hi Marek"))
+        for person in (self.alex, self.kuba):
+            self.assertTrue(self.pump(until=lambda p=person: ("Marek", "hello everyone", False) in p.ui.chats()))
+        self.assertTrue(self.pump(until=lambda: self.alex.ui.chats()[-1:] == [("Kuba", "hi Marek", False)]
+                                  or ("Kuba", "hi Marek", False) in self.alex.ui.chats()))
+        self.assertEqual(self.marek.ui.chats()[0], ("Marek", "hello everyone", True))      # mine, once
+        self.assertEqual(sum(1 for c in self.marek.ui.chats() if c[1] == "hello everyone"), 1)
+        self.assertFalse(self.marek.c.chat.say("   "))
+        self.assertTrue(self.alex.c.chat.react("🍿"))
+        for person in (self.marek, self.kuba):
+            self.assertTrue(self.pump(until=lambda p=person: ("Alex", "🍿", False) in p.ui.reactions()))
+        self.assertFalse(self.alex.c.chat.react("💩"))
+        self.marek.c.session.send_room("react", e="💩")                    # a modified app: refused
+        self.pump(0.5)
+        self.assertNotIn("💩", [r[1] for r in self.kuba.ui.reactions()])
+
+    def test_floods_are_limited(self):
+        sent = [self.marek.c.chat.say(f"message {n}") for n in range(8)]
+        self.assertEqual(sent, [True] * chat_module.SEND_RATE + [False] * (8 - chat_module.SEND_RATE))
+        self.assertTrue(any("Slow down" in t for t in self.marek.ui.activities()))
+        for n in range(20):                                                 # a modified app floods
+            self.kuba.c.session.send_room("chat", text=f"spam {n}")
+        self.pump(1.5)
+        spam = [c for c in self.alex.ui.chats() if c[1].startswith("spam")]
+        self.assertLessEqual(len(spam), chat_module.TAKE_RATE)
+        self.assertGreaterEqual(len([c for c in self.alex.ui.chats() if c[1].startswith("message")]),
+                                chat_module.SEND_RATE - 1)
+
+    def test_alone_no_chat(self):
+        self.kuba.c.leave()
+        self.pump(0.5)
+        self.assertFalse(self.kuba.c.chat.say("anyone?"))
+        self.assertTrue(self.kuba.c.chat.react("😂"))                      # alone: only over my own video
+        self.assertIn(("Kuba", "😂", True), self.kuba.ui.reactions())
 
 
 class QueueTests(RoomTestCase):

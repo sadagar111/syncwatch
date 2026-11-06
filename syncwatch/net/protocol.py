@@ -80,6 +80,8 @@ YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}", "dQw4w9WgXcQ")
 # "ip:port" or "[ipv6]:port" where someone in the room can be reached (checked again before use)
 ADDRESS = Pattern(r"(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]{2,45}\]):\d{1,5}", "192.0.2.10:6881")
 TMDB_IMAGE = Pattern(r"/[A-Za-z0-9_-]{1,80}\.(jpg|jpeg|png|webp)", "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg")
+REACTIONS = ("😂", "😮", "😍", "😱", "😢", "👏", "🔥", "🍿")   # the only emoji a reaction can be (0.8)
+CHAT_TEXT = 300                                                  # characters in one chat message
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
               "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
@@ -171,6 +173,9 @@ ROOM: Dict[str, Spec] = {
              "k": (int, False, (0, 1 << 31)), "title": (str, False, 120), "year": (int, False, (0, 2200)),
              "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
              "keys": (ListOf(int, 12, (1, 1 << 31)), False, None)},
+    # chat and reactions (0.8): to everyone in the room, shown when they come, kept nowhere
+    "chat": {"text": (str, True, CHAT_TEXT)},
+    "react": {"e": (REACTIONS, True, None)},
 }
 
 COMMON: Spec = {"s": (Hex(16), True, None), "n": SEQ}

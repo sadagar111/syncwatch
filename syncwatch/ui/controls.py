@@ -33,6 +33,7 @@ class ControlBar(QFrame):
     sidebarClicked = Signal()
     settingsClicked = Signal()
     openClicked = Signal()
+    reactionChosen = Signal(str)
 
     def __init__(self, colors: dict, parent=None):
         super().__init__(parent)
@@ -67,6 +68,13 @@ class ControlBar(QFrame):
         self.subs.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.subs_menu = QMenu(self)
         self.subs.setMenu(self.subs_menu)
+        from ..net.protocol import REACTIONS
+        self.react = IconButton("react", "😊 ▾", "Send a reaction to everyone (keys 1–8)")
+        self.react.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.react_menu = QMenu(self)
+        for number, emoji in enumerate(REACTIONS, 1):
+            self.react_menu.addAction(f"{emoji}   ({number})", lambda e=emoji: self.reactionChosen.emit(e))
+        self.react.setMenu(self.react_menu)
         self.mute = IconButton("volume", "🔊", "Mute (M)")
         self.volume = QSlider(Qt.Orientation.Horizontal)
         self.volume.setRange(0, 100)
@@ -95,7 +103,7 @@ class ControlBar(QFrame):
         for widget in (self.open, self.back, self.play, self.forward):
             row2.addWidget(widget)
         row2.addSpacing(10)
-        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label):
+        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label, self.react):
             row2.addWidget(widget)
         row2.addStretch(1)
         for widget in (self.subs, self.mute, self.volume, self.volume_label, self.fullscreen,
@@ -109,7 +117,7 @@ class ControlBar(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         # Room-only buttons start hidden (set_sync / set_following show them in a room). Visible at the
         # start, they made the window open about 90 px wider than asked, past the edge of small screens.
-        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label):
+        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label, self.react):
             widget.hide()
 
     # ------------------------------------------------------------ updates from the main window
@@ -165,6 +173,7 @@ class ControlBar(QFrame):
                  attention: bool, gap_kind: str) -> None:
         self.sync_up.setVisible(connected)
         self.sync_me.setVisible(connected)
+        self.react.setVisible(connected)
         self.sync_up.setEnabled(can_sync_up)
         label = "⟲ Sync up" + (f" ({cooldown_sync:.0f})" if cooldown_sync > 0 else "")
         if self.sync_up.text() and self.sync_up.text() != label:
