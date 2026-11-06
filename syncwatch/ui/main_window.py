@@ -39,6 +39,7 @@ from .subtitles_ui import Subtitles
 from .updates_ui import UpdateController
 from .sidebar import QueueEntry
 from .youtube_ui import LinkBox, LinkDialog, TitleLookup, YouTube
+from .previews_ui import Previews
 from ..youtube import links as youtube_links
 
 log = logging.getLogger("syncwatch.window")
@@ -204,6 +205,8 @@ class MainWindow(QMainWindow):
         queue_panel.moveRequested.connect(self.controller.queue_move)
         queue_panel.skipClicked.connect(self.controller.queue_skip)
         queue_panel.addClicked.connect(lambda: self.ask_youtube_link(queue=True))
+        self.previews = Previews(self.settings, self.ctx.profile.cache_dir, self)   # (0.9)
+        self.controls.seek.previews = self.previews
         self.player.ended.connect(self._media_ended)
         self.settings.subscribe("ui.panel_queue", lambda k, v: self.queue_changed())
         self._wire()
@@ -525,6 +528,7 @@ class MainWindow(QMainWindow):
             except OSError:
                 size = 0
             self._film_key = film_key(path.name, size)
+            self.previews.film_opened(path, self._film_key)        # pictures over the seek bar (0.9)
             self.setWindowTitle(f"SyncWatch: {path.name}")
             self.stack.setCurrentWidget(self.video)
             self.subtitles.film_opened(path, self._film_key)
@@ -661,6 +665,7 @@ class MainWindow(QMainWindow):
         if not self.player.load_stream(stream):
             return
         self._film_key = f"yt:{stream.id}"
+        self.previews.clear()
         self._start_at_ms = max(0, int(start_s)) * 1000
         self.setWindowTitle(f"SyncWatch: {stream.label}")
         self.stack.setCurrentWidget(self.video)
@@ -705,6 +710,7 @@ class MainWindow(QMainWindow):
         """Close the open film (e.g. before it's removed from the library): back to the start screen."""
         self._save_resume(force=True)
         self.player.unload()
+        self.previews.clear()
         self.subtitles.film_closed()
         self._film_key = ""
         self.setWindowTitle("SyncWatch")
@@ -1264,6 +1270,7 @@ class MainWindow(QMainWindow):
         self.films.save_if_dirty()
         self.subtitles.stop()
         self.youtube.stop()
+        self.previews.stop()
         self.library.shutdown()
         self.controller.shutdown()
         self.player.shutdown()

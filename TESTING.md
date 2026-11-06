@@ -1,3 +1,13 @@
+# Test checklist for 0.9 (pictures over the seek bar), branch `try/0.9-previews`
+
+## P1. Seek-bar pictures
+- [ ] Open a film from your library, wait ~half a minute, hover over the seek bar: a picture of that moment
+      with its time. Moving along the bar changes it smoothly
+- [ ] A long 4K/HEVC film: does making them slow down playback? (They're made at a low priority)
+- [ ] Open the same film again: the pictures are there at once (the cache)
+
+---
+
 # Test checklist for 0.5 (YouTube together), branch `try/0.5-youtube`
 
 Nothing here could be tried with the real YouTube from where it was built (YouTube is blocked

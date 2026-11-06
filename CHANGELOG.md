@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0 (proposal, branch try/0.9-previews: pictures over the seek bar)
+- **Hover over the seek bar to see that moment of the film**: a small picture with the time, like on YouTube. SyncWatch makes the pictures once per film in the background (a few seconds to half a minute, at a low priority, in a process of its own) and keeps them in its cache, so the next time they're there at once.
+- Settings > Playback: *Pictures over the seek bar* (on), and how far apart they are (advanced; at most 400 per film).
+- For films from your PC (YouTube videos and torrents being streamed don't get them).
+
 ## 0.5.0 (in progress: YouTube together)
 **Watch YouTube together**
 - Paste a YouTube link on the start screen (or press Ctrl+L, or Ctrl+V anywhere, or drag a link from your browser onto SyncWatch). Watch links, youtu.be, Shorts and `&t=` start times all work.

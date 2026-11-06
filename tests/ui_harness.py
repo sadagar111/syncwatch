@@ -56,6 +56,15 @@ def main_window():
     return None
 
 
+def spin_until(seconds, until):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if until():
+            return True
+        spin(0.1)
+    return bool(until())
+
+
 def shot(name):
     """Screenshot of the main window with the overlay composited on top (as it looks on screen)."""
     window = main_window()
@@ -131,6 +140,21 @@ def run_script(errors_seen):
         window.controller.toggle()
         spin(1.0)
         shot("03_playing")
+        # pictures over the seek bar (0.9): made in the background, shown while hovering
+        made = spin_until(30, lambda: window.previews.file is not None)
+        from PySide6.QtTest import QTest
+        seek = window.controls.seek
+        QTest.mouseMove(seek, QPoint(seek.width() // 3, 20))
+        spin(0.3)
+        popup = seek._popup
+        checks = {"pictures made": made,
+                  "picture shown while hovering": popup is not None and popup.isVisible() and popup.pixmap is not None}
+        if popup is not None and popup.pixmap is not None:
+            popup.grab().save(str(OUT / "03b_seek_picture.png"))
+        QTest.mouseMove(window.controls.play, QPoint(5, 5))
+        spin(0.2)
+        print("PREVIEW CHECKS:", checks)
+        FAILED.extend(name for name, ok in checks.items() if not ok)
         print("position after play:", int(window.player.position()), "playing:", window.player.is_playing())
         window.controller.toggle()
         spin(0.5)
