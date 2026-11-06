@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0 (proposal, branch try/0.8-chat: chat and reactions)
+- **Room chat**: in a room, a box under *Activity* (press **T** to write, **Enter** sends, **Esc** goes back to the film). Messages show in the sidebar and, while the sidebar is hidden (fullscreen, or after Tab), for a few seconds over the video (Settings > Watching together: while hidden / always / never). Nothing is kept: the messages go with the room.
+- **Reactions**: **😊** in the control bar, or the number keys **1–8** (😂 😮 😍 😱 😢 👏 🔥 🍿): the emoji floats up over everyone's video with your name under it. Friends' reactions can be hidden, and the number keys turned off (Settings > Watching together).
+- Floods are dropped (at most 5 messages in 5 s and 6 reactions in 3 s per person), text is always shown as plain text, and only those 8 emoji can be sent.
+
 ## 0.5.0 (in progress: YouTube together)
 **Watch YouTube together**
 - Paste a YouTube link on the start screen (or press Ctrl+L, or Ctrl+V anywhere, or drag a link from your browser onto SyncWatch). Watch links, youtu.be, Shorts and `&t=` start times all work.

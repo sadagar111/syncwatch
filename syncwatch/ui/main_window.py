@@ -202,6 +202,10 @@ class MainWindow(QMainWindow):
         queue_panel.moveRequested.connect(self.controller.queue_move)
         queue_panel.skipClicked.connect(self.controller.queue_skip)
         queue_panel.addClicked.connect(lambda: self.ask_youtube_link(queue=True))
+        self.sidebar.activity.chatSubmitted.connect(self._send_chat)           # chat and reactions (0.8)
+        self.sidebar.activity.chat_box.leave.connect(lambda: (self.sidebar.activity.chat_box.clearFocus(),
+                                                              self.setFocus()))
+        self.controls.reactionChosen.connect(lambda emoji: self.controller.chat.react(emoji))
         self.player.ended.connect(self._media_ended)
         self.settings.subscribe("ui.panel_queue", lambda k, v: self.queue_changed())
         self._wire()
@@ -330,7 +334,35 @@ class MainWindow(QMainWindow):
     # ================================================================ the controller's UI interface
     def status(self, text: str, connected: bool) -> None:
         self.sidebar.room.set_status(text, connected)
+        self.sidebar.activity.set_chat(connected)
         self._refresh_soon()
+
+    # chat and reactions (0.8): the controller's RoomChat tells, these show
+    def chat_message(self, name: str, text: str, mine: bool) -> None:
+        self.sidebar.activity.add(f"💬 {'You' if mine else name}: {text}", "you" if mine else "friend")
+        over = self.settings.get("chat.over_video")
+        if not mine and (over == "always" or (over == "hidden" and not self.sidebar.isVisible())):
+            self.overlay.toast(f"{name}: {text}", "friend")
+
+    def reaction(self, name: str, emoji: str, mine: bool) -> None:
+        if mine or self.settings.get("chat.reactions"):
+            self.overlay.react(emoji, "" if mine else name)
+
+    def _send_chat(self, text: str) -> None:
+        if self.controller.chat.say(text):
+            self.sidebar.activity.chat_box.clear()
+
+    def focus_chat(self) -> None:
+        if not self.controller.connected:
+            return
+        if not self.sidebar.isVisible():
+            self.toggle_sidebar()
+        self.sidebar.activity.chat_box.setFocus()
+
+    def _react_key(self, number: int) -> None:
+        from ..net.protocol import REACTIONS
+        if self.settings.get("chat.number_keys") and self.controller.connected:
+            self.controller.chat.react(REACTIONS[number - 1])
 
     def activity(self, text: str, kind: str = "info") -> None:
         self.sidebar.activity.add(text, kind)
@@ -1034,6 +1066,7 @@ class MainWindow(QMainWindow):
             "keys.sidebar": self.toggle_sidebar,
             "keys.open": self.open_library,
             "keys.youtube": self.ask_youtube_link,
+            "keys.chat": self.focus_chat,
             "keys.settings": self.open_settings,
             "keys.help": self.toggle_help,
         }
@@ -1049,6 +1082,11 @@ class MainWindow(QMainWindow):
         paste.setContext(Qt.ShortcutContext.WindowShortcut)
         paste.activated.connect(self._paste_link)
         self._shortcuts.append(paste)
+        for number in range(1, 9):        # reactions (0.8); text fields keep their digits
+            react = QShortcut(QKeySequence(str(number)), self)
+            react.setContext(Qt.ShortcutContext.WindowShortcut)
+            react.activated.connect(lambda n=number: self._react_key(n))
+            self._shortcuts.append(react)
         escape = QShortcut(QKeySequence("Esc"), self)
         escape.activated.connect(self._escape)
         self._shortcuts.append(escape)

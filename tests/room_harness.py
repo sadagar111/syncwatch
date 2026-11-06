@@ -124,6 +124,18 @@ class RecorderUI:
     def played_items(self):
         return [e[1] for e in self.events if e[0] == "play_item"]
 
+    def chat_message(self, name, text, mine):
+        self._add(("chat", (name, text, mine)))
+
+    def chats(self):
+        return [e[1] for e in self.events if e[0] == "chat"]
+
+    def reaction(self, name, emoji, mine):
+        self._add(("react", (name, emoji, mine)))
+
+    def reactions(self):
+        return [e[1] for e in self.events if e[0] == "react"]
+
     def join_request(self, knock):
         self.requests.append(knock)
 

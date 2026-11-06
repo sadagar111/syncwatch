@@ -75,6 +75,8 @@ SEQ = (int, True, (0, MAX_CLOCK))
 CLOCK = (int, True, (0, MAX_CLOCK))
 POS = (int, True, (0, MAX_POSITION_MS))
 YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}")
+REACTIONS = ("😂", "😮", "😍", "😱", "😢", "👏", "🔥", "🍿")   # the only emoji a reaction can be (0.8)
+CHAT_TEXT = 300                                                  # characters in one chat message
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
               "yt": (YOUTUBE_ID, False, None)}   # since 0.5: a YouTube video instead of a file
@@ -147,6 +149,9 @@ ROOM: Dict[str, Spec] = {
     "qreq": {"op": (("add", "remove", "skip", "play", "move"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
+    # chat and reactions (0.8): to everyone in the room, shown when they come, kept nowhere
+    "chat": {"text": (str, True, CHAT_TEXT)},
+    "react": {"e": (REACTIONS, True, None)},
 }
 
 COMMON: Spec = {"s": (Hex(16), True, None), "n": SEQ}

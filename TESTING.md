@@ -1,3 +1,15 @@
+# Test checklist for 0.8 (chat and reactions), branch `try/0.8-chat`
+
+## C1. Chat and reactions (two PCs, or two windows with `--profile`)
+- [ ] In a room, the sidebar says *Activity and chat* with a box at the bottom. **T** jumps into it, **Enter**
+      sends, **Esc** goes back. Messages arrive on the other PC within a second, with the name
+- [ ] Fullscreen (or Tab to hide the sidebar): a friend's message shows over the video for a few seconds
+- [ ] **😊** in the control bar and keys **1–8**: the emoji floats up on both PCs (with the sender's name on the
+      other one). Typing digits in the chat box doesn't send reactions
+- [ ] Emoji look right on Windows (colour emoji, not boxes)
+
+---
+
 # Test checklist for 0.5 (YouTube together), branch `try/0.5-youtube`
 
 Nothing here could be tried with the real YouTube from where it was built (YouTube is blocked

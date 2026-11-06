@@ -81,6 +81,7 @@ class Overlay(QWidget):
         self._countdown_end: Optional[float] = None
         self._flash: Optional[Tuple[str, float]] = None
         self._help: Optional[str] = None
+        self._reactions: List[Tuple[str, str, float, float]] = []    # emoji, name, start, x (0-1)
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._animate)
@@ -101,6 +102,16 @@ class Overlay(QWidget):
     def toast(self, text: str, kind: str = "info") -> None:
         self._toasts.append((text, kind, time.monotonic() + self.toast_seconds))
         self._toasts = self._toasts[-4:]
+        self.update()
+
+    REACTION_S = 2.8
+
+    def react(self, emoji: str, name: str = "") -> None:
+        """An emoji floats up from the bottom right and fades (name: who sent it, "" for me)."""
+        import random
+        self._reactions.append((emoji, name[:32], time.monotonic(), random.uniform(0.60, 0.92)))
+        self._reactions = self._reactions[-30:]
+        self._timer.setInterval(33)          # smooth while something floats
         self.update()
 
     def countdown(self, ms: int) -> None:
@@ -139,6 +150,11 @@ class Overlay(QWidget):
             changed = True
             if now >= self._flash[1]:
                 self._flash = None
+        if self._reactions:
+            changed = True
+            self._reactions = [r for r in self._reactions if now - r[2] < self.REACTION_S]
+            if not self._reactions:
+                self._timer.setInterval(100)
         if changed:
             self.update()
 
@@ -151,6 +167,8 @@ class Overlay(QWidget):
         if self.subtitles_enabled and self._cues:
             self._paint_subtitles(painter, rect)
         self._paint_toasts(painter, rect)
+        if self._reactions:
+            self._paint_reactions(painter, rect)
         if self._countdown_end is not None:
             seconds = max(1, int(self._countdown_end - time.monotonic() + 0.999))
             self._paint_center(painter, rect, str(seconds), 0.16)
@@ -253,6 +271,30 @@ class Overlay(QWidget):
             elided = metrics.elidedText(text, Qt.TextElideMode.ElideRight, width - 24)
             painter.drawText(box.adjusted(12, 0, -12, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
             y += box.height() + 8
+
+    def _paint_reactions(self, painter: QPainter, rect: QRect) -> None:
+        import math
+        now = time.monotonic()
+        size = max(26, int(rect.height() * 0.07))
+        emoji_font, name_font = QFont(), QFont()
+        emoji_font.setPixelSize(size)
+        name_font.setPixelSize(max(11, size // 3))
+        for emoji, name, start, x in self._reactions:
+            t = min(1.0, (now - start) / self.REACTION_S)
+            cx = rect.width() * x + math.sin(t * 7.0 + x * 20.0) * size * 0.3
+            cy = rect.height() * (0.88 - 0.45 * t)
+            painter.setOpacity(1.0 if t < 0.6 else max(0.0, (1.0 - t) / 0.4))
+            painter.setFont(emoji_font)
+            painter.setPen(QColor("#FFFFFF"))
+            painter.drawText(QRectF(cx - size, cy - size, 2 * size, 1.4 * size), Qt.AlignmentFlag.AlignCenter, emoji)
+            if name:
+                painter.setFont(name_font)
+                box = QRectF(cx - 3 * size, cy + 0.4 * size, 6 * size, name_font.pixelSize() * 1.6)
+                painter.setPen(QColor(0, 0, 0, 200))
+                painter.drawText(box.translated(1, 1), Qt.AlignmentFlag.AlignCenter, name)
+                painter.setPen(QColor("#FFFFFF"))
+                painter.drawText(box, Qt.AlignmentFlag.AlignCenter, name)
+        painter.setOpacity(1.0)
 
     def _paint_center(self, painter: QPainter, rect: QRect, text: str, scale: float) -> None:
         size = max(28.0, rect.height() * scale)
