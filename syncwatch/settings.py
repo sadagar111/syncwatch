@@ -79,6 +79,12 @@ SCHEMA: List[Setting] = [
     _s("playback.audio_languages", "str", "sk,cs,en", "Preferred audio languages", PB,
        "Language codes separated by commas, best first, e.g. sk,cs,en. Used to pick the audio "
        "track automatically when a film has several.", advanced=True, max_len=60),
+    _s("playback.previews", "bool", True, "Pictures over the seek bar", PB,
+       "Hover over the seek bar to see that moment of the film. They're made once per film in the "
+       "background (a few seconds to half a minute) and kept in SyncWatch's cache."),
+    _s("playback.preview_every_s", "int", 10, "A seek-bar picture every … seconds", PB,
+       "Long films get fewer (at most 400 pictures).", advanced=True, minimum=2, maximum=120,
+       suffix=" s"),
     _s("playback.engine", "choice", "mpv", "Video player", PB,
        "mpv plays nearly every film. Qt is the player of SyncWatch 0.4.1 and older, kept in case "
        "mpv doesn't work on this PC (SyncWatch also switches to it by itself then). Restart "

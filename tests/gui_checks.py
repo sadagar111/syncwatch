@@ -30,7 +30,7 @@ def check_ui(out: Path) -> bool:
                             env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     (out / "ui.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("KEY CHECKS", "UI HARNESS",
-                                                                                     "ROOM CHECKS", "CHAT CHECKS", "PLAYER",
+                                                                                     "ROOM CHECKS", "CHAT CHECKS", "PREVIEW CHECKS", "PLAYER",
                                                                                      "subtitle sources"))))
     player = next((line[len("PLAYER:"):].strip() for line in result.stdout.splitlines()
                    if line.startswith("PLAYER:")), "")

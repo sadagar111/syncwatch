@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0 (proposal, branch try/0.9-previews: pictures over the seek bar)
+- **Hover over the seek bar to see that moment of the film**: a small picture with the time, like on YouTube. SyncWatch makes the pictures once per film in the background (a few seconds to half a minute, at a low priority, in a process of its own) and keeps them in its cache, so the next time they're there at once.
+- Settings > Playback: *Pictures over the seek bar* (on), and how far apart they are (advanced; at most 400 per film).
+- For films from your PC (YouTube videos and torrents being streamed don't get them).
+
 ## 0.8.0 (proposal, branch try/0.8-chat: chat and reactions)
 - **Room chat**: in a room, a box under *Activity* (press **T** to write, **Enter** sends, **Esc** goes back to the film). Messages show in the sidebar and, while the sidebar is hidden (fullscreen, or after Tab), for a few seconds over the video (Settings > Watching together: while hidden / always / never). Nothing is kept: the messages go with the room.
 - **Reactions**: **😊** in the control bar, or the number keys **1–8** (😂 😮 😍 😱 😢 👏 🔥 🍿): the emoji floats up over everyone's video with your name under it. Friends' reactions can be hidden, and the number keys turned off (Settings > Watching together).
