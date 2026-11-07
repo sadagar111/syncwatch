@@ -158,6 +158,16 @@ class IdleScreen(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
+        self._content_layout = layout
+        self._scrollbar = scroll.verticalScrollBar()
+        self._scrollbar.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt naming)
+        """While the scroll bar shows, the column moves over by as much: still in the middle of the window."""
+        if watched is self._scrollbar and event.type() in (QEvent.Type.Show, QEvent.Type.Hide):
+            extra = watched.width() if event.type() == QEvent.Type.Show else 0
+            self._content_layout.setContentsMargins(24 + extra, 24, 24, 24)
+        return super().eventFilter(watched, event)
 
 
 class MainWindow(QMainWindow):
