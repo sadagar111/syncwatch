@@ -31,7 +31,11 @@ profile.mkdir(parents=True)
 (profile / "settings.json").write_text(json.dumps({"_version": 1, "values": {
     "profile.name": NAMES[ROLE], "ui.startup_checks": "never", "ui.video_selftest": False,
     "playback.resume": False, "sync.gap_refresh_s": 1, "sync.countdown_s": 2,
-    "sync.gap_reference": "host"}}), encoding="utf-8")
+    "sync.gap_reference": "host",
+    # (the torrent offer at the end) Marek is asked first (the default) and then streams with nothing
+    # reaching the internet; Kuba has said no in Settings
+    **({"torrents.dht": False, "torrents.incoming": False} if ROLE == "marek" else {}),
+    **({"torrents.follow_host": "no"} if ROLE == "kuba" else {})}}), encoding="utf-8")
 
 from PySide6.QtGui import QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -62,13 +66,18 @@ def shot(name):
 SCRIPTS = {
     "host": [(1, "host"), (8, "play"), (12, "shot_playing"), (14, "pause"), (17, "seek5"), (19, "play2"),
              (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (45, "vote_suggest"), (49.5, "vote_close"),
-             (51, "shot_vote"), (52, "end")],
+             (51, "shot_vote"), (52, "torrent_film"), (58.5, "end")],
     "marek": [(3, "join"), (12, "shot_playing"), (24, "drift"), (29, "report_gap"), (30, "syncme"),
               (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (45.5, "chat"),
-              (47, "vote_cast"), (51, "shot_vote"), (52, "end")],
-    "kuba": [(3.5, "join"), (12, "shot_playing"), (46, "react"), (47.5, "vote_cast"), (51, "shot_vote"), (52, "end")],
+              (47, "vote_cast"), (51, "shot_vote"), (55.5, "offer_state"), (56, "offer_accept"),
+              (58, "offer_state2"), (58.5, "end")],
+    "kuba": [(3.5, "join"), (12, "shot_playing"), (46, "react"), (47.5, "vote_cast"), (51, "shot_vote"),
+             (55.5, "offer_state"), (58.5, "end")],
 }
-# (after the measured stretches: chat, a reaction and a film vote, through the windows' own buttons and boxes)
+# (after the measured stretches: chat, a reaction and a film vote, through the windows' own buttons and boxes;
+# then the host streams a torrent, which nobody has, so nothing downloads)
+OFFER_HASH = "5a" * 20
+OFFER_MAGNET = f"magnet:?xt=urn:btih:{OFFER_HASH}&dn=Torrent%20Test%20Film.mkv"
 
 
 def listen(w, out) -> None:
@@ -182,6 +191,17 @@ def scripted_exec(self):
                     w.sidebar.vote.voteRequested.emit(choice.key)
             elif action == "vote_close":
                 w.sidebar.vote.close_button.click()
+            elif action == "torrent_film":
+                c.set_film("Torrent Test Film.mkv", 734_003_200, 0, magnet=OFFER_MAGNET)
+            elif action in ("offer_state", "offer_state2"):
+                banner = w.sidebar.share_banner
+                out.write(json.dumps({"event": f"{ROLE}:{action}:seen", "t": time.time(),
+                                      "banner": "" if banner.isHidden() else banner.button.text(),
+                                      "streaming": bool(w.torrents.active and w.torrents.hash == OFFER_HASH)}) + "\n")
+                if action == "offer_state2":
+                    w.torrents.stop()
+            elif action == "offer_accept":
+                w.sidebar.share_banner.button.click()
             elif action.startswith("shot_"):
                 QApplication.processEvents()
                 shot(action[5:])

@@ -266,6 +266,7 @@ class MainWindow(QMainWindow):
             magnet, name, size, self.torrents.addresses))
         self.torrents.addressesChanged.connect(self._my_addresses_changed)
         self.sidebar.share_banner.clicked.connect(self._share_banner_clicked)
+        self._torrent_offer: Optional[tuple] = None   # (magnet, name, size): the host's torrent, mine to stream too?
         self._getting_shared = ""      # the magnet of a film I'm getting from the host
         self.torrents.ready.connect(lambda source: self.play_stream(source, 0))
         self.torrents.statusText.connect(self.controls.set_source_text)
@@ -811,8 +812,10 @@ class MainWindow(QMainWindow):
 
     def follow_torrent(self, magnet: str, name: str, size: int) -> None:
         """The controller: the host streams a torrent I don't have open. A film of that name and size
-        in my library is opened instead (no download needed)."""
-        if not self.settings.get("torrents.follow_host") or not torrent_links.is_magnet(magnet):
+        in my library is opened instead (no download needed). Otherwise the sidebar asks first
+        (streaming a torrent also uploads it to others), unless Settings > Torrents says otherwise."""
+        choice = self.settings.get("torrents.follow_host")
+        if choice == "no" or not torrent_links.is_magnet(magnet):
             return
         if self.torrents.active and self.torrents.hash and self.torrents.hash == torrent_links.magnet_hash(magnet):
             return   # already streaming it
@@ -821,13 +824,36 @@ class MainWindow(QMainWindow):
         self._torrent_follow_tried[magnet] = time.monotonic()
         known = library_films.list_films(self.movies_dir()) + library_films.list_films(self.torrents.folder())
         local = next((film.path for film in known if film.path.name == name and film.size == size), None)
-        self._follow_align = True
         if local is not None:
+            self._follow_align = True
             self.activity(f"The host streams {name}: you have it in your library, opening that", "friend")
             self.open_film(local)
             return
-        self.activity(f"The host streams {name or 'a torrent'}: streaming it too", "friend")
+        if choice == "ask":
+            if self._torrent_offer is None or self._torrent_offer[0] != magnet:
+                self._torrent_offer = (magnet, name, int(size))
+                self.activity(f"The host streams {name or 'a film'} from a torrent. Stream it too? (sidebar)",
+                              "friend")
+            self._refresh_share_banner()
+            return
+        self._stream_hosts_torrent(magnet, name)
+
+    def _stream_hosts_torrent(self, magnet: str, name: str, clicked: bool = False) -> None:
+        self._torrent_offer = None
+        self._follow_align = True
+        if not clicked:   # (after a click, the torrent's own "Starting the torrent…" line says enough)
+            self.activity(f"The host streams {name or 'a torrent'}: streaming it too", "friend")
         self.torrents.open(magnet)
+
+    def _torrent_offer_still_open(self) -> bool:
+        """The host still streams the torrent offered in the sidebar, and I don't (yet)."""
+        offer, c = self._torrent_offer, self.controller
+        host = c.host_peer
+        if offer is None or host is None or c.is_host or not c.attached or not host.film:
+            return False
+        if host.film.get("magnet") != offer[0]:
+            return False
+        return not (self.torrents.active and self.torrents.hash == torrent_links.magnet_hash(offer[0]))
 
     def play_stream(self, stream, start_s: int = 0) -> None:
         """A YouTube video was found: play it like a film."""
@@ -876,9 +902,11 @@ class MainWindow(QMainWindow):
 
     # sharing a film with the room
     def _refresh_share_banner(self) -> None:
+        self._my_copy = None
+        if self._offer_torrent():
+            return
         film = self.controller.can_ask_for_film()
         host = self.controller.host_peer
-        self._my_copy = None
         if film is None or host is None or self._getting_shared or self.torrents.active:
             self.sidebar.share_banner.offer("", "")
             return
@@ -895,7 +923,25 @@ class MainWindow(QMainWindow):
             f"{host.name} is watching {film['name']} ({human_size(film['size'])}). You don't have it: get it "
             f"straight from {host.name}? It plays while it downloads.", f"Get it from {host.name}")
 
+    def _offer_torrent(self) -> bool:
+        """The sidebar asks whether to stream the host's torrent too (Settings > Torrents: ask)."""
+        if not self._torrent_offer_still_open():
+            self._torrent_offer = None
+            return False
+        _, name, size = self._torrent_offer
+        host = self.controller.host_peer
+        about = f"{name} ({human_size(size)})" if size else (name or "a film")
+        self.sidebar.share_banner.offer(
+            f"{host.name} streams {about} from a torrent. Stream it too? Your PC then downloads it and "
+            "shares the parts it has with others, like any torrent app.", "Stream it too")
+        return True
+
     def _share_banner_clicked(self) -> None:
+        if self._torrent_offer_still_open():
+            magnet, name, _ = self._torrent_offer
+            self.sidebar.share_banner.offer("", "")
+            self._stream_hosts_torrent(magnet, name, clicked=True)
+            return
         copy = getattr(self, "_my_copy", None)
         if copy is not None and copy.is_file():
             self.sidebar.share_banner.offer("", "")

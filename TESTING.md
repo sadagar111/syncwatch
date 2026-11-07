@@ -82,7 +82,7 @@ Internet Archive's public-domain collection: their pages have a magnet link or a
 - [ ] A film streamed to the end, then closed: it's in your library now (*Your films*)
 
 ## T2. In a room (two PCs, ideally in different homes)
-- [ ] The host streams a magnet link: the guest's SyncWatch streams it too and lines up
+- [ ] The host streams a magnet link: the guest's sidebar asks *Stream it too* → click: it streams and lines up
 - [ ] The host plays a film from the library that the guest doesn't have: the guest sees *Get it from <host>*
       in the sidebar → the host is asked → the film plays for the guest while it downloads (control bar: ⬇ …)
 - [ ] The host's control bar shows *⬆ sharing … · … people*. Send me how fast it was and whether you're on

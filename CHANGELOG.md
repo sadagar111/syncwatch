@@ -31,7 +31,7 @@
 - The part you're watching comes first: SyncWatch fetches the pieces just ahead of where you are. Jump to the middle or the end, and those pieces are fetched next, so you don't wait for the whole film.
 - The control bar shows how far it is: *⬇ 45 % · 3.2 MB/s · 18 people · about 2 min left*.
 - Settings > Torrents: download folder (default: *Torrents* in your library folder), keep or delete the film when you close it, upload limit, whether others may connect to you (Windows asks once), and advanced ones.
-- **In a room:** when the host streams a torrent, friends who follow the host stream it too (and line up). A friend who already has the same film in the library opens that instead.
+- **In a room:** when the host streams a torrent, friends who follow the host are asked in the sidebar: *Stream it too* (then it streams and lines up). Streaming a torrent also shares its parts with others, so nobody's PC starts that on its own (Settings > Torrents: ask first / stream it too / don't). A friend who already has the same film in the library opens that instead, without asking.
 - **Share my film with the room:** a friend who doesn't have the host's film sees *Get it from Alex*. The host is asked (Settings > Torrents: ask / always / never), then the film goes straight from the host's PC to the friend, and plays for them while it downloads. Nothing goes through the relay: the room only passes on where to connect, encrypted. Both sides try to reach each other, so it works through more routers. The film's description is remembered, so sharing it again starts at once.
 - A streamed film that downloaded completely moves into your library when you close it (Settings > Torrents).
 - Only what you open yourself: SyncWatch doesn't search for films anywhere.
