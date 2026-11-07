@@ -863,9 +863,9 @@ class Discover(QObject):
             self.dialog.refresh_buttons()
 
     def vote_won(self, choice: Choice) -> None:
-        mine = self.have_film(choice.title, choice.year, choice.tmdb)
-        self.window.overlay.toast(f"🏆 Tonight: {choice.label}" + (" (it's in your library)" if mine else ""),
-                                  "friend")
+        """(The activity line already says who won; a second note only if I can play it right away.)"""
+        if self.have_film(choice.title, choice.year, choice.tmdb) is not None:
+            self.window.overlay.toast(f"🏆 {choice.label} is in your library: ▶ Play it in the sidebar", "friend")
 
     def play_winner(self, key: int) -> None:
         choice = self.window.controller.votes.vote.find(key)
