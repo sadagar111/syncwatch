@@ -17,7 +17,7 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import (QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QImage, QKeySequence,
                            QPainter, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QSplitter, QStackedWidget, QVBoxLayout, QWidget)
+                               QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import errors, log as log_module, paths
 from ..filmstate import film_key
@@ -138,11 +138,37 @@ class IdleScreen(QWidget):
         row.addStretch(1)
         row.addWidget(column, 30)
         row.addStretch(1)
-        layout = QVBoxLayout(self)
+        # The cards keep their natural height: on a short window the start screen scrolls instead of
+        # squeezing them (squeezed, a card's text ran into its button).
+        column.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        content = QWidget()
+        content.setObjectName("StartContent")
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.addStretch(2)
         layout.addLayout(row)
         layout.addStretch(3)   # a little above the middle looks centred to the eye
+        scroll = QScrollArea()
+        scroll.setObjectName("StartScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea#StartScroll, QWidget#qt_scrollarea_viewport, QWidget#StartContent "
+                             "{ background: transparent; }")
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+        self._content_layout = layout
+        self._scrollbar = scroll.verticalScrollBar()
+        self._scrollbar.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt naming)
+        """While the scroll bar shows, the column moves over by as much: still in the middle of the window."""
+        if watched is self._scrollbar and event.type() in (QEvent.Type.Show, QEvent.Type.Hide):
+            extra = watched.width() if event.type() == QEvent.Type.Show else 0
+            self._content_layout.setContentsMargins(24 + extra, 24, 24, 24)
+        return super().eventFilter(watched, event)
 
 
 class MainWindow(QMainWindow):
