@@ -261,6 +261,9 @@ class Torrents(QObject):
             return
         from ..library import films as library_films  # noqa: PLC0415
         source = self.folder() / self.chosen["path"]
+        if not engine_module.is_video(source.name) or not source.resolve().is_relative_to(self.folder().resolve()):
+            log.warning("not moving %s into the library (not a film in the download folder)", source)
+            return
         try:
             target = library_films.unique_path(Path(self.library()), source.name)
             target.parent.mkdir(parents=True, exist_ok=True)
