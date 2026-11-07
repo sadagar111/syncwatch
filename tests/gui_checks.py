@@ -180,6 +180,32 @@ def check_room(out: Path) -> bool:
     passed = after_sync_me is not None and abs(after_sync_me) < 400
     ok &= passed
     print(f"room: after Marek's Sync me: {after_sync_me:.0f} ms {'OK' if passed else 'FAIL'}")
+    ok &= _torrent_offer(out)
+    return ok
+
+
+def _torrent_offer(out: Path) -> bool:
+    """(0.6) The host streams a torrent: Marek (ask first, the default) is asked in the sidebar and
+    streams it only after his click; Kuba (Settings > Torrents: don't) is neither asked nor streams."""
+    seen = {}
+    for role in ("marek", "kuba"):
+        for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():
+            if ':seen"' in line:
+                entry = json.loads(line)
+                seen[entry["event"]] = entry
+    marek, after, kuba = (seen.get(k, {}) for k in ("marek:offer_state:seen", "marek:offer_state2:seen",
+                                                     "kuba:offer_state:seen"))
+    ok = True
+    for name, passed in (
+            ("Marek is asked before the host's torrent streams", marek.get("banner") == "Stream it too"
+             and marek.get("streaming") is False),
+            ("after his click it streams", after.get("streaming") is True),
+            ("Kuba (Settings: don't) isn't asked and streams nothing", kuba.get("banner") == ""
+             and kuba.get("streaming") is False)):
+        ok &= passed
+        print(f"room: {name} {'OK' if passed else 'FAIL'}")
+    if not ok:
+        print(f"room: what they saw: {seen}")
     return ok
 
 

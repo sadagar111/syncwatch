@@ -248,9 +248,11 @@ SCHEMA: List[Setting] = [
     _s("torrents.into_library", "bool", True, "Move finished films into my library", TR,
        "A streamed film that downloaded completely moves from the download folder into your library "
        "when you close it (if you keep films)."),
-    _s("torrents.follow_host", "bool", True, "Stream the torrents the host streams", TR,
-       "In a room, when the host streams a torrent you don't have, it starts streaming for you too "
-       "(unless you're watching on your own)."),
+    _s("torrents.follow_host", "choice", "ask", "When the host streams a torrent", TR,
+       "In a room, when the host streams a torrent you don't have (unless you're watching on your own). "
+       "Streaming it means your PC downloads it and shares the parts it has with others, like any torrent "
+       "app, so you're asked first.",
+       choices=[("ask", "Ask me first"), ("yes", "Stream it too"), ("no", "Don't")]),
     _s("torrents.start_mb", "int", 8, "Start playing after", TR,
        "How much of the film is fetched before it starts playing.", advanced=True, minimum=1, maximum=500,
        suffix=" MB"),

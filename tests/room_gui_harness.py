@@ -31,7 +31,11 @@ profile.mkdir(parents=True)
 (profile / "settings.json").write_text(json.dumps({"_version": 1, "values": {
     "profile.name": NAMES[ROLE], "ui.startup_checks": "never", "ui.video_selftest": False,
     "playback.resume": False, "sync.gap_refresh_s": 1, "sync.countdown_s": 2,
-    "sync.gap_reference": "host"}}), encoding="utf-8")
+    "sync.gap_reference": "host",
+    # (the torrent offer at the end) Marek is asked first (the default) and then streams with nothing
+    # reaching the internet; Kuba has said no in Settings
+    **({"torrents.dht": False, "torrents.incoming": False} if ROLE == "marek" else {}),
+    **({"torrents.follow_host": "no"} if ROLE == "kuba" else {})}}), encoding="utf-8")
 
 from PySide6.QtGui import QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -61,11 +65,15 @@ def shot(name):
 # Timed for the 40-second film in tests/media.
 SCRIPTS = {
     "host": [(1, "host"), (8, "play"), (12, "shot_playing"), (14, "pause"), (17, "seek5"), (19, "play2"),
-             (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (52, "end")],
+             (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (52, "torrent_film"), (58.5, "end")],
     "marek": [(3, "join"), (12, "shot_playing"), (24, "drift"), (29, "report_gap"), (30, "syncme"),
-              (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (52, "end")],
-    "kuba": [(3.5, "join"), (12, "shot_playing"), (52, "end")],
+              (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (55.5, "offer_state"),
+              (56, "offer_accept"), (58, "offer_state2"), (58.5, "end")],
+    "kuba": [(3.5, "join"), (12, "shot_playing"), (55.5, "offer_state"), (58.5, "end")],
 }
+# (after the measured stretches: the host streams a torrent, which nobody has, so nothing downloads)
+OFFER_HASH = "5a" * 20
+OFFER_MAGNET = f"magnet:?xt=urn:btih:{OFFER_HASH}&dn=Torrent%20Test%20Film.mkv"
 
 
 def wait_for_the_others() -> None:
@@ -149,6 +157,17 @@ def scripted_exec(self):
                 c.pause()
             elif action == "friend_play":
                 c.play()
+            elif action == "torrent_film":
+                c.set_film("Torrent Test Film.mkv", 734_003_200, 0, magnet=OFFER_MAGNET)
+            elif action in ("offer_state", "offer_state2"):
+                banner = w.sidebar.share_banner
+                out.write(json.dumps({"event": f"{ROLE}:{action}:seen", "t": time.time(),
+                                      "banner": "" if banner.isHidden() else banner.button.text(),
+                                      "streaming": bool(w.torrents.active and w.torrents.hash == OFFER_HASH)}) + "\n")
+                if action == "offer_state2":
+                    w.torrents.stop()
+            elif action == "offer_accept":
+                w.sidebar.share_banner.button.click()
             elif action.startswith("shot_"):
                 QApplication.processEvents()
                 shot(action[5:])
