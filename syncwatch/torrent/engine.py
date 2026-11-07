@@ -72,6 +72,9 @@ PIECE_WAIT_S = 90.0                  # a read waits this long for a piece, then 
 SPACE_MARGIN = 200 * 1024 * 1024
 CACHE_BYTES = 64 * 1024 * 1024       # pieces kept in memory for mpv (the last ones read, and ahead)
 READ_AHEAD_PIECES = 4
+# For addresses from the room (see connect): libtorrent normally tries a failed peer again only after a
+# minute or more and gives it up after three tries.
+DIRECT_RECONNECT = {"min_reconnect_time": 3, "max_failcount": 100}
 
 
 def local_addresses() -> List[str]:
@@ -142,6 +145,7 @@ class Engine:
         self.file_offset = 0
         self.piece_length = 0
         self.added_at = 0.0
+        self.direct = False               # an address from the room came (connect)
         self.ready_sent = False
         self.done_sent = False
         self.playhead = 0                 # the byte (in the file) mpv read from last
@@ -273,10 +277,17 @@ class Engine:
             say({"ev": "addresses", "list": found})
 
     def connect(self, address: str) -> None:
+        """An address from the room: a friend who shares a film with me, or fetches mine. Such an address
+        is tried again every few seconds until it answers (a first try through a router, or before the
+        other side listens, often fails); there are only a few of them."""
         host, _, port = address.rpartition(":")
+        if self.handle is None or not host or not port.isdigit():
+            return
         try:
-            if self.handle is not None and host and port.isdigit():
-                self.handle.connect_peer((host.strip("[]"), int(port)))
+            if not self.direct:
+                self.direct = True
+                self.session.apply_settings(DIRECT_RECONNECT)
+            self.handle.connect_peer((host.strip("[]"), int(port)))
         except Exception as exc:  # noqa: BLE001
             say({"ev": "error", "kind": "peer", "message": f"{type(exc).__name__}: {exc}"})
 
