@@ -193,6 +193,31 @@ def check_room(out: Path) -> bool:
     passed = after_sync_me is not None and abs(after_sync_me) < 400
     ok &= passed
     print(f"room: after Marek's Sync me: {after_sync_me:.0f} ms {'OK' if passed else 'FAIL'}")
+    ok &= _room_extras(out)
+    return ok
+
+
+def _room_extras(out: Path) -> bool:
+    """Chat, a reaction and a film vote between the three apps (0.7 + 0.8), when they have them."""
+    got = {}
+    for role in ("host", "marek", "kuba"):
+        lines = (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines()
+        got[role] = [json.loads(line) for line in lines if '"got_' in line]
+    ok = True
+    expected = {
+        "Marek's chat message reached the others": lambda role: any(
+            e["event"] == "got_chat_message" and e["args"][:2] == ["Marek", "hello from Marek"] for e in got[role]),
+        "Kuba's 🍿 reached the others": lambda role: any(
+            e["event"] == "got_reaction" and e["args"][:2] == ["Kuba", "🍿"] for e in got[role]),
+        "everyone heard the vote's winner (Inception)": lambda role: any(
+            e["event"] == "got_vote_won" and e["args"] == ["Inception"] for e in got[role]),
+    }
+    senders = {"Marek's chat message reached the others": "marek", "Kuba's 🍿 reached the others": "kuba"}
+    for name, test in expected.items():
+        roles = [r for r in ("host", "marek", "kuba") if r != senders.get(name)]
+        passed = all(test(role) for role in roles)
+        ok &= passed
+        print(f"room: {name} {'OK' if passed else 'FAIL'}")
     return ok
 
 

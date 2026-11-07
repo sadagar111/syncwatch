@@ -61,11 +61,29 @@ def shot(name):
 # Timed for the 40-second film in tests/media.
 SCRIPTS = {
     "host": [(1, "host"), (8, "play"), (12, "shot_playing"), (14, "pause"), (17, "seek5"), (19, "play2"),
-             (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (52, "end")],
+             (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (45, "vote_suggest"), (49.5, "vote_close"),
+             (51, "shot_vote"), (52, "end")],
     "marek": [(3, "join"), (12, "shot_playing"), (24, "drift"), (29, "report_gap"), (30, "syncme"),
-              (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (52, "end")],
-    "kuba": [(3.5, "join"), (12, "shot_playing"), (52, "end")],
+              (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (45.5, "chat"),
+              (47, "vote_cast"), (51, "shot_vote"), (52, "end")],
+    "kuba": [(3.5, "join"), (12, "shot_playing"), (46, "react"), (47.5, "vote_cast"), (51, "shot_vote"), (52, "end")],
 }
+# (after the measured stretches: chat, a reaction and a film vote, through the windows' own buttons and boxes)
+
+
+def listen(w, out) -> None:
+    """Log what reaches this app: chat messages, reactions, the vote's winner (gui_checks compares)."""
+    for name in ("chat_message", "reaction", "vote_won"):
+        original = getattr(w, name, None)
+        if original is None:
+            continue
+
+        def hooked(*args, _name=name, _original=original):
+            shown = [a if a is None or isinstance(a, (str, int, float, bool)) else getattr(a, "title", str(a))
+                     for a in args]                          # (a vote's Choice: its title)
+            out.write(json.dumps({"event": f"got_{_name}", "args": shown, "t": time.time()}) + "\n")
+            return _original(*args)
+        setattr(w, name, hooked)
 
 
 def wait_for_the_others() -> None:
@@ -103,6 +121,7 @@ def scripted_exec(self):
     script = list(SCRIPTS[ROLE])
     start = time.monotonic()
     out = LOG.open("w")
+    listen(w, out)
     problems = []
     from syncwatch import errors
     errors.set_handler(lambda r: problems.append(r.code))
@@ -149,6 +168,20 @@ def scripted_exec(self):
                 c.pause()
             elif action == "friend_play":
                 c.play()
+            elif action == "vote_suggest":
+                c.votes.suggest("The Matrix", 1999)
+                c.votes.suggest("Inception", 2010)
+            elif action == "chat":
+                w.sidebar.activity.chat_box.setText("hello from Marek")
+                w.sidebar.activity.chat_box.returnPressed.emit()
+            elif action == "react":
+                w.controls.reactionChosen.emit("🍿")
+            elif action == "vote_cast":
+                choice = next((ch for ch in c.votes.vote.choices if ch.title == "Inception"), None)
+                if choice is not None:
+                    w.sidebar.vote.voteRequested.emit(choice.key)
+            elif action == "vote_close":
+                w.sidebar.vote.close_button.click()
             elif action.startswith("shot_"):
                 QApplication.processEvents()
                 shot(action[5:])
