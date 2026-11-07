@@ -1416,7 +1416,8 @@ class MainWindow(QMainWindow):
         for setting in SCHEMA:
             if setting.kind == "keys" and self.settings.get(setting.key):
                 lines.append(f"{self.settings.get(setting.key)}\t{setting.label}")
-        lines += ["", "Double-click the video: fullscreen · Esc: close this"]
+        lines += ["", "In a room: 1–8 send reactions (😂 😮 😍 😱 😢 👏 🔥 🍿)",
+                  "Double-click the video: fullscreen · Esc: close this"]
         self.overlay.show_help("\n".join(lines))
 
     # ================================================================ fullscreen & sidebar
