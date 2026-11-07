@@ -6,6 +6,7 @@ session in this process (only on 127.0.0.1, no DHT), then tells the helper to co
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -93,8 +94,8 @@ def make_torrent(folder: Path, name: str, data: bytes, piece: int = 65536) -> Pa
 class Seeder:
     """A libtorrent session in this process that shares one file on 127.0.0.1."""
 
-    def __init__(self, folder: Path, torrent: Path, upload_kbps: int = 0):
-        self.session = lt.session({"listen_interfaces": "127.0.0.1:0", "enable_dht": False, "enable_lsd": False,
+    def __init__(self, folder: Path, torrent: Path, upload_kbps: int = 0, port: int = 0):
+        self.session = lt.session({"listen_interfaces": f"127.0.0.1:{port}", "enable_dht": False, "enable_lsd": False,
                                    "enable_upnp": False, "enable_natpmp": False,
                                    "upload_rate_limit": upload_kbps * 1024})
         if upload_kbps:   # peers on this PC normally aren't limited: put everyone in the global class
@@ -140,7 +141,8 @@ class Helper:
                 return event
             if event["ev"] == "error" and kind != "error":
                 raise AssertionError(f"helper error: {event}")
-        raise AssertionError(f"no {kind} event; got {[e['ev'] for e in self.events][-10:]}")
+        last = next((e for e in reversed(self.events) if e["ev"] == "status"), None)
+        raise AssertionError(f"no {kind} event; got {[e['ev'] for e in self.events][-10:]}; last status: {last}")
 
     def quit(self, delete=False):
         if self.proc.poll() is None:
@@ -192,6 +194,26 @@ class EngineTests(unittest.TestCase):
         self.helper.until("done")
         with self.assertRaises(urllib.error.HTTPError):                       # the secret token counts
             read(ready["url"].replace(ready["url"].split("/")[3], "wrong-token"), 0, 10)
+
+    def test_an_address_from_the_room_is_tried_again(self):
+        """Nobody listens at the address yet (a router in the way, or the other side still starting): it's
+        tried again every few seconds, so the film comes as soon as the seeder is there."""
+        data = os.urandom(2 * 1024 * 1024)
+        torrent = make_torrent(self.seed_dir, "Film.2001.mkv", data)
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        self.helper = Helper(self.down, "--start-mb", "1")
+        self.helper.send(cmd="add", source=str(torrent))
+        files = self.helper.until("files")
+        self.helper.send(cmd="select", index=engine.best_video(files["files"]))
+        self.helper.send(cmd="peer", address=f"127.0.0.1:{port}")      # refused: nobody there yet
+        time.sleep(7)       # libtorrent alone gives such an address up after three quick tries
+        self.seeder = Seeder(self.seed_dir, torrent, 0, port)
+        started = time.monotonic()
+        self.helper.until("ready", timeout=25)
+        self.assertLess(time.monotonic() - started, 20)
 
     def test_a_jump_is_fetched_first(self):
         """The seeder sends 1.5 MB/s: the whole film takes ~10 s, but a jump near the end takes ~1 s."""
