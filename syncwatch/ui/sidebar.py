@@ -481,7 +481,8 @@ class ActivityPanel(Panel):
         self.list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.body.addWidget(self.list, 1)
         self.chat_box = ChatBox()
-        self.chat_box.setPlaceholderText("Say something to the room… (T, Enter sends)")
+        self.chat_box.setPlaceholderText("Say something… (T)")
+        self.chat_box.setToolTip("Write to everyone in the room: T jumps here, Enter sends, Esc goes back")
         from ..net.protocol import CHAT_TEXT
         self.chat_box.setMaxLength(CHAT_TEXT)
         self.chat_box.returnPressed.connect(lambda: self.chatSubmitted.emit(self.chat_box.text()))
