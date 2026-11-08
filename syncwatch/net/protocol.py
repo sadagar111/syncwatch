@@ -127,7 +127,8 @@ ROOM: Dict[str, Spec] = {
     "state": {"pos": POS, "playing": (bool, True, None), "at": CLOCK, "ready": (bool, False, None),
               "film": (FILM, False, None), "rules": (RULES, True, None)},
     "status": {"pos": POS, "playing": (bool, True, None), "at": CLOCK, "separate": (bool, False, None),
-               "ready": (bool, False, None), "film": (FILM, False, None)},
+               "ready": (bool, False, None), "film": (FILM, False, None),
+               "stall": (bool, False, None)},   # true: my video stopped to load more (since 0.5)
     "req": {"action": (("play", "pause", "seek", "syncup"), True, None),
             "pos": (int, False, (0, MAX_POSITION_MS))},
     "cmd": {"action": (("play", "pause", "seek"), True, None), "pos": POS, "playing": (bool, True, None),
@@ -137,7 +138,8 @@ ROOM: Dict[str, Spec] = {
     "sync_prepare": {"id": (int, True, (0, 1 << 31)), "pos": POS, "by": (str, False, 32),
                      "by_id": (B64(8), False, None),
                      "jump": (bool, False, None),    # true: after a jump (0.4.1); missing: Sync up
-                     "next": (bool, False, None)},   # true: the next video of the queue starts (0.5)
+                     "next": (bool, False, None),    # true: the next video of the queue starts (0.5)
+                     "wait": (str, False, 64)},      # who's video is loading: everyone waits for them (0.5)
     "sync_ready": {"id": (int, True, (0, 1 << 31))},
     "sync_go": {"id": (int, True, (0, 1 << 31)), "start": CLOCK},
     "sync_abort": {"id": (int, True, (0, 1 << 31))},

@@ -48,9 +48,10 @@ class FakePlayer:
         self.seeks = 0
         self.media = media
         self.rate = 1.0          # 1.01 = runs 1 % fast (a "drifting" PC)
+        self.stalled = False     # waiting for more of the video (a slow stream): the clock stands still
 
     def position(self):
-        if not self.playing:
+        if not self.playing or self.stalled:
             return self.base
         now = time.monotonic()
         start = self.base_time if self.clock_runs else max(self.base_time, self.ready_at)
@@ -65,6 +66,17 @@ class FakePlayer:
     def is_ready(self):
         return time.monotonic() >= self.ready_at
 
+    def is_stalled(self):
+        return self.playing and self.stalled
+
+    def stall(self, on: bool):
+        """The stream runs dry (True) or has more again (False)."""
+        if on and not self.stalled:
+            self.base, self.base_time = self.position(), time.monotonic()
+        elif not on and self.stalled:
+            self.base_time = time.monotonic()
+        self.stalled = on
+
     def has_media(self):
         return self.media
 
@@ -76,6 +88,7 @@ class FakePlayer:
         self.base, self.playing = self.position(), False
 
     def seek(self, ms):
+        self.stalled = False     # (a jump fetches the new spot: loading is seek_delay from here)
         self.base, self.base_time = float(ms), time.monotonic()
         self.ready_at = time.monotonic() + self.seek_delay
         self.seeks += 1

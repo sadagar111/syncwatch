@@ -178,6 +178,13 @@ SCHEMA: List[Setting] = [
        minimum=0.0, maximum=3000.0),
     _s("sync.countdown_s", "int", 3, "Countdown before resuming after Sync up", WT,
        "0 = resume immediately.", advanced=True, minimum=0, maximum=10, suffix=" s"),
+    _s("sync.wait_for_loading", "bool", True, "Wait for a friend whose video is loading", WT,
+       "When you host: if someone's video stops to load more (a slow connection, a torrent that's still "
+       "coming), everyone pauses where you are until it can play, then all start together. Not again "
+       "within 20 s, and not for a connection that keeps needing it."),
+    _s("sync.loading_wait_s", "int", 30, "Wait for a loading video at most", WT,
+       "How long everyone waits for a friend's video to load before starting without them.",
+       advanced=True, minimum=5, maximum=300, suffix=" s"),
     _s("sync.ready_timeout_s", "float", 5.0, "Wait for slow PCs at most", WT,
        "During Sync up (and after jumps, when everyone pauses and starts together), how long to "
        "wait for a friend whose film isn't ready yet before starting without them.", advanced=True, minimum=1.0, maximum=60.0, step=0.5, decimals=1,
