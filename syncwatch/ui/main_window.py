@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
         queue_panel.playRequested.connect(self.controller.queue_play)
         queue_panel.removeRequested.connect(self.controller.queue_remove)
         queue_panel.moveRequested.connect(self.controller.queue_move)
-        queue_panel.skipClicked.connect(self.controller.queue_skip)
+        queue_panel.skipClicked.connect(self.controller.queue_vote_skip)   # (a plain skip when I may)
         queue_panel.addClicked.connect(lambda: self.ask_youtube_link(queue=True))
         self.player.ended.connect(self._media_ended)
         self.settings.subscribe("ui.panel_queue", lambda k, v: self.queue_changed())
@@ -647,7 +647,13 @@ class MainWindow(QMainWindow):
                               item.by, item.by == c.name) for item in queue.items]
         now = f"▶ Now: {queue.now.title}" if queue.now is not None else ""
         panel = self.sidebar.queue
-        panel.update_queue(now, entries, c.can_queue("add"), c.can_queue("control"))
+        vote = ""
+        if c.can_vote_skip():
+            votes = queue.skip_votes()
+            vote = f"⏭ Vote to skip ({votes[0]}/{votes[1]})" if votes else "⏭ Vote to skip"
+            if c.voted_to_skip():
+                vote = vote.replace("Vote to skip", "Voted")
+        panel.update_queue(now, entries, c.can_queue("add"), c.can_queue("control"), vote)
         panel.setVisible(bool(self.settings.get("ui.panel_queue")) and bool(queue.items or queue.now))
         if queue.next is not None:
             self.youtube.prefetch(queue.next.id)    # the next video starts without waiting for YouTube

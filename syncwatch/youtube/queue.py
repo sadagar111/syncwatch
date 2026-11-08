@@ -48,6 +48,7 @@ class Queue:
         self.items: List[Item] = []          # up next, in order
         self.version = 0                     # counts every change (members ignore older messages)
         self._next_key = 1
+        self.skip: Optional[tuple] = None    # (key of the video that plays, votes to skip it, votes needed)
 
     # ------------------------------------------------------------ changing (host)
     def add(self, video_id: str, title: str, dur: int, by: str) -> Item:
@@ -141,7 +142,16 @@ class Queue:
         message = {"no": self.version, "items": [item.to_message() for item in self.items]}
         if self.now is not None:
             message["now"] = self.now.to_message()
+        votes = self.skip_votes()
+        if votes is not None:
+            message["skip"] = {"k": self.now.key, "n": votes[0], "need": votes[1]}
         return message
+
+    def skip_votes(self) -> Optional[tuple]:
+        """(votes, needed) to skip the video that plays now, or None if nobody has voted."""
+        if self.skip is None or self.now is None or self.skip[0] != self.now.key or self.skip[1] <= 0:
+            return None
+        return self.skip[1], self.skip[2]
 
     def load_message(self, message: Dict) -> bool:
         """A member takes over the host's queue (an already checked "queue" message). False if stale."""
@@ -150,11 +160,13 @@ class Queue:
         self.version = message["no"]
         self.items = [Item.from_message(raw) for raw in message["items"]][:MAX_ITEMS]
         self.now = Item.from_message(message["now"]) if message.get("now") else None
+        skip = message.get("skip")
+        self.skip = (skip["k"], skip["n"], skip["need"]) if skip else None
         return True
 
     def reset(self) -> None:
         """Leaving a room: a member's copy of the host's queue is gone (version counting starts over)."""
-        self.items, self.now, self.version = [], None, 0
+        self.items, self.now, self.version, self.skip = [], None, 0, None
 
     # ------------------------------------------------------------ reading
     @property

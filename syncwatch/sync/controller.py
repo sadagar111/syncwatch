@@ -176,12 +176,16 @@ class Controller(RoomListener):
         self.queue = Queue()
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
+        self._skip_votes: Dict[bytes, str] = {}    # the host: who voted to skip the video that plays now
+        self._skip_key = 0                          # (its queue key)
+        self._voted_key = 0                         # a member: the video I voted to skip
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
         subscribe = getattr(settings, "subscribe", None)
         if subscribe is not None:          # the host changed who may add/skip: tell the room now
             subscribe("youtube.queue_", lambda _key, _value: self._queue_rules_changed())
+            subscribe("youtube.vote_skip", lambda _key, _value: self._queue_rules_changed())
 
     # ================================================================ setup
     def start(self) -> None:
@@ -365,6 +369,7 @@ class Controller(RoomListener):
         self._warned_films.clear()
         self.rules = Rules()
         self._qreq_times.clear()
+        self._skip_votes, self._skip_key, self._voted_key = {}, 0, 0
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -793,7 +798,8 @@ class Controller(RoomListener):
 
     def my_queue_rules(self) -> Dict[str, str]:
         return {"add": str(self.settings.get("youtube.queue_add")),
-                "control": str(self.settings.get("youtube.queue_control"))}
+                "control": str(self.settings.get("youtube.queue_control")),
+                "vote": bool(self.settings.get("youtube.vote_skip"))}
 
     def can_queue(self, what: str) -> bool:
         """"add" or "control" (skip, remove others' videos, reorder, play now) allowed for me?"""
@@ -811,6 +817,30 @@ class Controller(RoomListener):
 
     def queue_skip(self) -> None:
         self._queue_request("skip")
+
+    def can_vote_skip(self) -> bool:
+        """A member who may not skip can ask the room to (the host's setting)."""
+        return (not self.can_queue("control") and bool(self.queue_rules.get("vote"))
+                and self.queue.now is not None)
+
+    def voted_to_skip(self) -> bool:
+        return self.queue.now is not None and self._voted_key == self.queue.now.key
+
+    def queue_vote_skip(self) -> None:
+        """My vote to skip the video that plays (the host's app counts: more than half the room skips it)."""
+        now = self.queue.now
+        if self.can_queue("control"):
+            self.queue_skip()
+            return
+        if not self.can_vote_skip():
+            self.ui.problem("SW-610")
+            return
+        if self._voted_key == now.key:
+            self.ui.activity("You've already voted to skip this video", "info")
+            return
+        self._voted_key = now.key
+        self.session.send_room("qreq", op="voteskip", key=now.key)
+        self.ui.activity(f"You voted to skip {now.title}", "you")
 
     def queue_remove(self, key: int) -> None:
         self._queue_request("remove", key=key)
@@ -960,6 +990,12 @@ class Controller(RoomListener):
             return   # flood protection: silently dropped
         times.append(now)
         op, rules = body["op"], self.my_queue_rules()
+        if op == "voteskip":
+            if rules["vote"]:
+                self._queue_vote(peer, body.get("key"))
+            else:
+                self._reject(peer, "queue", "host_only")
+            return
         if op == "add":
             allowed = rules["add"] == "everyone"
         else:
@@ -972,6 +1008,27 @@ class Controller(RoomListener):
         fields = {name: body[name] for name in ("yt", "title", "dur", "key", "to") if name in body}
         if self._queue_do(op, peer, **fields) == "busy":
             self._reject(peer, "queue", "busy")
+
+    def _queue_vote(self, peer: Peer, key) -> None:
+        """The host: a vote to skip the video that plays now. More than half of the room skips it."""
+        now = self.queue.now
+        if now is None or key != now.key:
+            return              # a vote for a video that isn't playing any more
+        if self._skip_key != now.key:
+            self._skip_votes, self._skip_key = {}, now.key
+        self._skip_votes[peer.id] = peer.name
+        people = 1 + len(self.peers)             # me (the host) and everyone in the room
+        votes, need = len(self._skip_votes), people // 2 + 1
+        if votes >= need:
+            self.ui.activity(f"The room voted to skip {now.title} ({votes} of {people})", "friend")
+            self._skip_votes, self._skip_key, self.queue.skip = {}, 0, None
+            if self._queue_start(self.queue.advance()) is None:
+                self.ui.activity("Nothing more in the queue", "info")
+                self._queue_changed()
+            return
+        self.queue.skip = (now.key, votes, need)
+        self.ui.activity(f"{peer.name} voted to skip {now.title} ({votes} of {need} needed)", "friend")
+        self._queue_changed()
 
     def _on_queue(self, peer: Peer, body: Dict) -> None:
         if self.is_host or not peer.is_host:
