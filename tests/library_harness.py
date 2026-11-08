@@ -192,6 +192,18 @@ def run_script():
     CHECKS["the next episode opens at the end"] = spin(25, lambda: window.player.path == third)
     CHECKS["and plays by itself"] = spin(15, lambda: window.player.path == third and window.player.is_playing())
 
+    # 6. A show's intro (0.5 skip intro): Skip intro shows during the "Intro" chapter, and skips it
+    intro_film = data_dir / "Shows" / "Intro.Show.S01E01.mkv"
+    intro_film.parent.mkdir(parents=True, exist_ok=True)
+    make_film(intro_film, seconds=7, chapters=[(0, 4, "Intro"), (4, 7, "Episode")])
+    window.open_film(intro_film)
+    spin(15, lambda: window.player.path == intro_film and window.player.is_ready())
+    window.controller.toggle()
+    CHECKS["Skip intro shows during the intro"] = spin(5, lambda: window.controls.skip_intro.isVisible())
+    window.controls.skip_intro.click()
+    CHECKS["it jumps past the intro"] = spin(5, lambda: window.player.position() >= 3900)
+    CHECKS["and goes away"] = spin(3, lambda: not window.controls.skip_intro.isVisible())
+
 
 def scripted_exec(self):
     from syncwatch import errors

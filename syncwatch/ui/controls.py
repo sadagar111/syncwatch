@@ -5,7 +5,7 @@ import time
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QSizePolicy, QSlider, QToolButton,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider, QToolButton,
                                QVBoxLayout)
 
 from ..sync.controller import fmt_time
@@ -26,6 +26,7 @@ class ControlBar(QFrame):
     forwardClicked = Signal()
     syncUpClicked = Signal()
     syncMeClicked = Signal()
+    skipIntroClicked = Signal()
     followToggled = Signal(bool)
     muteClicked = Signal()
     volumeChanged = Signal(int)
@@ -86,6 +87,10 @@ class ControlBar(QFrame):
         self.sidebar = IconButton("sidebar", "☰", "Show/hide the sidebar (Tab)")
         self.settings = IconButton("settings", "⚙", "Settings")
         self.open = IconButton("open", "📂", "Library: your films")
+        self.skip_intro = QPushButton("Skip intro ⏭")
+        self.skip_intro.setToolTip("Jump to the end of this intro, opening or recap (key I)")
+        self.skip_intro.setObjectName("Attention")
+        self.skip_intro.hide()
 
         self.back.clicked.connect(self.backClicked)
         self.play.clicked.connect(self.playClicked)
@@ -98,9 +103,10 @@ class ControlBar(QFrame):
         self.sidebar.clicked.connect(self.sidebarClicked)
         self.settings.clicked.connect(self.settingsClicked)
         self.open.clicked.connect(self.openClicked)
+        self.skip_intro.clicked.connect(self.skipIntroClicked)
 
         row2 = QHBoxLayout()
-        for widget in (self.open, self.back, self.play, self.forward):
+        for widget in (self.open, self.back, self.play, self.forward, self.skip_intro):
             row2.addWidget(widget)
         row2.addSpacing(10)
         for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label, self.react):

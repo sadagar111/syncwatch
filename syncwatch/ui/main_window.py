@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, Q
 
 from .. import errors, log as log_module, paths
 from ..filmstate import film_key
-from ..library import episodes
+from ..library import chapters as chapter_rules, episodes
 from ..settings import RESTART_KEYS, SCHEMA
 from ..sync.controller import Controller, fmt_time
 from .controls import ControlBar
@@ -233,6 +233,8 @@ class MainWindow(QMainWindow):
         self._follow_align = False     # the video was opened because the host plays it: line up after
         self._queue_autostart = False  # the next video of the queue: start everyone together once it's open
         self._episode_autostart = False  # the next episode: the same, once it's open
+        self._intro = None             # (end ms, title) of the intro playing now, if any
+        self._intro_told = None        # the intro already hinted at (or skipped by itself)
         self._following_id = ""        # the host's video I'm opening (its problems only go to the activity feed)
         self._torrent_follow_tried: dict = {}   # magnet -> when following the host's torrent was last started
         self._last_resume_save = 0.0
@@ -382,6 +384,7 @@ class MainWindow(QMainWindow):
         ui.forwardClicked.connect(lambda: c.skip(1000 * self.settings.get("playback.skip_s")))
         ui.syncUpClicked.connect(c.sync_up)
         ui.syncMeClicked.connect(c.sync_me)
+        ui.skipIntroClicked.connect(self.skip_intro)
         ui.followToggled.connect(c.set_attached)
         ui.muteClicked.connect(self.toggle_mute)
         ui.volumeChanged.connect(lambda v: self.settings.set("playback.volume", v))
@@ -1196,6 +1199,7 @@ class MainWindow(QMainWindow):
             self.overlay.set_subtitles(self.subtitles.cues_at(position))
         else:
             self.overlay.set_subtitles([])
+        self._check_intro(position, duration)
         self._follow_video_area()
         self._fullscreen_autohide()
         if self._refresh_wanted:
@@ -1477,6 +1481,7 @@ class MainWindow(QMainWindow):
             "keys.ready": self._ready_clicked,
             "keys.next_episode": self.next_episode,
             "keys.night_mode": self._toggle_night_mode,
+            "keys.skip_intro": self.skip_intro,
             "keys.subs_toggle": lambda: self.settings.set("subs.enabled", not self.settings.get("subs.enabled")),
             "keys.subs_earlier": lambda: self._nudge_subs(-1),
             "keys.subs_later": lambda: self._nudge_subs(1),
@@ -1546,6 +1551,7 @@ class MainWindow(QMainWindow):
         self.settings.set("playback.audio_delay_ms", delay)
         self.overlay.toast(f"Sound delay {delay / 1000:+.3f} s" + ("  (earlier than the picture)" if delay < 0 else ""),
                            "info")
+
     def _toggle_night_mode(self) -> None:
         if self.player.engine != "mpv":
             self.overlay.toast("Night mode needs mpv (Settings > Playback > Video player)", "info")
@@ -1553,6 +1559,33 @@ class MainWindow(QMainWindow):
         on = not self.settings.get("playback.night_mode")
         self.settings.set("playback.night_mode", on)
         self.overlay.toast("Night mode on: loud and quiet evened out" if on else "Night mode off", "info")
+
+    # ---------------------------------------------------------------- intros
+    def _check_intro(self, position: float, duration: int) -> None:
+        """Inside an intro, opening or recap chapter: Skip intro shows (or it's skipped, Settings > Playback)."""
+        mode = self.settings.get("playback.skip_intros")
+        found = None
+        if mode != "off" and self.player.is_playing():
+            found = chapter_rules.skippable_at(self.player.chapters(), position, duration)
+        self._intro = found
+        self.controls.skip_intro.setVisible(found is not None)
+        if found is None or found == self._intro_told:
+            return
+        self._intro_told = found
+        c = self.controller
+        if mode == "auto" and (c.is_host or not c.connected):
+            self.skip_intro()
+        else:
+            self.overlay.toast(f"{found[1]}: press I to skip it", "info")
+
+    def skip_intro(self) -> None:
+        if self._intro is None:
+            return
+        end, title = self._intro
+        self._intro = None
+        self.controls.skip_intro.hide()
+        self.activity(f"Skipped the {title.lower()}", "you")
+        self.controller.seek(end)
 
     def _escape(self) -> None:
         if self.overlay.help_visible:

@@ -86,6 +86,10 @@ SCHEMA: List[Setting] = [
     _s("playback.night_mode", "bool", False, "Night mode: even out loud and quiet", PB,
        "Loud scenes get quieter and quiet talking louder, so you don't keep reaching for the volume (late at "
        "night, or with others asleep). On this PC only. Key: Alt+N. Only with mpv (the default video player)."),
+    _s("playback.skip_intros", "choice", "button", "Intros, openings and recaps", PB,
+       "When a film's chapter is called Intro, Opening, OP or Recap (many shows' files have them): show Skip "
+       "intro (and a hint: press I), skip it by itself (when you host or watch alone), or nothing. Only with mpv.",
+       choices=[("button", "Show Skip intro"), ("auto", "Skip them by themselves"), ("off", "Nothing")]),
     _s("playback.audio_languages", "str", "sk,cs,en", "Preferred audio languages", PB,
        "Language codes separated by commas, best first, e.g. sk,cs,en. Used to pick the audio "
        "track automatically when a film has several.", advanced=True, max_len=60),
@@ -368,6 +372,7 @@ SCHEMA: List[Setting] = [
     _s("keys.ready", "keys", "R", "Ready check (host) / I'm ready", KB, advanced=True),
     _s("keys.next_episode", "keys", "N", "Next episode", KB, advanced=True),
     _s("keys.night_mode", "keys", "Alt+N", "Night mode on/off", KB, advanced=True),
+    _s("keys.skip_intro", "keys", "I", "Skip the intro", KB, advanced=True),
     _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB, advanced=True),
     _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),

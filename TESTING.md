@@ -112,6 +112,8 @@ is the real test.
       near its end: the next one opens and plays by itself; N jumps to it right away
 - [ ] Night mode (branch `try/0.5-night-mode`, or `try/all`): an action film, Alt+N: explosions quieter, talking
       easier to hear (a toast says on/off); kept after a restart
+- [ ] Skip intro (branch `try/0.5-skip-intro`, or `try/all`): an anime or show episode whose file has chapters
+      (mpv shows them as marks; often "Opening"): during the opening, *Skip intro ⏭* and a hint; click or I
 
 ## Y2. Together (two PCs, or two windows with `--profile`)
 - [ ] Ready check (branch `try/0.5-ready-check`, or `try/all`): the host clicks *✋ Ready check* under People;

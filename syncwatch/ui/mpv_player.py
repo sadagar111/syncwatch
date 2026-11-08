@@ -216,6 +216,7 @@ class MpvPlayer(QObject):
         self._wait_started = 0.0
         self._eof = False
         self._tracks: list = []
+        self._chapters: List[Tuple[int, str]] = []    # (start in ms, title)
         self._volume, self._muted = 80, False
         self._last_playing = False
         self._last_child_check = 0.0
@@ -275,7 +276,7 @@ class MpvPlayer(QObject):
         self.version = mpvlib.version_text(self.core)
         self.core.register_event_callback(self._event_from_mpv)
         # Not "pause": SyncWatch decides that itself (mpv only pauses on its own at the end, eof-reached).
-        for name in ("time-pos", "core-idle", "duration", "eof-reached", "track-list"):
+        for name in ("time-pos", "core-idle", "duration", "eof-reached", "track-list", "chapter-list"):
             self.core.observe_property(name, self._property_from_mpv)
         log.info("mpv started: %s, video output %s, hardware decoding %s", self.version, self.video_output,
                  self.hwdec)
@@ -421,6 +422,7 @@ class MpvPlayer(QObject):
         self._pos, self._pos_time = 0.0, time.monotonic()
         self._duration = 0
         self._tracks = []
+        self._chapters = []
         self._reported.clear()
         self._load_seq += 1
         self._wanted_entry = None
@@ -458,6 +460,10 @@ class MpvPlayer(QObject):
     # ------------------------------------------------------------ tracks
     def _audio(self) -> list:
         return [t for t in self._tracks if isinstance(t, dict) and t.get("type") == "audio"]
+
+    def chapters(self) -> List[Tuple[int, str]]:
+        """The film's chapters: (start in ms, title)."""
+        return list(self._chapters)
 
     def audio_tracks(self) -> List[Tuple[int, str, str]]:
         """[(index, label, language code)]"""
@@ -572,6 +578,14 @@ class MpvPlayer(QObject):
         elif what == "track-list":
             self._tracks = list(value or [])
             self.tracksChanged.emit()
+        elif what == "chapter-list":
+            chapters = []
+            for chapter in value or []:
+                try:
+                    chapters.append((int(float(chapter.get("time", 0)) * 1000), str(chapter.get("title") or "")[:100]))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+            self._chapters = chapters
         elif what == "loadfile-reply":
             seq, error, result = value
             if seq != self._load_seq:
