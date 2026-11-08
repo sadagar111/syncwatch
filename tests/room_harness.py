@@ -164,7 +164,11 @@ class Person:
     def code(self) -> str:
         return self.c.session.code.text()
 
+    frozen = False      # True: this person's app hears and says nothing (their connection dropped)
+
     def pump(self) -> None:
+        if self.frozen:
+            return
         while True:
             try:
                 event = self.inbox.get_nowait()

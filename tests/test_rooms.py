@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -488,6 +489,36 @@ class JumpTests(RoomTestCase):
             self.assertEqual(person.ui.countdowns, [], person.name)   # no 3-2-1 for a jump
         self.assertTrue(any("Alex jumped to 10:00" in a or "Alex jumped to 0:10:00" in a
                             for a in self.guests[0].ui.activities()), self.guests[0].ui.activities())
+
+    def test_the_room_pauses_when_someones_connection_drops(self):
+        import room_harness
+        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.room_of(0.05, 0.05)
+        dropped = self.guests[0]
+        dropped.frozen = True
+        self.assertTrue(self.pump(until=lambda: not self.alex.player.playing, timeout=10))
+        self.assertTrue(self.pump(until=lambda: not self.guests[1].player.playing))
+        self.assertTrue(any("no word from Guest 1's app" in a for a in self.alex.ui.activities()))
+        self.pump(1.0)
+        self.assertFalse(self.alex.player.playing)        # still waiting
+        dropped.frozen = False                            # back: everyone starts together
+        self.assertTrue(self.pump(until=self.all_playing, timeout=15))
+        self.assertTrue(any("Guest 1 is back" in a for a in self.alex.ui.activities()))
+        self.pump(0.5)
+        self.assertLess(self.spread(), 150)
+
+    def test_not_paused_for_a_drop_when_the_host_says_no(self):
+        import room_harness
+        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.room_of(0.05)
+        self.alex.settings.set("sync.pause_on_drop", False)
+        self.guests[0].frozen = True
+        self.pump(4)
+        self.assertTrue(self.alex.player.playing)
 
     def test_together_a_members_jump(self):
         self.room_of(0.05, 0.8)

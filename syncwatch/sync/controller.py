@@ -66,6 +66,10 @@ PLAY_ALIGN_MS = 300          # on play, jump first if further apart than this
 READY_TOLERANCE_MS = 500
 SAME_SPOT_MS = 40            # already there: no need to jump again
 JUMP_MEASURE_AFTER_S = 2.0   # how a jump while playing turned out is measured this long after it
+DROP_AFTER_S = 6.0           # a friend following the room silent this long while we play: their connection dropped
+BACK_WITHIN_S = 2.5          # (a report this recent: they're back)
+BACK_STEADY_S = 3.0          # back for this long (their app may first reconnect to the room): start together
+DROP_GIVE_UP_S = 90.0        # not back after this long: the host decides
 JUMP_LEARN_RATE = 0.3        # how much one measured jump changes what this PC has learned
 MAX_JUMP_AHEAD_MS = 2000.0
 JUMP_ANSWER_WAIT_S = 3.0     # after my jump, I wait this long (plus "wait for slow PCs") for the host
@@ -176,6 +180,10 @@ class Controller(RoomListener):
         self.queue = Queue()
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
+        self._paused_for_drop: Optional[bytes] = None    # (host) the friend the room paused for
+        self._drop_paused_at = 0.0
+        self._back_since: Optional[float] = None
+        self._drops_noticed: Set[bytes] = set()          # (host) silent friends already paused for
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
@@ -365,6 +373,8 @@ class Controller(RoomListener):
         self._warned_films.clear()
         self.rules = Rules()
         self._qreq_times.clear()
+        self._paused_for_drop = None
+        self._drops_noticed.clear()
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -527,6 +537,7 @@ class Controller(RoomListener):
                 self.ui.activity("The host didn't start everyone again after your jump, so your film plays on",
                                  "warn")
         self._advance_host_sync(now)
+        self._watch_drops(now)
         self._advance_client_sync(now)
         if self._play_at is not None and now >= self._play_at:
             self._play_at = None
@@ -1346,6 +1357,50 @@ class Controller(RoomListener):
             if data and len(data) > MAX_AVATAR_BYTES:
                 data = None
         return data
+
+    def _watch_drops(self, now: float) -> None:
+        """The host: a friend following the room has gone silent while we play (their internet or PC
+        stopped answering): everyone pauses. When they're back, everyone starts together. If they
+        leave (or the room drops them after 20 s), the host decides."""
+        if not (self.connected and self.is_host and self.settings.get("sync.pause_on_drop")):
+            self._paused_for_drop = None
+            self._drops_noticed.clear()
+            return
+        waiting_for = self._paused_for_drop
+        if waiting_for is not None:
+            peer = self.peers.get(waiting_for)       # (missing for a moment while their app rejoins)
+            fresh = peer is not None and peer.known and now - peer.received_at < BACK_WITHIN_S
+            if self.p.is_playing() or self._host_sync is not None:
+                self._paused_for_drop = None          # someone started it again meanwhile
+            elif now - self._drop_paused_at > DROP_GIVE_UP_S:
+                self._paused_for_drop = None
+                self.ui.activity("They didn't come back: press play when you're ready", "info")
+            elif not fresh:
+                self._back_since = None
+            elif self._back_since is None:
+                self._back_since = now
+            elif now - self._back_since >= BACK_STEADY_S:
+                self._paused_for_drop = self._back_since = None
+                self._drops_noticed.discard(waiting_for)
+                self.ui.activity(f"{peer.name} is back: everyone starts together", "friend")
+                self._start_host_sync(by="")
+            return
+        if not self.p.is_playing() or self._host_sync is not None:
+            return
+        for peer in self.peers.values():
+            silent = now - peer.received_at
+            if peer.separate or not peer.known or silent < DROP_AFTER_S:
+                if silent < DROP_AFTER_S:
+                    self._drops_noticed.discard(peer.id)
+                continue
+            if peer.id in self._drops_noticed:
+                continue
+            self._drops_noticed.add(peer.id)
+            self._paused_for_drop, self._drop_paused_at, self._back_since = peer.id, now, None
+            self.ui.activity(f"Paused: no word from {peer.name}'s app for {silent:.0f} s (their connection?). "
+                             "When they're back, everyone starts together.", "warn")
+            self.pause()
+            return
 
     def _start_host_sync(self, by: str, kind: str = "syncup", pos: Optional[float] = None,
                          by_id: Optional[bytes] = None, next_video: bool = False) -> None:

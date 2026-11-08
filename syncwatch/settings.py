@@ -178,6 +178,9 @@ SCHEMA: List[Setting] = [
        minimum=0.0, maximum=3000.0),
     _s("sync.countdown_s", "int", 3, "Countdown before resuming after Sync up", WT,
        "0 = resume immediately.", advanced=True, minimum=0, maximum=10, suffix=" s"),
+    _s("sync.pause_on_drop", "bool", True, "Pause when someone's connection drops", WT,
+       "When you host: if a friend following the room goes silent while you watch (their internet or PC "
+       "stopped answering for 6 s), everyone pauses; when they're back, everyone starts together."),
     _s("sync.ready_timeout_s", "float", 5.0, "Wait for slow PCs at most", WT,
        "During Sync up (and after jumps, when everyone pauses and starts together), how long to "
        "wait for a friend whose film isn't ready yet before starting without them.", advanced=True, minimum=1.0, maximum=60.0, step=0.5, decimals=1,
