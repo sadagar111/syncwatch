@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.3 (a crash fix for Windows)
+- Fixes a crash on Windows: SyncWatch could close by itself now and then while a film was open. mpv's own little scripts (which SyncWatch doesn't use) clashed with SyncWatch's crash report; mpv now starts without them, and the crash report only notes the part of SyncWatch that crashed. Nothing else changes.
+
 ## 0.4.2 (new video player, and your film library)
 **A new video player: mpv**
 - Films now play with **mpv**, which handles practically every film, including AC3, E-AC3 and DTS sound that didn't always play before.
