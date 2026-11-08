@@ -209,6 +209,7 @@ class Controller(RoomListener):
         self._ready_check: Optional[_ReadyCheck] = None    # (host) the ready check that's open
         self._ready_ids = 0
         self.ready_view: Optional[Dict] = None             # what the People panel shows: {id, waiting, me}
+        self._film_followed = ""                  # the host's film I last told the window about
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
@@ -414,6 +415,7 @@ class Controller(RoomListener):
         self._loading_waits.clear()
         self._loading_given_up.clear()
         self._ready_check, self.ready_view = None, None
+        self._film_followed = ""
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -1277,6 +1279,17 @@ class Controller(RoomListener):
             follow = getattr(self.ui, "follow_torrent", None)
             if follow is not None:
                 follow(magnet, film.get("name", ""), int(film.get("size", 0)))
+        elif not video and not magnet:
+            self._follow_host_film(film)        # perhaps the next episode of what we watch (the window decides)
+
+    def _follow_host_film(self, film: Dict) -> None:
+        name = film.get("name") or ""
+        if not name or film.get("magnet") or name == (self.film or {}).get("name") or name == self._film_followed:
+            return
+        self._film_followed = name          # (once per film of the host's)
+        follow = getattr(self.ui, "follow_film", None)
+        if follow is not None:
+            follow(name, int(film.get("size") or 0))
 
     def _on_req(self, peer: Peer, body: Dict) -> None:
         if not self.is_host:

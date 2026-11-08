@@ -108,10 +108,14 @@ is the real test.
 
 - [ ] Sound delay (branch `try/0.5-sound-delay`, or `try/all`): with Bluetooth headphones, Alt+Z a few times
       until lips and words match (a toast shows the delay); it's kept after a restart
+- [ ] Next episode (branch `try/0.5-next-episode`, or `try/all`): open an episode of a show (S01E01…), jump
+      near its end: the next one opens and plays by itself; N jumps to it right away
 
 ## Y2. Together (two PCs, or two windows with `--profile`)
 - [ ] Ready check (branch `try/0.5-ready-check`, or `try/all`): the host clicks *✋ Ready check* under People;
       the guest sees *✓ I'm ready* and who's still missing; after the click the film starts with 3-2-1 for both
+- [ ] Next episode together: both have the show's episodes (any file names). The host goes on to the next
+      episode (N or at the end): the guest's copy of it opens and both start it together
 - [ ] Host a room, the other joins. The host pastes a link: the other opens the same video by
       itself and lines up (People list: *in sync*)
 - [ ] Play, pause, jumps, Sync up: same as with films

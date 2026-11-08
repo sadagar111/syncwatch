@@ -80,6 +80,9 @@ SCHEMA: List[Setting] = [
        "Moves the sound against the picture, on this PC only. Bluetooth headphones play the sound late: "
        "try -150 to -250 ms (below zero = sound earlier). Keys: Alt+Z earlier, Alt+X later. Only with mpv "
        "(the default video player).", minimum=-2000, maximum=2000, step=25, suffix=" ms"),
+    _s("playback.next_episode", "bool", True, "Play the next episode by itself", PB,
+       "When an episode of a show ends (S01E02, 1x02, Episode 2…), the next one starts: from the same folder, "
+       "or the next season's folder next to it. When you host, for everyone together. Key N: right away."),
     _s("playback.audio_languages", "str", "sk,cs,en", "Preferred audio languages", PB,
        "Language codes separated by commas, best first, e.g. sk,cs,en. Used to pick the audio "
        "track automatically when a film has several.", advanced=True, max_len=60),
@@ -203,6 +206,9 @@ SCHEMA: List[Setting] = [
     _s("sync.loading_wait_s", "int", 30, "Wait for a loading video at most", WT,
        "How long everyone waits for a friend's video to load before starting without them.",
        advanced=True, minimum=5, maximum=300, suffix=" s"),
+    _s("sync.follow_episodes", "bool", True, "Go on to the next episode with the host", WT,
+       "In a room, when the host goes on to another episode of the show you're watching, your copy of it opens "
+       "(if it's in the same folder as yours, or the next season's folder)."),
     _s("sync.ready_timeout_s", "float", 5.0, "Wait for slow PCs at most", WT,
        "During Sync up (and after jumps, when everyone pauses and starts together), how long to "
        "wait for a friend whose film isn't ready yet before starting without them.", advanced=True, minimum=1.0, maximum=60.0, step=0.5, decimals=1,
@@ -354,6 +360,7 @@ SCHEMA: List[Setting] = [
     _s("keys.sync_me", "keys", "S", "Sync me (jump only myself)", KB, advanced=True),
     _s("keys.sync_up", "keys", "Ctrl+S", "Sync up (everyone)", KB, advanced=True),
     _s("keys.ready", "keys", "R", "Ready check (host) / I'm ready", KB, advanced=True),
+    _s("keys.next_episode", "keys", "N", "Next episode", KB, advanced=True),
     _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB, advanced=True),
     _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),

@@ -314,6 +314,19 @@ class YouTubeTests(RoomTestCase):
         self.pump(1.0)
         self.assertEqual(len(events(self.marek, "receive_share")), 1)
 
+    def test_members_hear_when_the_host_goes_on_to_another_episode(self):
+        """(next episode) The window decides whether it's the next episode and opens the member's copy."""
+        self.kuba.c.set_attached(False)
+        for person in (self.alex, self.marek, self.kuba):
+            person.c.set_film("Show.S01E01.mkv", 1000, 60_000)
+        self.pump(1.5)
+        self.alex.c.set_film("Show.S01E02.mkv", 2000, 60_000)
+        self.assertTrue(self.pump(until=lambda: self.marek.ui.films_followed() == [("Show.S01E02.mkv", 2000)]))
+        self.pump(2.5)                                   # once per film of the host's, not every heartbeat
+        self.assertEqual(self.marek.ui.films_followed(), [("Show.S01E02.mkv", 2000)])
+        self.assertEqual(self.kuba.ui.films_followed(), [])     # watching on his own
+        self.assertEqual(self.alex.ui.films_followed(), [])
+
     def test_a_film_and_a_video_arent_compared_by_length(self):
         self.alex.c.set_film("A test video", 0, 7_200_000, yt=self.VIDEO)
         self.kuba.c.set_attached(False)
