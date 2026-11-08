@@ -104,6 +104,9 @@ class Player(QObject):
     def set_hwdec(self, value: str) -> None:
         """Qt decides about hardware decoding itself."""
 
+    def set_audio_delay(self, ms: int) -> None:
+        """Qt's player can't move the sound against the picture (the setting says it's mpv only)."""
+
     def shutdown(self) -> None:
         self.mp.stop()
 

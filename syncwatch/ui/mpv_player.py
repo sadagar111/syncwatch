@@ -291,6 +291,10 @@ class MpvPlayer(QObject):
         self.hwdec = value
         self._async("set", "hwdec", value)
 
+    def set_audio_delay(self, ms: int) -> None:
+        """The sound this much later than the picture (below zero: earlier, for Bluetooth headphones)."""
+        self._async("set", "audio-delay", f"{max(-2000, min(2000, int(ms))) / 1000:.3f}")
+
     def shutdown(self) -> None:
         """Stop mpv (when the window closes). Safe to call twice."""
         core, self.core = self.core, None

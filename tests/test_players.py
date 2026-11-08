@@ -194,6 +194,13 @@ class MpvPlayerTests(unittest.TestCase):
         self.assertEqual([label for _, label, _ in self.player.audio_tracks()], ["Track 1 · AAC mono"])
         self.assertEqual(self.player.active_audio_track(), 0)
 
+    def test_sound_delay(self):
+        self.load()
+        self.player.set_audio_delay(-225)
+        self.assertTrue(spin(5, lambda: abs(float(self.player._read("audio-delay") or 0) + 0.225) < 0.001))
+        self.player.set_audio_delay(99_999)          # kept within ±2 s
+        self.assertTrue(spin(5, lambda: abs(float(self.player._read("audio-delay") or 0) - 2.0) < 0.001))
+
     def test_play_pause_and_position(self):
         self.load()
         self.player.play()
