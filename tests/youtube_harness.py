@@ -57,6 +57,14 @@ web_dir = data_dir / "web"
 web_dir.mkdir()
 for video, seconds in ((FIRST, 4), (SECOND, 4), (THIRD, 4)):
     make_film(web_dir / f"{video}.mkv", seconds=seconds)
+# YouTube's subtitles (0.5 captions): the first video is a page with the film and an English <track>,
+# which yt-dlp's generic code reads like YouTube's subtitle list
+CAPTION_TEXT = "Hello from the harness captions"
+(web_dir / f"{FIRST}.en.vtt").write_text(f"WEBVTT\n\n00:00:00.500 --> 00:00:03.500\n{CAPTION_TEXT}\n", encoding="utf-8")
+(web_dir / f"{FIRST}.html").write_text(
+    f'<html><head><title>Harness video with subtitles</title></head><body><video src="{FIRST}.mkv">'
+    f'<track kind="subtitles" srclang="en" label="English" src="{FIRST}.en.vtt"></video></body></html>',
+    encoding="utf-8")
 
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -74,11 +82,21 @@ _new_job = youtube_ui.YouTube._new_job
 
 def _local_job(self, video_id):
     job = _new_job(self, video_id)
-    job._arguments += ["--test-url", f"{BASE}/{video_id}.mkv"]
+    page = f"{video_id}.html" if (web_dir / f"{video_id}.html").exists() else f"{video_id}.mkv"
+    job._arguments += ["--test-url", f"{BASE}/{page}"]
     return job
 
 
 youtube_ui.YouTube._new_job = _local_job
+_caption_start = youtube_ui.CaptionJob.start
+
+
+def _local_captions(self):
+    self._arguments += ["--test-url", f"{BASE}/{self.video_id}.html"]
+    _caption_start(self)
+
+
+youtube_ui.CaptionJob.start = _local_captions
 youtube_ui.find_js_runtime = lambda setting: setting or "/no/deno/needed/for/local/files"
 
 # Playlists (0.5): the playlist is a page with the videos embedded, read by yt-dlp's real code
@@ -136,6 +154,13 @@ def run_script():
     CHECKS["it plays like a film"] = abs(window.player.duration() - 4000) < 300
     window.controller.toggle()
     CHECKS["play"] = spin(5, lambda: playing(window, FIRST))
+    # 1b. its subtitles from "YouTube": offered, turned on by themselves (English is one of my languages),
+    # fetched by resolve.py --captions and shown
+    subs = window.subtitles
+    CHECKS["YouTube's subtitles offered"] = [s.id for s in subs.sources] == ["yt:en"]
+    CHECKS["they turn on and load"] = spin(30, lambda: subs.current_id == "yt:en" and subs.track is not None)
+    CHECKS["the line is there"] = subs.cues_at(1500) == [(CAPTION_TEXT, False)]
+    CHECKS["kept for next time"] = (window.ctx.profile.cache_dir / "youtube-subtitles" / f"{FIRST}.en.vtt").exists()
     shot(window, "02_first_video")
 
     # 2. queue two more, one of them gone from "YouTube"; at the end the next one starts by itself

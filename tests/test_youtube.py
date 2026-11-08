@@ -13,7 +13,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
+from itertools import product
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -323,6 +325,162 @@ class ResolverProcessTests(unittest.TestCase):
 
     def test_flags_keep_user_libraries(self):
         self.assertNotIn("-I", resolve.command()[1:-1])
+
+    def test_captions_through_ytdlp(self):
+        """A video's subtitles are listed, and --captions has yt-dlp write the chosen ones (its real
+        code: the generic extractor reads a page with a <video> and its <track>)."""
+        (self.dir / "clip.en.vtt").write_text("WEBVTT\n\n00:00:00.500 --> 00:00:02.000\nHello from the captions\n",
+                                              encoding="utf-8")
+        (self.dir / "captions.html").write_text(
+            '<html><head><title>Captions</title></head><body><video src="clip.mkv">'
+            '<track kind="subtitles" srclang="en" label="English" src="clip.en.vtt"></video></body></html>',
+            encoding="utf-8")
+        page = f"{self.base}/captions.html"
+        code, message = self.run_resolver(ID, "--test-url", page, "--timeout", "10")
+        self.assertEqual(code, 0, message)
+        stream = streams.from_json(message["ok"])
+        self.assertEqual([(c.lang, c.auto) for c in stream.captions], [("en", False)])
+        out_dir = Path(tempfile.mkdtemp())
+        try:
+            out = out_dir / f"{ID}.en.vtt"
+            code, message = self.run_resolver(ID, "--captions", "en", "--out", str(out), "--test-url", page,
+                                              "--timeout", "10")
+            self.assertEqual(code, 0, message)
+            self.assertEqual(Path(message["ok"]["file"]), out)
+            self.assertIn("Hello from the captions", out.read_text(encoding="utf-8"))
+            self.assertEqual([p.name for p in out_dir.iterdir()], [out.name])    # nothing else left behind
+            code, message = self.run_resolver(ID, "--captions", "de", "--out", str(out_dir / "x.de.vtt"),
+                                              "--test-url", page, "--timeout", "10")
+            self.assertEqual((code, message.get("error")), (1, "nosubs"), message)
+            code, message = self.run_resolver(ID, "--captions", "en/../x", "--out", str(out))
+            self.assertEqual(code, 2)
+            code, message = self.run_resolver(ID, "--captions", "en", "--out", str(out_dir / "x.exe"))
+            self.assertEqual(code, 2)
+        finally:
+            shutil.rmtree(out_dir, ignore_errors=True)
+
+
+class CaptionTests(unittest.TestCase):
+    """What resolve.py says about a video's subtitles, and how it asks yt-dlp for one language."""
+    INFO = {"subtitles": {"en": [{"ext": "vtt", "url": "u", "name": "English"}], "live_chat": [{"ext": "json"}],
+                          "x y": [{"ext": "vtt"}], "pt-BR": [{"ext": "vtt", "name": "Portuguese (Brazil)\n"}],
+                          "nl": []},
+            "automatic_captions": {"en-orig": [{"ext": "vtt", "name": "English (Original)"}],
+                                   "en": [{"ext": "vtt", "name": "English"}], "sk": [{"ext": "vtt", "name": "Slovak"}]}}
+
+    def test_listed(self):
+        self.assertEqual(resolve.caption_list(self.INFO), [
+            {"lang": "en", "name": "English", "auto": False},
+            {"lang": "pt-BR", "name": "Portuguese (Brazil)", "auto": False},
+            {"lang": "en-orig", "name": "English (Original)", "auto": True},
+            {"lang": "en", "name": "English", "auto": True},
+            {"lang": "sk", "name": "Slovak", "auto": True}])
+        self.assertEqual(resolve.caption_list({"subtitles": "odd", "automatic_captions": None}), [])
+
+    def test_at_most_so_many(self):
+        codes = ["".join(p) for p in product("abcdefghij", repeat=3)][:400]
+        info = {"automatic_captions": {code: [{"ext": "vtt"}] for code in codes}}
+        self.assertEqual(len(resolve.caption_list(info)), resolve.MAX_CAPTIONS)
+
+    def test_options(self):
+        options = resolve.caption_options("pt-BR", True, Path("folder"), "deno=/d/deno", None, 20)
+        self.assertTrue(options["writeautomaticsub"])
+        self.assertFalse(options["writesubtitles"])
+        self.assertTrue(options["skip_download"])
+        self.assertEqual(options["remote_components"], [])
+        self.assertEqual(options["js_runtimes"], {"deno": {"path": "/d/deno"}})
+        pattern = __import__("re").compile(options["subtitleslangs"][0] + "$")   # how yt-dlp reads it
+        self.assertTrue(pattern.match("pt-BR"))
+        self.assertIsNone(pattern.match("pt-BRx"))
+        self.assertFalse(resolve.caption_options("en", False, Path("f"), None, None, 20)["writeautomaticsub"])
+
+    def test_from_json(self):
+        got = streams.captions_from_json([
+            {"lang": "en-orig", "name": "English (Original)", "auto": True}, {"lang": "en", "name": 5, "auto": False},
+            {"lang": "<script>", "auto": False}, {"lang": "de", "auto": "yes"}, "junk",
+            {"lang": "en", "name": "again", "auto": False}])
+        self.assertEqual([(c.lang, c.name, c.auto) for c in got], [("en-orig", "English (Original)", True),
+                                                                   ("en", "", False)])
+        self.assertTrue(got[0].original)
+        self.assertEqual(got[0].language, "en")
+        self.assertFalse(got[1].original)
+        self.assertEqual(streams.captions_from_json("nope"), ())
+
+
+class CaptionPickTests(unittest.TestCase):
+    """The Subtitles menu for a YouTube video: what's offered, what turns on by itself, fetched once."""
+    CAPTIONS = streams.captions_from_json([
+        {"lang": "en", "name": "English", "auto": False},
+        {"lang": "en-orig", "name": "English (Original)", "auto": True},
+        {"lang": "en", "name": "English", "auto": True},
+        {"lang": "sk", "name": "Slovak", "auto": True},
+        {"lang": "de", "name": "German", "auto": True}])
+
+    @classmethod
+    def setUpClass(cls):
+        from PySide6.QtCore import QCoreApplication
+        cls.app = QCoreApplication.instance() or QCoreApplication([])
+
+    def setUp(self):
+        from syncwatch.filmstate import FilmMemory
+        from syncwatch.settings import Settings
+        from syncwatch.ui.subtitles_ui import Subtitles
+        self.dir = Path(tempfile.mkdtemp())
+        self.settings = Settings(None)
+        self.settings.set("subs.languages", "sk,en")
+        self.subs = Subtitles(self.settings, FilmMemory(None), self.dir)
+        self.asked = []
+
+        def fetch(video_id, lang, auto, out, done):
+            self.asked.append((video_id, lang, auto))
+            out.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nAhoj z YouTube\n", encoding="utf-8")
+            done(out, "")
+        self.subs.fetch_youtube = fetch
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def loaded(self):
+        from PySide6.QtCore import QCoreApplication
+        end = time.monotonic() + 5
+        while self.subs.track is None and time.monotonic() < end:
+            QCoreApplication.processEvents()
+            time.sleep(0.01)
+        return self.subs.track is not None
+
+    def test_offered(self):
+        self.subs.stream_opened(f"yt:{ID}", ID, self.CAPTIONS)
+        # the uploader's, YouTube's in the spoken language, and its translation into my languages (not German)
+        self.assertEqual([s.id for s in self.subs.sources], ["yt:en", "ytauto:en-orig", "ytauto:sk"])
+        self.subs.film_closed()
+        self.assertEqual((self.subs.sources, self.subs.video_id), ([], ""))
+
+    def test_the_uploaders_turn_on_and_are_fetched_once(self):
+        self.subs.stream_opened(f"yt:{ID}", ID, self.CAPTIONS)
+        self.assertEqual(self.subs.current_id, "yt:en")    # Slovak comes first, but only YouTube's: English wins
+        self.assertTrue(self.loaded())
+        self.assertEqual(self.subs.cues_at(2000), [("Ahoj z YouTube", False)])
+        self.subs.stream_opened(f"yt:{ID}", ID, self.CAPTIONS)     # opened again: from the cache
+        self.assertTrue(self.loaded())
+        self.assertEqual(self.asked, [(ID, "en", False)])
+
+    def test_automatic_ones_only_when_set(self):
+        automatic = tuple(c for c in self.CAPTIONS if c.auto)
+        self.subs.stream_opened(f"yt:{ID}", ID, automatic)
+        self.assertEqual(self.subs.current_id, "off")
+        self.settings.set("youtube.auto_captions", True)
+        self.subs.stream_opened(f"yt:{ID}", ID, automatic)
+        self.assertEqual(self.subs.current_id, "ytauto:sk")     # my first language, translated by YouTube
+        self.assertTrue(self.loaded())
+        self.assertEqual(self.asked, [(ID, "sk", True)])
+
+    def test_a_failed_fetch_turns_them_off(self):
+        seen = []
+        self.subs.failed.connect(lambda code, details: seen.append(code))
+        self.subs.fetch_youtube = lambda video_id, lang, auto, out, done: done(None, "bot: not a bot?")
+        self.subs.stream_opened(f"yt:{ID}", ID, self.CAPTIONS)
+        self.assertEqual((self.subs.current_id, self.subs.track), ("off", None))
+        self.assertEqual(seen, ["SW-611"])
 
 
 if __name__ == "__main__":

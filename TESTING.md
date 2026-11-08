@@ -125,6 +125,14 @@ is the real test.
 - [ ] Paste a playlist link (a music album, or any `…&list=…` link): it asks, then the other videos appear in
       Up next with their titles; a playlist of more than 50 says how many didn't fit
 
+## Y4. YouTube's subtitles (branch `try/0.5-captions`, or `try/all`)
+- [ ] A video with subtitles from its uploader in one of your languages (e.g. a TED talk): after a few
+      seconds they appear by themselves. CC menu: *YouTube · English* is ticked
+- [ ] CC menu on a video without uploader subtitles: *YouTube, automatic · English (Original)* and the
+      automatic ones in your languages (e.g. Slovak, translated). Pick one: it appears within a few seconds
+- [ ] Open the same video again: its subtitles come at once (kept for a week)
+- [ ] Timing… (delay) works on them like on a film's subtitles
+
 ---
 
 # Test checklist for 0.4.2 (mpv and the film library)

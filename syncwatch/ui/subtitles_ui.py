@@ -2,7 +2,9 @@
 
 Sources are found automatically: subtitle files next to the film (same name,
 optionally with a language tag, or in a Subs folder) and text tracks inside
-.mkv/.webm films. Your choice, delay and stretch are remembered per film.
+.mkv/.webm films. A YouTube video's subtitles come from YouTube: fetched when
+picked (by yt-dlp, in its own process) and kept in the cache for a while.
+Your choice, delay and stretch are remembered per film (and per video).
 
 Slow work (reading a film's subtitle tracks) runs in the background and shows
 progress with an estimate of the time left; results are cached so each film
@@ -12,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -27,11 +30,13 @@ from ..subtitles.model import SubtitleTrack
 log = logging.getLogger("syncwatch.subtitles")
 
 MKV_SUFFIXES = (".mkv", ".webm", ".mka", ".mk3d")
+YOUTUBE_KEEP_S = 7 * 86400        # YouTube subtitles in the cache are used again for a week
+YOUTUBE_TIDY_S = 30 * 86400       # and deleted after a month
 
 
 @dataclass
 class Source:
-    id: str          # "file:<path>" | "mkv:<track number>"
+    id: str          # "file:<path>" | "mkv:<track number>" | "yt:<lang>" | "ytauto:<lang>" (YouTube's)
     label: str
     language: str
     usable: bool = True
@@ -40,6 +45,7 @@ class Source:
 class Subtitles(QObject):
     sourcesChanged = Signal()
     statusChanged = Signal(str)
+    failed = Signal(str, str)     # (problem code, details) the window shows without a popup
     _bridge = Signal(object)      # runs a function on the GUI thread
 
     def __init__(self, settings, films: FilmMemory, cache_dir: Path, parent=None):
@@ -61,13 +67,16 @@ class Subtitles(QObject):
         self._mkv_state = "none"      # none | listing | ready | reading | done | failed
         self._cancel = threading.Event()
         self._bridge.connect(lambda fn: fn())
+        self.video_id = ""            # the YouTube video that's open (its subtitles are YouTube's)
+        # set by the window: YouTube.fetch_captions(video_id, lang, auto, out, done(file or None, problem))
+        self.fetch_youtube = None
 
     # ------------------------------------------------------------ film changes
     def film_opened(self, film: Path, film_key: str) -> None:
         self._cancel.set()
         self._cancel = threading.Event()
         self._generation += 1
-        self._film, self._film_key = film, film_key
+        self._film, self._film_key, self.video_id = film, film_key, ""
         self.sources, self._mkv_tracks, self._mkv_infos = [], {}, []
         self.track, self.current_id, self.status = None, "off", ""
         memory = self.films.get(film_key)
@@ -84,6 +93,31 @@ class Subtitles(QObject):
                              name="sw-subs-list").start()
         else:
             self._choose_initial(memory)
+        self.sourcesChanged.emit()
+
+    def stream_opened(self, film_key: str, video_id: str, captions) -> None:
+        """A YouTube video: the uploader's subtitles, and YouTube's automatic ones in the spoken language
+        and in your languages (it translates them into ~150). Fetched when picked."""
+        self._cancel.set()
+        self._cancel = threading.Event()
+        self._generation += 1
+        self._film, self._film_key, self.video_id = None, film_key, video_id
+        self.sources, self._mkv_tracks, self._mkv_infos = [], {}, []
+        self.track, self.current_id, self.status = None, "off", ""
+        self._mkv_state = "none"
+        memory = self.films.get(film_key)
+        self.delay_ms = int(memory.get("sub_delay_ms", 0))
+        self.stretch = float(memory.get("sub_stretch", 1.0)) or 1.0
+        preferred = {parsers.normalise_language(p) for p in self.settings.languages("subs.languages")}
+        spoken = {parsers.normalise_language(c.language) for c in captions if c.original}
+        for caption in captions:
+            language = parsers.normalise_language(caption.language)
+            name = caption.name or parsers.LANGUAGE_NAMES.get(language, caption.language)
+            if not caption.auto:
+                self.sources.append(Source(f"yt:{caption.lang}", f"YouTube · {name}", language))
+            elif caption.original or (language in preferred and language not in spoken):
+                self.sources.append(Source(f"ytauto:{caption.lang}", f"YouTube, automatic · {name}", language))
+        self._choose_initial(memory)
         self.sourcesChanged.emit()
 
     def _list_mkv(self, film: Path, generation: int) -> None:
@@ -125,6 +159,12 @@ class Subtitles(QObject):
         # Your language order decides first; between a file and a track in the same
         # language, the file wins (it was put there on purpose).
         best = parsers.pick_preferred(files + tracks, preferred)
+        if best is None and self.video_id:
+            # the uploader's subtitles in any of your languages before YouTube's automatic ones
+            best = parsers.pick_preferred([(s, s.language) for s in usable if s.id.startswith("yt:")], preferred)
+            if best is None and self.settings.get("youtube.auto_captions"):
+                best = parsers.pick_preferred([(s, s.language) for s in usable if s.id.startswith("ytauto:")],
+                                              preferred)
         if best is None and len(files) == 1 and not files[0][1]:
             best = files[0][0]  # a single file without a language tag: probably the right one
         if best is not None:
@@ -142,11 +182,13 @@ class Subtitles(QObject):
             self._load_file(Path(source_id[5:]))
         elif source_id.startswith("mkv:"):
             self._load_mkv_track(int(source_id[4:]))
+        elif source_id.startswith(("yt:", "ytauto:")):
+            self._load_youtube(source_id)
         self.sourcesChanged.emit()
 
-    def _load_file(self, path: Path) -> None:
+    def _load_file(self, path: Path, source_id: str = "") -> None:
         generation = self._generation
-        source_id = f"file:{path}"
+        source_id = source_id or f"file:{path}"
         stem = self._film.stem if self._film else ""
         encoding = self.settings.get("subs.encoding")
         preferred = self.settings.languages("subs.languages")
@@ -175,6 +217,55 @@ class Subtitles(QObject):
         self.track = track
         encoding = getattr(track, "encoding", "")
         self._set_status(f"{len(track)} subtitles loaded" + (f" ({encoding})" if encoding not in ("utf-8", "") else ""))
+
+    # ------------------------------------------------------------ YouTube's subtitles
+    def _youtube_file(self, source_id: str) -> Path:
+        kind, _, lang = source_id.partition(":")
+        return self.cache_dir / "youtube-subtitles" / f"{self.video_id}.{lang}{'.auto' if kind == 'ytauto' else ''}.vtt"
+
+    def _load_youtube(self, source_id: str) -> None:
+        out = self._youtube_file(source_id)
+        for path in (out, out.with_suffix(".srt")):     # (fetched before, recently)
+            try:
+                if time.time() - path.stat().st_mtime < YOUTUBE_KEEP_S:
+                    self._load_file(path, source_id)
+                    return
+            except OSError:
+                pass
+        if self.fetch_youtube is None or not self.video_id:
+            self.current_id = "off"
+            return
+        generation = self._generation
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            self._tidy_youtube(out.parent)
+        except OSError as exc:
+            log.warning("no folder for YouTube subtitles: %s", exc)
+        self._set_status("Getting the subtitles from YouTube…")
+        self.fetch_youtube(self.video_id, source_id.partition(":")[2], source_id.startswith("ytauto:"), out,
+                           lambda path, problem: self._youtube_fetched(generation, source_id, path, problem))
+
+    def _youtube_fetched(self, generation: int, source_id: str, path: Optional[Path], problem: str) -> None:
+        if generation != self._generation or self.current_id != source_id:
+            return
+        if path is None:
+            self.failed.emit("SW-611", problem[:2000])
+            self.current_id = "off"
+            self._set_status("")
+            self.sourcesChanged.emit()
+            return
+        self._load_file(path, source_id)
+
+    @staticmethod
+    def _tidy_youtube(folder: Path) -> None:
+        """Subtitles fetched more than a month ago go (a few hundred KB each)."""
+        now = time.time()
+        for path in folder.iterdir():
+            try:
+                if path.is_file() and now - path.stat().st_mtime > YOUTUBE_TIDY_S:
+                    path.unlink()
+            except OSError:
+                pass
 
     def _load_mkv_track(self, number: int) -> None:
         info = next((t for t in self._mkv_infos if t.number == number), None)
@@ -284,7 +375,7 @@ class Subtitles(QObject):
         """No film anymore (it's being removed from the library): stop reading it, show nothing."""
         self._cancel.set()
         self._generation += 1
-        self._film, self._film_key = None, ""
+        self._film, self._film_key, self.video_id = None, "", ""
         self.sources, self._mkv_tracks, self._mkv_infos = [], {}, []
         self.track, self.current_id, self.status = None, "off", ""
         self._mkv_state = "none"

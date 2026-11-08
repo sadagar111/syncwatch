@@ -127,6 +127,22 @@ class PlaylistJob(ResolveJob):
         return streams.playlist_from_json(raw)
 
 
+class CaptionJob(ResolveJob):
+    """One run of resolve.py --captions: found(Path of the subtitle file) or failed(kind, message)."""
+
+    def __init__(self, video_id: str, arguments: list, timeout_s: int, out: Path, parent=None):
+        super().__init__(video_id, arguments, timeout_s, parent)
+        self.out = out
+
+    def _parse_ok(self, raw):
+        path = Path(raw.get("file", "")) if isinstance(raw, dict) and isinstance(raw.get("file"), str) else None
+        # only where it was asked to write (.vtt, or .srt when YouTube had no WebVTT)
+        if path is None or path.parent != self.out.parent or path.name not in (self.out.name,
+                                                                                self.out.with_suffix(".srt").name):
+            raise streams.BadStream("no subtitle file where it was asked for")
+        return path
+
+
 class YouTube(QObject):
     """The window's YouTube part. ``opened(stream, start_s)`` when a video is ready to play."""
     opened = Signal(object, int)
@@ -219,6 +235,25 @@ class YouTube(QObject):
         if self.engine() == "qt":
             arguments.append("--combined")
         return ResolveJob(video_id, arguments, int(self.settings.get("youtube.timeout_s")), self)
+
+    def fetch_captions(self, video_id: str, lang: str, auto: bool, out: Path,
+                       done: Callable[[Optional[Path], str], None]) -> Optional[CaptionJob]:
+        """Get a video's subtitles in one language into ``out`` (resolve.py --captions);
+        later done(file, "") or done(None, problem)."""
+        if self.check():
+            done(None, "yt-dlp or Deno not found")
+            return None
+        timeout = int(self.settings.get("youtube.timeout_s"))
+        arguments = ["--captions", lang, "--out", str(out), "--cache", str(self.cache_dir / "yt-dlp"),
+                     "--timeout", str(max(10, timeout - 5))] + (["--auto"] if auto else [])
+        deno = find_js_runtime(self.settings.get("youtube.js_runtime"))
+        if deno:
+            arguments += ["--js", f"deno={deno}"]
+        job = CaptionJob(video_id, arguments, timeout, out, self)
+        job.found.connect(lambda path: (done(path, ""), job.deleteLater()))
+        job.failed.connect(lambda kind, text: (done(None, f"{kind}: {text}"), job.deleteLater()))
+        job.start()
+        return job
 
     def list_playlist(self, ref: links.PlaylistRef) -> None:
         """Ask yt-dlp for a playlist's videos (IDs and titles only); playlistListed or failed comes."""
