@@ -118,6 +118,9 @@ is the real test.
       the guest sees *✓ I'm ready* and who's still missing; after the click the film starts with 3-2-1 for both
 - [ ] Next episode together: both have the show's episodes (any file names). The host goes on to the next
       episode (N or at the end): the guest's copy of it opens and both start it together
+- [ ] Pause when a connection drops (branch `try/0.5-pause-on-drop`, or `try/all`): while you watch, the guest
+      pulls their network cable / turns off Wi-Fi for ~15 s: the host's room pauses (*no word from …*); when
+      it's back, a few seconds later everyone starts together
 - [ ] Host a room, the other joins. The host pastes a link: the other opens the same video by
       itself and lines up (People list: *in sync*)
 - [ ] Play, pause, jumps, Sync up: same as with films
