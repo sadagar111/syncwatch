@@ -825,7 +825,9 @@ class JumpTests(RoomTestCase):
 
     def test_the_room_pauses_when_someones_connection_drops(self):
         import room_harness
-        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0})
+        # (heartbeats every 0.5 s, so a friend who's fine never looks silent for 2 s on a slow test machine)
+        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0,
+                                                                             "HEARTBEAT_MEMBER_S": 0.5})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.room_of(0.05, 0.05)
@@ -844,7 +846,9 @@ class JumpTests(RoomTestCase):
 
     def test_not_paused_for_a_drop_when_the_host_says_no(self):
         import room_harness
-        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0})
+        # (heartbeats every 0.5 s, so a friend who's fine never looks silent for 2 s on a slow test machine)
+        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0,
+                                                                             "HEARTBEAT_MEMBER_S": 0.5})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.room_of(0.05)
