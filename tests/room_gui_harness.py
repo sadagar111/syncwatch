@@ -66,16 +66,18 @@ def shot(name):
 SCRIPTS = {
     "host": [(1, "host"), (8, "play"), (12, "shot_playing"), (14, "pause"), (17, "seek5"), (19, "play2"),
              (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (45, "vote_suggest"), (49.5, "vote_close"),
-             (51, "shot_vote"), (52, "torrent_film"), (58.5, "end")],
+             (51, "shot_vote"), (51.5, "seek5"), (52.5, "ready_ask"), (61, "ready_seen"), (62, "torrent_film"),
+             (68.5, "end")],
     "marek": [(3, "join"), (12, "shot_playing"), (24, "drift"), (29, "report_gap"), (30, "syncme"),
               (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (45.5, "chat"),
-              (47, "vote_cast"), (51, "shot_vote"), (55.5, "offer_state"), (56, "offer_accept"),
-              (58, "offer_state2"), (58.5, "end")],
+              (47, "vote_cast"), (51, "shot_vote"), (54.5, "ready_seen"), (55, "ready_yes"), (61, "ready_seen"),
+              (65.5, "offer_state"), (66, "offer_accept"), (68, "offer_state2"), (68.5, "end")],
     "kuba": [(3.5, "join"), (12, "shot_playing"), (46, "react"), (47.5, "vote_cast"), (51, "shot_vote"),
-             (55.5, "offer_state"), (58.5, "end")],
+             (54.5, "ready_seen"), (56, "ready_yes"), (61, "ready_seen"), (65.5, "offer_state"), (68.5, "end")],
 }
 # (after the measured stretches: chat, a reaction and a film vote, through the windows' own buttons and boxes;
-# then the host streams a torrent, which nobody has, so nothing downloads)
+# back to 0:05 and the host's ready check, answered with the members' own buttons; then the host streams a
+# torrent, which nobody has, so nothing downloads)
 OFFER_HASH = "5a" * 20
 OFFER_MAGNET = f"magnet:?xt=urn:btih:{OFFER_HASH}&dn=Torrent%20Test%20Film.mkv"
 
@@ -202,6 +204,14 @@ def scripted_exec(self):
                     w.torrents.stop()
             elif action == "offer_accept":
                 w.sidebar.share_banner.button.click()
+            elif action in ("ready_ask", "ready_yes"):
+                w.sidebar.people.ready_button.click()
+            elif action == "ready_seen":
+                people = w.sidebar.people
+                out.write(json.dumps({"event": f"{ROLE}:ready:seen", "t": time.time(),
+                                      "line": "" if people.ready_line.isHidden() else people.ready_line.text(),
+                                      "button": "" if people.ready_button.isHidden() else people.ready_button.text(),
+                                      "playing": bool(w.player.is_playing())}) + "\n")
             elif action.startswith("shot_"):
                 QApplication.processEvents()
                 shot(action[5:])

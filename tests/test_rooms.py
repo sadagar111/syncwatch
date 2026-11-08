@@ -583,6 +583,64 @@ class QueueTests(RoomTestCase):
         self.assertNotIn("SW-503", self.alex.ui.problems())
 
 
+class ReadyCheckTests(RoomTestCase):
+    """The host asks "everyone ready?"; when everyone following has answered, Sync up starts the film."""
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex", seek_delay=0.2)
+        self.marek = self.room.person("Marek", seek_delay=0.2)
+        self.kuba = self.room.person("Kuba", seek_delay=0.2)
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.pump(until=lambda: all(p.c.session.clock_ready for p in (self.marek, self.kuba)))
+        self.pump(until=lambda: all(p.known for p in self.alex.c.peers.values()))
+
+    def waiting(self, person):
+        view = person.c.ready_view
+        return sorted(view["waiting"]) if view else None
+
+    def test_everyone_ready_starts_the_film_with_the_countdown(self):
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.kuba) == ["Kuba", "Marek"]))
+        self.assertTrue(any("Alex asks: everyone ready?" in a for a in self.marek.ui.activities()))
+        self.marek.c.i_am_ready()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.kuba) == ["Kuba"]))
+        self.assertTrue(self.marek.c.ready_view["me"])
+        self.kuba.c.session.send_room("rready", id=999)               # an answer to another check: ignored
+        self.pump(0.5)
+        self.assertEqual(self.waiting(self.alex), ["Kuba"])
+        self.assertFalse(any(p.player.playing for p in (self.alex, self.marek, self.kuba)))
+        self.kuba.c.i_am_ready()
+        self.assertTrue(self.pump(until=lambda: self.kuba.c.ready_view is None and self.alex.c.ready_view is None))
+        self.assertTrue(self.pump(until=lambda: all(p.player.playing for p in (self.alex, self.marek, self.kuba)),
+                                  timeout=15))
+        self.assertTrue(self.alex.ui.countdowns or self.marek.ui.countdowns)   # 3-2-1, like Sync up
+
+    def test_called_off_and_someone_leaving(self):
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.marek) is not None))
+        self.alex.c.ready_check()                                      # again: called off
+        self.assertTrue(self.pump(until=lambda: self.marek.c.ready_view is None and self.kuba.c.ready_view is None))
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.marek) == ["Kuba", "Marek"]))
+        self.marek.c.i_am_ready()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.marek) == ["Kuba"]))
+        self.kuba.c.leave()                                            # the one it waits for leaves: it starts
+        self.assertTrue(self.pump(until=lambda: self.alex.player.playing and self.marek.player.playing, timeout=15))
+
+    def test_nobody_answers(self):
+        import room_harness
+        constants = room_harness.Controller.tick.__globals__
+        patcher = mock.patch.dict(constants, {"READY_CHECK_TIMEOUT_S": 1.0})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: any("didn't answer" in a for a in self.alex.ui.activities()),
+                                  timeout=10))
+        self.assertTrue(self.pump(until=lambda: self.marek.c.ready_view is None))
+        self.assertFalse(self.alex.player.playing)
+
+
 class SecurityTests(RoomTestCase):
     def setUp(self):
         super().setUp()

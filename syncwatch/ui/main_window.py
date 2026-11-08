@@ -400,6 +400,7 @@ class MainWindow(QMainWindow):
         room.approveAllClicked.connect(self.controller.approve_all)
         room.denyClicked.connect(self._deny)
         self.sidebar.people.actionRequested.connect(self._person_action)
+        self.sidebar.people.readyClicked.connect(self._ready_clicked)
         friends = self.sidebar.friends
         friends.joinClicked.connect(self._friend_join)
         friends.acceptClicked.connect(lambda key: self.controller.friends.accept(self.controller.session, key))
@@ -1216,6 +1217,7 @@ class MainWindow(QMainWindow):
                     markers.append((int(estimate), self.ctx.theme.colors["marker"][:7], peer.name))
         self.sidebar.people.update_people(entries)
         self._refresh_share_banner()
+        self.sidebar.people.update_ready(*self._ready_texts())
         self.controls.seek.set_markers(markers)
         self._refresh_friends()
         rules = c.effective_rules()
@@ -1424,6 +1426,7 @@ class MainWindow(QMainWindow):
             "keys.fullscreen": self.toggle_fullscreen,
             "keys.sync_me": self.controller.sync_me,
             "keys.sync_up": self.controller.sync_up,
+            "keys.ready": self._ready_clicked,
             "keys.subs_toggle": lambda: self.settings.set("subs.enabled", not self.settings.get("subs.enabled")),
             "keys.subs_earlier": lambda: self._nudge_subs(-1),
             "keys.subs_later": lambda: self._nudge_subs(1),
@@ -1456,6 +1459,29 @@ class MainWindow(QMainWindow):
         escape = QShortcut(QKeySequence("Esc"), self)
         escape.activated.connect(self._escape)
         self._shortcuts.append(escape)
+
+    def _ready_clicked(self) -> None:
+        c = self.controller
+        if c.connected and c.is_host:
+            c.ready_check()
+        else:
+            c.i_am_ready()
+
+    def _ready_texts(self):
+        """(line, button) for the ready check in the People panel."""
+        c, view = self.controller, self.controller.ready_view
+        if not c.connected:
+            return "", ""
+        names = ", ".join("you" if name == c.name else name for name in (view or {}).get("waiting", []))
+        if c.is_host:
+            if view is not None:
+                return f"Ready check: waiting for {names}", "Call off the ready check"
+            return "", ("✋ Ready check" if any(not p.separate for p in c.peers.values()) else "")
+        if view is None:
+            return "", ""
+        if view.get("me"):
+            return f"You're ready ✓ · the host waits for {names}" if names else "You're ready ✓", ""
+        return f"The host asks: everyone ready? Waiting for {names}", "✓ I'm ready"
 
     def _nudge_subs(self, direction: int) -> None:
         step = int(self.settings.get("subs.delay_step_ms"))

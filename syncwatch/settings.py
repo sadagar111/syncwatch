@@ -353,6 +353,7 @@ SCHEMA: List[Setting] = [
     _s("keys.fullscreen", "keys", "F", "Fullscreen", KB, advanced=True),
     _s("keys.sync_me", "keys", "S", "Sync me (jump only myself)", KB, advanced=True),
     _s("keys.sync_up", "keys", "Ctrl+S", "Sync up (everyone)", KB, advanced=True),
+    _s("keys.ready", "keys", "R", "Ready check (host) / I'm ready", KB, advanced=True),
     _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB, advanced=True),
     _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),

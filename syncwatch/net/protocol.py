@@ -168,6 +168,10 @@ ROOM: Dict[str, Spec] = {
     "share": {"magnet": (str, True, 3000), "name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "addrs": (ListOf(ADDRESS, 8), True, None)},
     "share_peer": {"addrs": (ListOf(ADDRESS, 8), True, None)},
+    # the ready check (0.5): the host asks, sends who it still waits for after every answer; closed when done
+    "rcheck": {"id": (int, True, (1, 1 << 31)), "open": (bool, True, None),
+               "waiting": (ListOf({"n": (str, True, 32)}, MAX_PEOPLE), False, None)},
+    "rready": {"id": (int, True, (1, 1 << 31))},
     "qreq": {"op": (("add", "remove", "skip", "play", "move", "voteskip"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
