@@ -336,7 +336,9 @@ class QueuePanel(Panel):
         self.entries: List[QueueEntry] = []
         self.can_control = False
 
-    def update_queue(self, now_text: str, entries: List[QueueEntry], can_add: bool, can_control: bool) -> None:
+    def update_queue(self, now_text: str, entries: List[QueueEntry], can_add: bool, can_control: bool,
+                     vote: str = "") -> None:
+        """vote: for someone who may not skip, the vote-to-skip button's text ("" = no such button)."""
         self.can_control = can_control
         self.now.setText(now_text)
         self.now.setVisible(bool(now_text))
@@ -356,7 +358,10 @@ class QueuePanel(Panel):
         self.list.setVisible(bool(entries))
         self.empty.setVisible(not entries)
         self.add_button.setEnabled(can_add)
-        self.skip_button.setVisible(can_control and bool(entries))
+        self.skip_button.setVisible((can_control or bool(vote)) and bool(entries))
+        self.skip_button.setText("⏭ Skip" if can_control else vote)
+        self.skip_button.setToolTip("Play the next video now" if can_control else
+                                    "Vote to skip this video: when more than half of the room votes, it's skipped")
         total = len(entries)
         self.heading.setText(f"UP NEXT ({total})" if total else "UP NEXT")
 

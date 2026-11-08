@@ -122,6 +122,8 @@ is the real test.
 - [ ] The guest tries Skip: *Only the host can do that* (SW-610). Host: Settings → YouTube → *Who can skip*
       → Everyone: now the guest's Skip works
 - [ ] Queue a deleted/private video: it's skipped with a line in Activity, the next one plays
+- [ ] Vote to skip (branch `try/0.5-voteskip`, or `try/all`; three of you): a guest's Up next shows *Vote to skip*;
+      after one vote it shows (1/2), after the second guest's vote the next video starts for everyone
 - [ ] Paste a playlist link (a music album, or any `…&list=…` link): it asks, then the other videos appear in
       Up next with their titles; a playlist of more than 50 says how many didn't fit
 

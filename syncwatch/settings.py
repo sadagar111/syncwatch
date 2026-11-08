@@ -227,6 +227,9 @@ SCHEMA: List[Setting] = [
     _s("youtube.queue_control", "choice", "host", "Who can skip, remove and reorder", YT,
        "When you host a room. Everyone can always remove the videos they added themselves.",
        choices=[("host", "Only me (the host)"), ("everyone", "Everyone in the room")]),
+    _s("youtube.vote_skip", "bool", True, "Let the room vote to skip", YT,
+       "When you host and only you may skip: the others can vote to skip the video that plays. When more "
+       "than half of the room has voted (you count too), it's skipped."),
     _s("youtube.start_wait_s", "int", 20, "Wait for everyone to open the next video at most", YT,
        "When you host: the next video starts for everyone together, once all have it open (slow "
        "PCs are named after this long, and it starts anyway).", advanced=True, minimum=5, maximum=120,

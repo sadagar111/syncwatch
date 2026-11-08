@@ -529,6 +529,34 @@ class QueueTests(RoomTestCase):
         from syncwatch.sync.controller import QREQ_RATE
         self.assertEqual(len(self.alex.c.queue.items), QREQ_RATE)
 
+    def test_the_room_can_vote_to_skip(self):
+        """Only the host may skip (default), but the others can vote: more than half of the room skips."""
+        self.alex.c.queue_add(self.D, "Video D", 45_000)
+        self.alex.c.queue_next()
+        self.alex.c.queue_add(self.A, "Video A", 60_000)
+        self.assertEqual(self.alex.ui.played_items(), [self.D])
+        self.assertTrue(self.pump(until=lambda: self.marek.c.can_vote_skip() and self.kuba.c.can_vote_skip()))
+        self.marek.c.queue_vote_skip()
+        self.assertTrue(self.pump(until=lambda: self.kuba.c.queue.skip_votes() == (1, 2)))    # 1 of 2 needed (of 3)
+        self.assertTrue(any("Marek voted to skip Video D" in text for text in self.alex.ui.activities()))
+        self.marek.c.queue_vote_skip()                        # twice doesn't count twice
+        self.assertIn("You've already voted to skip this video", self.marek.ui.activities())
+        self.kuba.c.session.send_room("qreq", op="voteskip", key=12345)    # an old video's vote: ignored
+        self.pump(0.5)
+        self.assertEqual(self.alex.ui.played_items(), [self.D])
+        self.kuba.c.queue_vote_skip()
+        self.assertTrue(self.pump(until=lambda: self.alex.ui.played_items() == [self.D, self.A]))
+        self.assertTrue(any("The room voted to skip Video D (2 of 3)" in text for text in self.alex.ui.activities()))
+        self.assertTrue(self.pump(until=lambda: self.marek.c.queue.now is not None
+                                  and self.marek.c.queue.now.id == self.A and self.marek.c.queue.skip_votes() is None))
+        self.alex.settings.set("youtube.vote_skip", False)    # the host turns it off
+        self.assertTrue(self.pump(until=lambda: not self.marek.c.can_vote_skip()))
+        self.marek.c.queue_vote_skip()
+        self.assertIn("SW-610", self.marek.ui.problems())
+        self.marek.c.session.send_room("qreq", op="voteskip", key=self.marek.c.queue.now.key)   # a modified app
+        self.pump(0.5)
+        self.assertEqual(self.alex.c.queue.skip_votes(), None)
+
     def test_the_next_video_starts_together(self):
         for person in (self.alex, self.marek, self.kuba):
             person.c.set_film("Video C", 0, 60_000, yt=self.C)

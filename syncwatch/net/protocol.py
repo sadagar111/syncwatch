@@ -92,7 +92,10 @@ VOTE_CHOICE: Spec = {"k": (int, True, (1, 1 << 31)), "title": (str, True, 120), 
                      "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
                      "by": (str, False, 32), "voters": (ListOf(str, 64, 32), False, None),
                      "have": (ListOf(str, 64, 32), False, None)}
-QUEUE_RULES: Spec = {"add": (("everyone", "host"), True, None), "control": (("host", "everyone"), True, None)}
+QUEUE_RULES: Spec = {"add": (("everyone", "host"), True, None), "control": (("host", "everyone"), True, None),
+                     "vote": (bool, False, None)}           # vote to skip (since 0.5)
+SKIP_VOTES: Spec = {"k": (int, True, (1, 1 << 31)), "n": (int, True, (0, MAX_PEOPLE)),
+                    "need": (int, True, (1, MAX_PEOPLE + 1))}
 RULES: Spec = {"host_only": (bool, True, None), "cd_pp": (float, False, (0, 3600)),
                "cd_sync": (float, False, (0, 3600)),
                "jump": (("together", "ahead"), False, None)}   # since 0.4.1
@@ -155,7 +158,7 @@ ROOM: Dict[str, Spec] = {
     "sync_abort": {"id": (int, True, (0, 1 << 31))},
     # the YouTube queue (0.5): the host's app sends all of it after every change; members ask
     "queue": {"no": SEQ, "items": (ListOf(QUEUE_ITEM, 50), True, None), "now": (QUEUE_ITEM, False, None),
-              "rules": (QUEUE_RULES, True, None)},
+              "rules": (QUEUE_RULES, True, None), "skip": (SKIP_VOTES, False, None)},
     # sharing a film with the room (0.6): someone asks, the one who has it shares it as a private
     # torrent and says where to connect; addresses only ever travel inside the encrypted room
     "share_req": {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
@@ -163,7 +166,7 @@ ROOM: Dict[str, Spec] = {
     "share": {"magnet": (str, True, 3000), "name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "addrs": (ListOf(ADDRESS, 8), True, None)},
     "share_peer": {"addrs": (ListOf(ADDRESS, 8), True, None)},
-    "qreq": {"op": (("add", "remove", "skip", "play", "move"), True, None), "yt": (YOUTUBE_ID, False, None),
+    "qreq": {"op": (("add", "remove", "skip", "play", "move", "voteskip"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
     # the film vote (0.7): the host's app sends all of it after every change; members ask
