@@ -110,6 +110,8 @@ is the real test.
       until lips and words match (a toast shows the delay); it's kept after a restart
 - [ ] Next episode (branch `try/0.5-next-episode`, or `try/all`): open an episode of a show (S01E01…), jump
       near its end: the next one opens and plays by itself; N jumps to it right away
+- [ ] Night mode (branch `try/0.5-night-mode`, or `try/all`): an action film, Alt+N: explosions quieter, talking
+      easier to hear (a toast says on/off); kept after a restart
 
 ## Y2. Together (two PCs, or two windows with `--profile`)
 - [ ] Ready check (branch `try/0.5-ready-check`, or `try/all`): the host clicks *✋ Ready check* under People;

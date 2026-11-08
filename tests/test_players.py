@@ -200,6 +200,14 @@ class MpvPlayerTests(unittest.TestCase):
         self.assertTrue(spin(5, lambda: abs(float(self.player._read("audio-delay") or 0) + 0.225) < 0.001))
         self.player.set_audio_delay(99_999)          # kept within ±2 s
         self.assertTrue(spin(5, lambda: abs(float(self.player._read("audio-delay") or 0) - 2.0) < 0.001))
+    def test_night_mode(self):
+        self.load()
+        self.player.set_night_mode(True)
+        self.assertTrue(spin(5, lambda: "dynaudnorm" in str(self.player._read("af"))))
+        self.player.play()                                  # it still plays, with the filter
+        self.assertTrue(spin(5, lambda: self.player.position() > 300))
+        self.player.set_night_mode(False)
+        self.assertTrue(spin(5, lambda: not self.player._read("af")))
 
     def test_play_pause_and_position(self):
         self.load()

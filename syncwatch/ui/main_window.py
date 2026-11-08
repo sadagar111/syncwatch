@@ -339,6 +339,7 @@ class MainWindow(QMainWindow):
         self._place_video(self.player)
         self.player = players.start_or_fallback(self.player, self._place_video, self)
         self.player.set_audio_delay(int(self.settings.get("playback.audio_delay_ms")))
+        self.player.set_night_mode(bool(self.settings.get("playback.night_mode")))
 
         self.controls = ControlBar(theme.colors)
         left = QWidget()
@@ -426,6 +427,7 @@ class MainWindow(QMainWindow):
         self.settings.subscribe("sync.gap_refresh_s", lambda k, v: self._set_gap_rate())
         self.settings.subscribe("playback.hwdec", lambda k, v: self.player.set_hwdec(v))
         self.settings.subscribe("playback.audio_delay_ms", lambda k, v: self.player.set_audio_delay(int(v)))
+        self.settings.subscribe("playback.night_mode", lambda k, v: self.player.set_night_mode(bool(v)))
 
     def _apply_all_settings(self) -> None:
         self._apply_subtitle_style()
@@ -1474,6 +1476,7 @@ class MainWindow(QMainWindow):
             "keys.sync_up": self.controller.sync_up,
             "keys.ready": self._ready_clicked,
             "keys.next_episode": self.next_episode,
+            "keys.night_mode": self._toggle_night_mode,
             "keys.subs_toggle": lambda: self.settings.set("subs.enabled", not self.settings.get("subs.enabled")),
             "keys.subs_earlier": lambda: self._nudge_subs(-1),
             "keys.subs_later": lambda: self._nudge_subs(1),
@@ -1543,6 +1546,13 @@ class MainWindow(QMainWindow):
         self.settings.set("playback.audio_delay_ms", delay)
         self.overlay.toast(f"Sound delay {delay / 1000:+.3f} s" + ("  (earlier than the picture)" if delay < 0 else ""),
                            "info")
+    def _toggle_night_mode(self) -> None:
+        if self.player.engine != "mpv":
+            self.overlay.toast("Night mode needs mpv (Settings > Playback > Video player)", "info")
+            return
+        on = not self.settings.get("playback.night_mode")
+        self.settings.set("playback.night_mode", on)
+        self.overlay.toast("Night mode on: loud and quiet evened out" if on else "Night mode off", "info")
 
     def _escape(self) -> None:
         if self.overlay.help_visible:

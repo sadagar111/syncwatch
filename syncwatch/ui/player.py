@@ -107,6 +107,9 @@ class Player(QObject):
     def set_audio_delay(self, ms: int) -> None:
         """Qt's player can't move the sound against the picture (the setting says it's mpv only)."""
 
+    def set_night_mode(self, on: bool) -> None:
+        """Qt's player has no audio filters (the setting says it's mpv only)."""
+
     def shutdown(self) -> None:
         self.mp.stop()
 
