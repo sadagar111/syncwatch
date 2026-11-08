@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -703,6 +704,54 @@ class JumpTests(RoomTestCase):
             self.assertEqual(person.ui.countdowns, [], person.name)   # no 3-2-1 for a jump
         self.assertTrue(any("Alex jumped to 10:00" in a or "Alex jumped to 0:10:00" in a
                             for a in self.guests[0].ui.activities()), self.guests[0].ui.activities())
+
+    def test_a_friends_video_that_stops_to_load_is_waited_for(self):
+        """Guest 1's stream runs dry: everyone pauses until it can play (longer than the 5 s for slow
+        PCs), then all start together; not again right away."""
+        self.room_of(0.05, 0.05)
+        loading = self.guests[0]
+        loading.player.seek_delay = 7.0          # (its jump to where the host is takes 7 s to load)
+        loading.player.stall(True)
+        self.assertTrue(self.pump(until=lambda: not self.alex.player.playing, timeout=10))
+        self.assertTrue(self.pump(until=lambda: not any(g.player.playing for g in self.guests)))
+        self.assertIn("Waiting for Guest 1: the video is still loading there…",
+                      " ".join(self.guests[1].ui.activities()))
+        self.assertIn("Everyone waits until your video has loaded…", " ".join(loading.ui.activities()))
+        self.pump(5.5)                            # past "Wait for slow PCs at most" (5 s): still waiting
+        self.assertFalse(any(p.player.playing for p in self.everyone()))
+        self.assertTrue(self.pump(until=self.all_playing, timeout=10))
+        self.pump(0.5)
+        self.assertLess(self.spread(), 150)
+        loading.player.stall(True)                # again at once: not waited for within 20 s
+        self.pump(5)
+        self.assertTrue(self.alex.player.playing)
+
+    def test_a_connection_that_cant_keep_up_isnt_waited_for_forever(self):
+        import room_harness
+        # (the globals of the module the room's controllers run: another test may have imported a fresh copy)
+        constants = room_harness.Controller.tick.__globals__
+        patcher = mock.patch.dict(constants, {"STALL_AFTER_S": 0.3, "LOADING_WAIT_GAP_S": 0.2,
+                                              "HEARTBEAT_MEMBER_S": 0.3, "MY_STALL_MIN_S": 0.2})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.room_of(0.05)
+        loading = self.guests[0]
+        for _ in range(constants["LOADING_WAITS_MAX"]):
+            loading.player.stall(True)
+            self.assertTrue(self.pump(until=lambda: not self.alex.player.playing, timeout=15))
+            self.assertTrue(self.pump(until=self.all_playing, timeout=15))
+        loading.player.stall(True)
+        self.assertTrue(self.pump(until=lambda: any("keeps stopping to load" in a for a in self.alex.ui.activities()),
+                                  timeout=10))
+        self.pump(2)
+        self.assertTrue(self.alex.player.playing)
+
+    def test_not_waited_for_when_the_host_says_no(self):
+        self.room_of(0.05)
+        self.alex.settings.set("sync.wait_for_loading", False)
+        self.guests[0].player.stall(True)
+        self.pump(6)
+        self.assertTrue(self.alex.player.playing)
 
     def test_together_a_members_jump(self):
         self.room_of(0.05, 0.8)

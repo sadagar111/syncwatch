@@ -112,6 +112,9 @@ is the real test.
 - [ ] Play, pause, jumps, Sync up: same as with films
 - [ ] The guest clicks *Following the room* (→ *On my own*): a new video from the host doesn't open for them
 - [ ] The host switches to another video: everyone follows
+- [ ] Waiting for a loading video (branch `try/0.5-wait-loading`, or `try/all`): the guest limits their internet
+      (e.g. a phone hotspot, or a 4K video on slow Wi-Fi) until their video stops to load: after a few seconds
+      everyone pauses with *Waiting for …: the video is still loading there*, and all start together when it's back
 
 ## Y3. The queue (Up next)
 - [ ] Alone: ➕ Queue three videos while one plays. *Up next* shows them, titles appear after a moment

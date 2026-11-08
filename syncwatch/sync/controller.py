@@ -68,6 +68,12 @@ PLAY_ALIGN_MS = 300          # on play, jump first if further apart than this
 READY_TOLERANCE_MS = 500
 SAME_SPOT_MS = 40            # already there: no need to jump again
 JUMP_MEASURE_AFTER_S = 2.0   # how a jump while playing turned out is measured this long after it
+MY_STALL_MIN_S = 1.0         # my video stuck loading this long (not a blip): my heartbeat says so
+STALL_AFTER_S = 2.5          # a friend's video has stopped to load for this long: the room waits for it
+STALL_FRESH_S = 6.0          # (only reports newer than this count: someone who went quiet isn't waited for)
+LOADING_WAIT_GAP_S = 20.0    # not again sooner than this after the last such wait began
+LOADING_WAITS_MAX = 3        # if the same friend's video needs this many waits within
+LOADING_WAITS_WINDOW_S = 180.0   # this long, their connection can't keep up: not waited for any more
 JUMP_LEARN_RATE = 0.3        # how much one measured jump changes what this PC has learned
 MAX_JUMP_AHEAD_MS = 2000.0
 JUMP_ANSWER_WAIT_S = 3.0     # after my jump, I wait this long (plus "wait for slow PCs") for the host
@@ -97,6 +103,7 @@ class Peer:
     playing: bool = False
     separate: bool = False
     ready: bool = True
+    stalled: bool = False        # playing, but their video has stopped to load more (a slow stream)
     at: int = 0                  # the room clock (ms) when ``pos`` was measured; 0 = unknown
     received_at: float = 0.0     # my clock (s) when the report arrived
     known: bool = False          # at least one report received
@@ -184,6 +191,11 @@ class Controller(RoomListener):
         self._skip_votes: Dict[bytes, str] = {}    # the host: who voted to skip the video that plays now
         self._skip_key = 0                          # (its queue key)
         self._voted_key = 0                         # a member: the video I voted to skip
+        self._stalled_since: Dict[bytes, tuple] = {}           # (host) whose video is loading since when
+        self._loading_waits: Dict[bytes, Deque[float]] = {}    # (host) when the room waited for whom
+        self._loading_given_up: Set[bytes] = set()            # (host) connections that can't keep up
+        self._last_loading_wait = -1e9
+        self._my_stall_since: Optional[float] = None           # (member) my video stuck loading since
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
@@ -385,6 +397,9 @@ class Controller(RoomListener):
         self.votes.reset()
         self.chat.reset()
         self._skip_votes, self._skip_key, self._voted_key = {}, 0, 0
+        self._stalled_since.clear()
+        self._loading_waits.clear()
+        self._loading_given_up.clear()
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -547,6 +562,8 @@ class Controller(RoomListener):
                 self.ui.activity("The host didn't start everyone again after your jump, so your film plays on",
                                  "warn")
         self._advance_host_sync(now)
+        self._note_stall(now)
+        self._wait_for_loading(now)
         self._advance_client_sync(now)
         if self._play_at is not None and now >= self._play_at:
             self._play_at = None
@@ -770,6 +787,7 @@ class Controller(RoomListener):
         peer.at = body["at"]
         peer.received_at = self.clock()
         peer.ready = body.get("ready", True)
+        peer.stalled = body.get("stall", False)
         peer.known = True
         film = body.get("film")
         if film != peer.film:
@@ -1306,6 +1324,10 @@ class Controller(RoomListener):
         self._client_sync = {"id": body["id"], "pos": pos, "sent": False, "kind": kind}
         if body.get("next"):
             self.ui.activity("Next video: waiting until everyone has it open…", "friend")
+        elif body.get("wait"):
+            waiting = body["wait"]
+            self.ui.activity("Everyone waits until your video has loaded…" if waiting == self.name else
+                             f"Waiting for {waiting}: the video is still loading there…", "friend")
         elif kind == "jump":
             if not mine:
                 self.ui.activity(f"{who} jumped to {fmt_time(pos)}", "friend")
@@ -1488,6 +1510,8 @@ class Controller(RoomListener):
             self.session.send_room("state", **fields)
         else:
             fields["separate"] = not self.attached
+            if self._my_stall_since is not None and self.clock() - self._my_stall_since >= MY_STALL_MIN_S:
+                fields["stall"] = True
             self.session.send_room("status", **fields)
 
     def _send_profile(self) -> None:
@@ -1506,8 +1530,53 @@ class Controller(RoomListener):
                 data = None
         return data
 
+    def _note_stall(self, now: float) -> None:
+        """Since when my video has been stuck loading while playing (None: it isn't)."""
+        stalled = getattr(self.p, "is_stalled", None)
+        if stalled is not None and stalled():
+            if self._my_stall_since is None:
+                self._my_stall_since = now
+        else:
+            self._my_stall_since = None
+
+    def _wait_for_loading(self, now: float) -> None:
+        """The host: a friend following the room whose video has stopped to load (a slow connection, a
+        torrent that's still coming) for a few seconds: everyone pauses where I am and starts together
+        once all can play (like after a jump, but waiting longer). Not again right away, and not for
+        a connection that keeps needing it."""
+        if not (self.connected and self.is_host and self.settings.get("sync.wait_for_loading")) \
+                or self._host_sync is not None or not self.p.is_playing():
+            self._stalled_since.clear()
+            return
+        stalled = {p.id: p for p in self.peers.values()
+                   if p.stalled and p.playing and not p.separate and p.id not in self._loading_given_up
+                   and now - p.received_at < STALL_FRESH_S}
+        # since when, and the report that first said so: a later report must say so too
+        self._stalled_since = {pid: self._stalled_since.get(pid, (now, stalled[pid].received_at)) for pid in stalled}
+        due = [stalled[pid] for pid, (since, first) in self._stalled_since.items()
+               if now - since >= STALL_AFTER_S and stalled[pid].received_at > first]
+        if not due or now - self._last_loading_wait < LOADING_WAIT_GAP_S:
+            return
+        waited_for = []
+        for peer in due:
+            times = self._loading_waits.setdefault(peer.id, collections.deque(maxlen=LOADING_WAITS_MAX))
+            if len(times) == LOADING_WAITS_MAX and now - times[0] < LOADING_WAITS_WINDOW_S:
+                self._loading_given_up.add(peer.id)
+                self.ui.activity(f"{peer.name}'s video keeps stopping to load: the room doesn't wait for it "
+                                 "any more", "warn")
+                continue
+            times.append(now)
+            waited_for.append(peer.name)
+        if not waited_for:
+            return
+        self._last_loading_wait = now
+        self._stalled_since.clear()
+        names = ", ".join(waited_for)[:64]
+        self.ui.activity(f"Waiting for {names}: the video is still loading there…", "friend")
+        self._start_host_sync(by="", kind="jump", wait_for=names)
+
     def _start_host_sync(self, by: str, kind: str = "syncup", pos: Optional[float] = None,
-                         by_id: Optional[bytes] = None, next_video: bool = False) -> None:
+                         by_id: Optional[bytes] = None, next_video: bool = False, wait_for: str = "") -> None:
         """Everyone pauses at ``pos``, says when their film shows it, then all start together
         (Sync up: after a countdown; a jump: right away)."""
         if self._host_sync is not None:
@@ -1525,6 +1594,8 @@ class Controller(RoomListener):
         timeout = float(self.settings.get("sync.ready_timeout_s"))
         if next_video:   # everyone first has to find and open the new video
             timeout = max(timeout, float(self.settings.get("youtube.start_wait_s")))
+        if wait_for:     # someone's video has to load first
+            timeout = max(timeout, float(self.settings.get("sync.loading_wait_s")))
         waiting = {p.id for p in self.peers.values() if not p.separate}  # those on their own aren't waited for
         self._host_sync = _HostSync(self._sync_counter, pos, self.clock() + timeout, by, kind, by_id, waiting)
         fields = {"id": self._sync_counter, "pos": pos}
@@ -1532,6 +1603,8 @@ class Controller(RoomListener):
             fields["jump"] = True
         if next_video:
             fields["next"] = True
+        if wait_for:
+            fields["wait"] = wait_for
         if by:
             fields["by"] = by
         if by_id is not None:

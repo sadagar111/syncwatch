@@ -131,6 +131,11 @@ class Player(QObject):
             QMediaPlayer.MediaStatus.NoMedia, QMediaPlayer.MediaStatus.InvalidMedia,
             QMediaPlayer.MediaStatus.LoadingMedia)
 
+    def is_stalled(self) -> bool:
+        """Playing, but Qt waits for more of the video (a slow stream)."""
+        return self.is_playing() and self.mp.mediaStatus() in (QMediaPlayer.MediaStatus.BufferingMedia,
+                                                               QMediaPlayer.MediaStatus.StalledMedia)
+
     def is_ready(self) -> bool:
         if not self.has_media():
             return False

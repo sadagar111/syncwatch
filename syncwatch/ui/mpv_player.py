@@ -324,6 +324,10 @@ class MpvPlayer(QObject):
     def is_ready(self) -> bool:
         return self.has_media() and not self._waiting
 
+    def is_stalled(self) -> bool:
+        """Playing, but mpv isn't moving forward: it waits for more of the video (a slow stream)."""
+        return self.is_playing() and self._idle and not self._waiting
+
     def play(self) -> None:
         if not self.has_media():
             return
