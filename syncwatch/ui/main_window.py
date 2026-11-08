@@ -266,6 +266,7 @@ class MainWindow(QMainWindow):
         self.video: Optional[QWidget] = None
         self._place_video(self.player)
         self.player = players.start_or_fallback(self.player, self._place_video, self)
+        self.player.set_audio_delay(int(self.settings.get("playback.audio_delay_ms")))
 
         self.controls = ControlBar(theme.colors)
         left = QWidget()
@@ -348,6 +349,7 @@ class MainWindow(QMainWindow):
         self.settings.subscribe("profile.name", lambda k, v: self._profile_changed())
         self.settings.subscribe("sync.gap_refresh_s", lambda k, v: self._set_gap_rate())
         self.settings.subscribe("playback.hwdec", lambda k, v: self.player.set_hwdec(v))
+        self.settings.subscribe("playback.audio_delay_ms", lambda k, v: self.player.set_audio_delay(int(v)))
 
     def _apply_all_settings(self) -> None:
         self._apply_subtitle_style()
@@ -1111,6 +1113,8 @@ class MainWindow(QMainWindow):
             "keys.subs_toggle": lambda: self.settings.set("subs.enabled", not self.settings.get("subs.enabled")),
             "keys.subs_earlier": lambda: self._nudge_subs(-1),
             "keys.subs_later": lambda: self._nudge_subs(1),
+            "keys.audio_earlier": lambda: self._nudge_sound(-1),
+            "keys.audio_later": lambda: self._nudge_sound(1),
             "keys.sidebar": self.toggle_sidebar,
             "keys.open": self.open_library,
             "keys.youtube": self.ask_youtube_link,
@@ -1137,6 +1141,15 @@ class MainWindow(QMainWindow):
         step = int(self.settings.get("subs.delay_step_ms"))
         self.subtitles.nudge(direction * step)
         self.overlay.toast(f"Subtitle delay {self.subtitles.delay_ms / 1000:+.2f} s", "info")
+
+    def _nudge_sound(self, direction: int) -> None:
+        if self.player.engine != "mpv":
+            self.overlay.toast("Moving the sound needs mpv (Settings > Playback > Video player)", "info")
+            return
+        delay = max(-2000, min(2000, int(self.settings.get("playback.audio_delay_ms")) + 25 * direction))
+        self.settings.set("playback.audio_delay_ms", delay)
+        self.overlay.toast(f"Sound delay {delay / 1000:+.3f} s" + ("  (earlier than the picture)" if delay < 0 else ""),
+                           "info")
 
     def _escape(self) -> None:
         if self.overlay.help_visible:

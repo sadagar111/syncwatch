@@ -14,6 +14,9 @@ is the real test.
 - [ ] Jump around, pause, play: as smooth as with a film? Settings → YouTube → *Quality* 720p / 4K: does it change?
 - [ ] An age-restricted video: **SW-603** with a plain explanation. A private or deleted one: **SW-602**
 
+- [ ] Sound delay (branch `try/0.5-sound-delay`, or `try/all`): with Bluetooth headphones, Alt+Z a few times
+      until lips and words match (a toast shows the delay); it's kept after a restart
+
 ## Y2. Together (two PCs, or two windows with `--profile`)
 - [ ] Host a room, the other joins. The host pastes a link: the other opens the same video by
       itself and lines up (People list: *in sync*)

@@ -76,6 +76,10 @@ SCHEMA: List[Setting] = [
        advanced=True, minimum=1, maximum=25, suffix=" %"),
     _s("playback.wheel_volume", "bool", True, "Mouse wheel over the video changes volume", PB,
        advanced=True),
+    _s("playback.audio_delay_ms", "int", 0, "Sound delay", PB,
+       "Moves the sound against the picture, on this PC only. Bluetooth headphones play the sound late: "
+       "try -150 to -250 ms (below zero = sound earlier). Keys: Alt+Z earlier, Alt+X later. Only with mpv "
+       "(the default video player).", minimum=-2000, maximum=2000, step=25, suffix=" ms"),
     _s("playback.audio_languages", "str", "sk,cs,en", "Preferred audio languages", PB,
        "Language codes separated by commas, best first, e.g. sk,cs,en. Used to pick the audio "
        "track automatically when a film has several.", advanced=True, max_len=60),
@@ -279,6 +283,8 @@ SCHEMA: List[Setting] = [
     _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB, advanced=True),
     _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),
+    _s("keys.audio_earlier", "keys", "Alt+Z", "Sound earlier", KB, advanced=True),
+    _s("keys.audio_later", "keys", "Alt+X", "Sound later", KB, advanced=True),
     _s("keys.sidebar", "keys", "Tab", "Show/hide sidebar", KB, advanced=True),
     _s("keys.open", "keys", "Ctrl+O", "Library (your films)", KB, advanced=True),
     _s("keys.youtube", "keys", "Ctrl+L", "Open a YouTube link", KB, advanced=True),
