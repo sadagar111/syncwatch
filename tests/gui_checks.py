@@ -13,6 +13,7 @@ import bisect
 import json
 import os
 import subprocess
+import time
 import sys
 import tempfile
 from pathlib import Path
@@ -115,18 +116,26 @@ def check_room(out: Path) -> bool:
     for stale in [code_file, *out.glob("room-ready-*")]:
         stale.unlink(missing_ok=True)
     procs = {}
+    # Each app's output goes to a file, not a pipe: a pipe nobody reads yet (they were read one after
+    # the other) fills up (4 KB on Windows) and then blocks that app until the one before it has ended.
+    printed = {role: out / f"room-{role}.out" for role in roles}
+    files = {role: printed[role].open("w", encoding="utf-8") for role in roles}
     try:
         for role in roles:
             procs[role] = subprocess.Popen(
                 [sys.executable, str(HERE / "room_gui_harness.py"), role, str(FILM), str(logs[role]), relay.url,
-                 str(code_file), str(out / "ui")], env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace")
-        outputs = {role: proc.communicate(timeout=180)[0] for role, proc in procs.items()}
+                 str(code_file), str(out / "ui")], env=ENV, stdout=files[role], stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + 180
+        for proc in procs.values():
+            proc.wait(timeout=max(1.0, deadline - time.monotonic()))
     finally:
         for proc in procs.values():
             if proc.poll() is None:
                 proc.kill()
+        for file in files.values():
+            file.close()
         relay.stop()
+    outputs = {role: printed[role].read_text(encoding="utf-8", errors="replace") for role in roles}
     (out / "room.log").write_text("\n----\n".join(f"[{r}]\n{o}" for r, o in outputs.items()), encoding="utf-8")
     if not all(p.exists() for p in logs.values()):
         print("room: a log is missing (an app didn't run its script)")
