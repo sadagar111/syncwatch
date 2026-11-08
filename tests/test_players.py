@@ -194,6 +194,15 @@ class MpvPlayerTests(unittest.TestCase):
         self.assertEqual([label for _, label, _ in self.player.audio_tracks()], ["Track 1 · AAC mono"])
         self.assertEqual(self.player.active_audio_track(), 0)
 
+    def test_night_mode(self):
+        self.load()
+        self.player.set_night_mode(True)
+        self.assertTrue(spin(5, lambda: "dynaudnorm" in str(self.player._read("af"))))
+        self.player.play()                                  # it still plays, with the filter
+        self.assertTrue(spin(5, lambda: self.player.position() > 300))
+        self.player.set_night_mode(False)
+        self.assertTrue(spin(5, lambda: not self.player._read("af")))
+
     def test_play_pause_and_position(self):
         self.load()
         self.player.play()

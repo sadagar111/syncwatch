@@ -291,6 +291,13 @@ class MpvPlayer(QObject):
         self.hwdec = value
         self._async("set", "hwdec", value)
 
+    # FFmpeg's Dynamic Audio Normalizer: follows the loudness over ~2 s (15 frames of 150 ms) and evens it out
+    NIGHT_FILTER = "lavfi=[dynaudnorm=f=150:g=15:p=0.95]"
+
+    def set_night_mode(self, on: bool) -> None:
+        """Loud parts quieter, quiet parts louder (an audio filter), or the sound as it is."""
+        self._async("set", "af", self.NIGHT_FILTER if on else "")
+
     def shutdown(self) -> None:
         """Stop mpv (when the window closes). Safe to call twice."""
         core, self.core = self.core, None

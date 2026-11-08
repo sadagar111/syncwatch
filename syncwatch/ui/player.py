@@ -104,6 +104,9 @@ class Player(QObject):
     def set_hwdec(self, value: str) -> None:
         """Qt decides about hardware decoding itself."""
 
+    def set_night_mode(self, on: bool) -> None:
+        """Qt's player has no audio filters (the setting says it's mpv only)."""
+
     def shutdown(self) -> None:
         self.mp.stop()
 

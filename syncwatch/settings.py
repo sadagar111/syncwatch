@@ -76,6 +76,9 @@ SCHEMA: List[Setting] = [
        advanced=True, minimum=1, maximum=25, suffix=" %"),
     _s("playback.wheel_volume", "bool", True, "Mouse wheel over the video changes volume", PB,
        advanced=True),
+    _s("playback.night_mode", "bool", False, "Night mode: even out loud and quiet", PB,
+       "Loud scenes get quieter and quiet talking louder, so you don't keep reaching for the volume (late at "
+       "night, or with others asleep). On this PC only. Key: Alt+N. Only with mpv (the default video player)."),
     _s("playback.audio_languages", "str", "sk,cs,en", "Preferred audio languages", PB,
        "Language codes separated by commas, best first, e.g. sk,cs,en. Used to pick the audio "
        "track automatically when a film has several.", advanced=True, max_len=60),
@@ -276,6 +279,7 @@ SCHEMA: List[Setting] = [
     _s("keys.fullscreen", "keys", "F", "Fullscreen", KB, advanced=True),
     _s("keys.sync_me", "keys", "S", "Sync me (jump only myself)", KB, advanced=True),
     _s("keys.sync_up", "keys", "Ctrl+S", "Sync up (everyone)", KB, advanced=True),
+    _s("keys.night_mode", "keys", "Alt+N", "Night mode on/off", KB, advanced=True),
     _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB, advanced=True),
     _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),
