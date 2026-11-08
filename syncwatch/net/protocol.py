@@ -144,6 +144,10 @@ ROOM: Dict[str, Spec] = {
     # the YouTube queue (0.5): the host's app sends all of it after every change; members ask
     "queue": {"no": SEQ, "items": (ListOf(QUEUE_ITEM, 50), True, None), "now": (QUEUE_ITEM, False, None),
               "rules": (QUEUE_RULES, True, None)},
+    # the ready check (0.5): the host asks, sends who it still waits for after every answer; closed when done
+    "rcheck": {"id": (int, True, (1, 1 << 31)), "open": (bool, True, None),
+               "waiting": (ListOf({"n": (str, True, 32)}, MAX_PEOPLE), False, None)},
+    "rready": {"id": (int, True, (1, 1 << 31))},
     "qreq": {"op": (("add", "remove", "skip", "play", "move"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},

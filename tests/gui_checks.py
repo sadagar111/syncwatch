@@ -180,6 +180,31 @@ def check_room(out: Path) -> bool:
     passed = after_sync_me is not None and abs(after_sync_me) < 400
     ok &= passed
     print(f"room: after Marek's Sync me: {after_sync_me:.0f} ms {'OK' if passed else 'FAIL'}")
+    ok &= _ready_check(out)
+    return ok
+
+
+def _ready_check(out: Path) -> bool:
+    """(0.5) The host's ready check through the People panel's buttons: both members asked, it starts
+    for everyone (Sync up's countdown) once both clicked I'm ready."""
+    seen = {}
+    for role in ("host", "marek", "kuba"):
+        for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():
+            if ':ready:seen"' in line:
+                entry = json.loads(line)
+                seen.setdefault(role, []).append(entry)
+    asked = [entries[0] for role, entries in seen.items() if role != "host" and entries]
+    after = [entries[-1] for entries in seen.values() if entries]
+    ok = True
+    for name, passed in (
+            ("both members are asked, with a button", len(asked) == 2 and all(
+                e["button"] == "✓ I'm ready" and "everyone ready?" in e["line"] for e in asked)),
+            ("once both said so, everyone plays again", len(after) == 3 and all(
+                e["playing"] and e["line"] == "" for e in after))):
+        ok &= passed
+        print(f"room: ready check: {name} {'OK' if passed else 'FAIL'}")
+    if not ok:
+        print(f"room: what they saw: {seen}")
     return ok
 
 

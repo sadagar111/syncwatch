@@ -61,11 +61,16 @@ def shot(name):
 # Timed for the 40-second film in tests/media.
 SCRIPTS = {
     "host": [(1, "host"), (8, "play"), (12, "shot_playing"), (14, "pause"), (17, "seek5"), (19, "play2"),
-             (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (52, "end")],
+             (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (51, "seek5"), (52, "ready_ask"), (61, "ready_seen"),
+             (62, "end")],
     "marek": [(3, "join"), (12, "shot_playing"), (24, "drift"), (29, "report_gap"), (30, "syncme"),
-              (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (52, "end")],
-    "kuba": [(3.5, "join"), (12, "shot_playing"), (52, "end")],
+              (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (54, "ready_seen"),
+              (54.5, "ready_yes"), (61, "ready_seen"), (62, "end")],
+    "kuba": [(3.5, "join"), (12, "shot_playing"), (54, "ready_seen"), (55.5, "ready_yes"), (61, "ready_seen"),
+             (62, "end")],
 }
+# (after the measured stretches: the host's ready check, answered with the members' own buttons; first back
+# to 0:05, so the film doesn't end before they play again)
 
 
 def wait_for_the_others() -> None:
@@ -149,6 +154,14 @@ def scripted_exec(self):
                 c.pause()
             elif action == "friend_play":
                 c.play()
+            elif action in ("ready_ask", "ready_yes"):
+                w.sidebar.people.ready_button.click()
+            elif action == "ready_seen":
+                people = w.sidebar.people
+                out.write(json.dumps({"event": f"{ROLE}:ready:seen", "t": time.time(),
+                                      "line": "" if people.ready_line.isHidden() else people.ready_line.text(),
+                                      "button": "" if people.ready_button.isHidden() else people.ready_button.text(),
+                                      "playing": bool(w.player.is_playing())}) + "\n")
             elif action.startswith("shot_"):
                 QApplication.processEvents()
                 shot(action[5:])

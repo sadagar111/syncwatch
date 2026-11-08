@@ -15,6 +15,8 @@ is the real test.
 - [ ] An age-restricted video: **SW-603** with a plain explanation. A private or deleted one: **SW-602**
 
 ## Y2. Together (two PCs, or two windows with `--profile`)
+- [ ] Ready check (branch `try/0.5-ready-check`, or `try/all`): the host clicks *✋ Ready check* under People;
+      the guest sees *✓ I'm ready* and who's still missing; after the click the film starts with 3-2-1 for both
 - [ ] Host a room, the other joins. The host pastes a link: the other opens the same video by
       itself and lines up (People list: *in sync*)
 - [ ] Play, pause, jumps, Sync up: same as with films

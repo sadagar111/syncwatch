@@ -255,6 +255,7 @@ class PersonRow(QWidget):
 
 class PeoplePanel(Panel):
     actionRequested = Signal(str, bytes)     # (action id, who)
+    readyClicked = Signal()                  # the ready check button (host: ask/call off; member: I'm ready)
 
     def __init__(self, parent=None):
         super().__init__("People", parent)
@@ -263,6 +264,27 @@ class PeoplePanel(Panel):
         self.body.addLayout(self.rows_box)
         self.rows: Dict[bytes, PersonRow] = {}
         self._order: Tuple = ()
+        self.ready_line = QLabel()
+        self.ready_line.setWordWrap(True)
+        self.ready_line.setTextFormat(Qt.TextFormat.PlainText)
+        self.ready_line.hide()
+        self.body.addWidget(self.ready_line)
+        self.ready_button = _small_button("✋ Ready check", "Ask everyone whether they're ready: when all are, the "
+                                          "film starts for everyone with a countdown")
+        self.ready_button.clicked.connect(self.readyClicked)
+        self.ready_button.hide()
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.ready_button)
+        buttons.addStretch(1)
+        self.body.addLayout(buttons)
+
+    def update_ready(self, text: str, button: str) -> None:
+        """The ready check: a line about it ("" = none) and the button's text ("" = no button)."""
+        self.ready_line.setText(text)
+        self.ready_line.setVisible(bool(text))
+        if button:
+            self.ready_button.setText(button)
+        self.ready_button.setVisible(bool(button))
 
     def update_people(self, entries: List[PersonEntry]) -> None:
         order = tuple(e.key for e in entries)

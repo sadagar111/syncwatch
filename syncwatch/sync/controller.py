@@ -121,6 +121,16 @@ class Rules:
 
 
 @dataclass
+class _ReadyCheck:
+    id: int
+    waiting: Set[bytes]          # who hasn't said they're ready yet
+    deadline: float
+
+
+READY_CHECK_TIMEOUT_S = 180.0    # a ready check nobody finishes closes after this long
+
+
+@dataclass
 class _HostSync:
     id: int
     pos: int
@@ -176,6 +186,9 @@ class Controller(RoomListener):
         self.queue = Queue()
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
+        self._ready_check: Optional[_ReadyCheck] = None    # (host) the ready check that's open
+        self._ready_ids = 0
+        self.ready_view: Optional[Dict] = None             # what the People panel shows: {id, waiting, me}
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
@@ -365,6 +378,7 @@ class Controller(RoomListener):
         self._warned_films.clear()
         self.rules = Rules()
         self._qreq_times.clear()
+        self._ready_check, self.ready_view = None, None
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -431,6 +445,101 @@ class Controller(RoomListener):
         debounce = int(self.settings.get("sync.seek_debounce_ms")) / 1000.0
         self._pending_seek_at = self.clock() + debounce
         self._send_jump_by = None
+
+    # ---------------------------------------------------------------- the ready check (0.5)
+    def ready_check(self) -> None:
+        """The host: ask everyone following whether they're ready. When all are, Sync up starts the film
+        for everyone with the countdown. Again while it's open: cancel it."""
+        if not (self.connected and self.is_host):
+            return
+        if self._ready_check is not None:
+            self._close_ready_check("You called off the ready check", start=False)
+            return
+        waiting = {p.id for p in self.peers.values() if not p.separate}
+        if not waiting:
+            self.ui.activity("Nobody follows the room yet: nobody to ask", "info")
+            return
+        self._ready_ids += 1
+        self._ready_check = _ReadyCheck(self._ready_ids, waiting, self.clock() + READY_CHECK_TIMEOUT_S)
+        self.ui.activity("You asked: everyone ready?", "you")
+        self._send_ready_check()
+
+    def i_am_ready(self) -> None:
+        """A member answers the host's ready check."""
+        view = self.ready_view
+        if self.is_host or view is None or view.get("me"):
+            return
+        view["me"] = True
+        self.session.send_room("rready", id=view["id"])
+        self.ui.activity("You said you're ready", "you")
+        self.ui.changed()
+
+    def _send_ready_check(self) -> None:
+        check = self._ready_check
+        names = [self.peers[pid].name for pid in check.waiting if pid in self.peers]
+        self.ready_view = {"id": check.id, "waiting": names, "me": True}
+        self.session.send_room("rcheck", id=check.id, open=True, waiting=[{"n": name[:32]} for name in names])
+        self.ui.changed()
+
+    def _close_ready_check(self, text: str, start: bool) -> None:
+        check, self._ready_check, self.ready_view = self._ready_check, None, None
+        if check is not None:
+            self.session.send_room("rcheck", id=check.id, open=False)
+        self.ui.activity(text, "friend" if start else "info")
+        if start:
+            self._start_host_sync(by="")      # everyone lines up on me, 3-2-1, all play
+        self.ui.changed()
+
+    def _watch_ready_check(self, now: float) -> None:
+        check = self._ready_check
+        if check is None:
+            return
+        if not (self.connected and self.is_host):
+            self._ready_check = self.ready_view = None
+            return
+        gone = {pid for pid in check.waiting if pid not in self.peers or self.peers[pid].separate}
+        if gone:           # left the room, or watches on their own now: not waited for
+            check.waiting -= gone
+            if not check.waiting:
+                self._close_ready_check("Everyone's ready: here we go", start=True)
+                return
+            self._send_ready_check()
+        if now > check.deadline:
+            names = ", ".join(self.peers[pid].name for pid in check.waiting if pid in self.peers)
+            self._close_ready_check(f"The ready check is over: {names or 'someone'} didn't answer", start=False)
+
+    def _on_rready(self, peer: Peer, body: Dict) -> None:
+        check = self._ready_check
+        if not self.is_host or check is None or body["id"] != check.id or peer.id not in check.waiting:
+            return
+        check.waiting.discard(peer.id)
+        self.ui.activity(f"{peer.name} is ready", "friend")
+        if not check.waiting:
+            self._close_ready_check("Everyone's ready: here we go", start=True)
+        else:
+            self._send_ready_check()
+
+    def _on_rcheck(self, peer: Peer, body: Dict) -> None:
+        if self.is_host or not peer.is_host:
+            return
+        view = self.ready_view
+        if not self.attached:           # watching on my own: the host doesn't wait for me
+            if view is not None:
+                self.ready_view = None
+                self.ui.changed()
+            return
+        if not body["open"]:
+            if view is not None and view["id"] == body["id"]:
+                self.ready_view = None
+                self.ui.changed()
+            return
+        new = view is None or view["id"] != body["id"]
+        waiting = [entry["n"] for entry in body.get("waiting", [])]
+        self.ready_view = {"id": body["id"], "waiting": waiting,
+                           "me": (not new and view["me"]) or self.name not in waiting}
+        if new:
+            self.ui.activity(f"{peer.name} asks: everyone ready? (✓ I'm ready in People, or R)", "friend")
+        self.ui.changed()
 
     def sync_up(self) -> None:
         if not self.connected or not self.peers:
@@ -527,6 +636,7 @@ class Controller(RoomListener):
                 self.ui.activity("The host didn't start everyone again after your jump, so your film plays on",
                                  "warn")
         self._advance_host_sync(now)
+        self._watch_ready_check(now)
         self._advance_client_sync(now)
         if self._play_at is not None and now >= self._play_at:
             self._play_at = None
