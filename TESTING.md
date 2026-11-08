@@ -14,6 +14,9 @@ is the real test.
 - [ ] Jump around, pause, play: as smooth as with a film? Settings → YouTube → *Quality* 720p / 4K: does it change?
 - [ ] An age-restricted video: **SW-603** with a plain explanation. A private or deleted one: **SW-602**
 
+- [ ] Skip intro (branch `try/0.5-skip-intro`, or `try/all`): an anime or show episode whose file has chapters
+      (mpv shows them as marks; often "Opening"): during the opening, *Skip intro ⏭* and a hint; click or I
+
 ## Y2. Together (two PCs, or two windows with `--profile`)
 - [ ] Host a room, the other joins. The host pastes a link: the other opens the same video by
       itself and lines up (People list: *in sync*)

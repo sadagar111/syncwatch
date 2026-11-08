@@ -17,8 +17,10 @@ LAYOUTS = {1: "mono", 2: "stereo", 6: "5.1"}
 
 
 def make_film(path: Path, seconds: float = 3.0, audio_codec: Optional[str] = "aac", channels: int = 2,
-              size=(160, 90), rate: int = 24, sample_rate: int = 48000, language: str = "eng") -> str:
-    """Write the film; returns the video codec used."""
+              size=(160, 90), rate: int = 24, sample_rate: int = 48000, language: str = "eng",
+              chapters=()) -> str:
+    """Write the film; returns the video codec used. chapters: (start s, end s, title), like a show's
+    "Intro" and "Episode"."""
     import av
     try:
         av.codec.Codec("libx264", "w")
@@ -35,6 +37,11 @@ def make_film(path: Path, seconds: float = 3.0, audio_codec: Optional[str] = "aa
         if audio_codec:
             audio = out.add_stream(audio_codec, rate=sample_rate, layout=LAYOUTS[channels])
             audio.metadata["language"] = language
+        if chapters:
+            import fractions
+            out.set_chapters([{"id": number, "start": int(start * 1000), "end": int(end * 1000),
+                               "time_base": fractions.Fraction(1, 1000), "metadata": {"title": title}}
+                              for number, (start, end, title) in enumerate(chapters, 1)])
         frames = int(seconds * rate)
         for index in range(frames):
             frame = av.VideoFrame(width, height, "yuv420p")

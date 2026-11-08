@@ -226,6 +226,10 @@ class Player(QObject):
                 log.info("sound now plays on %s", default.description())
 
     # ------------------------------------------------------------ tracks
+    def chapters(self) -> List[Tuple[int, str]]:
+        """Qt's player doesn't say which chapters a film has."""
+        return []
+
     def audio_tracks(self) -> List[Tuple[int, str, str]]:
         """[(index, label, language code)]"""
         tracks = []

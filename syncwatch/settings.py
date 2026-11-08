@@ -76,6 +76,10 @@ SCHEMA: List[Setting] = [
        advanced=True, minimum=1, maximum=25, suffix=" %"),
     _s("playback.wheel_volume", "bool", True, "Mouse wheel over the video changes volume", PB,
        advanced=True),
+    _s("playback.skip_intros", "choice", "button", "Intros, openings and recaps", PB,
+       "When a film's chapter is called Intro, Opening, OP or Recap (many shows' files have them): show Skip "
+       "intro (and a hint: press I), skip it by itself (when you host or watch alone), or nothing. Only with mpv.",
+       choices=[("button", "Show Skip intro"), ("auto", "Skip them by themselves"), ("off", "Nothing")]),
     _s("playback.audio_languages", "str", "sk,cs,en", "Preferred audio languages", PB,
        "Language codes separated by commas, best first, e.g. sk,cs,en. Used to pick the audio "
        "track automatically when a film has several.", advanced=True, max_len=60),
@@ -276,6 +280,7 @@ SCHEMA: List[Setting] = [
     _s("keys.fullscreen", "keys", "F", "Fullscreen", KB, advanced=True),
     _s("keys.sync_me", "keys", "S", "Sync me (jump only myself)", KB, advanced=True),
     _s("keys.sync_up", "keys", "Ctrl+S", "Sync up (everyone)", KB, advanced=True),
+    _s("keys.skip_intro", "keys", "I", "Skip the intro", KB, advanced=True),
     _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB, advanced=True),
     _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
     _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),
