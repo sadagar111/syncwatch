@@ -222,6 +222,10 @@ SCHEMA: List[Setting] = [
        "play the one video. Only the host (or someone alone) adds a whole playlist.",
        choices=[("ask", "Ask (recommended)"), ("all", "Add all its videos to Up next"),
                 ("video", "Only the one video")]),
+    _s("youtube.auto_captions", "bool", False, "Also turn on YouTube's automatic subtitles", YT,
+       "When a video has no subtitles from its uploader in your languages (Subtitles settings), turn on "
+       "YouTube's automatically made ones (speech recognition, or translated from it): handy, but often "
+       "wrong. They're always in the Subtitles menu.", advanced=True),
     _s("youtube.codecs", "choice", "compatible", "Video formats", YT,
        "Most compatible avoids AV1, which older PCs can't decode smoothly. Any also allows AV1: a bit "
        "sharper for the same internet speed, but needs a newer PC or graphics card.", advanced=True,

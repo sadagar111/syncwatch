@@ -411,6 +411,12 @@ CATALOG: Dict[str, Problem] = {
         "Only the host can do that with the queue",
         "The host's settings decide who may add videos, skip, remove and reorder.",
         ["Ask the host, or watch on your own (click \"Following the room\")."], INFO),
+    "SW-611": Problem(
+        "Couldn't get the subtitles from YouTube",
+        "The video plays, but YouTube didn't give SyncWatch the subtitles you picked.",
+        ["Try again in a minute: YouTube sometimes says no once.",
+         "Pick another language, or load a subtitle file (Subtitles > Load a subtitle file…)."],
+        WARNING, popup=False),
 
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(

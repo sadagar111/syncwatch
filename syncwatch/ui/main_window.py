@@ -215,6 +215,8 @@ class MainWindow(QMainWindow):
         self.library.attach(self.idle.library)
         self.youtube = YouTube(self.settings, self.ctx.profile.cache_dir, lambda: self.player.engine, self)
         self.youtube.opened.connect(self.play_stream)
+        self.subtitles.fetch_youtube = self.youtube.fetch_captions
+        self.subtitles.failed.connect(self.problem)
         self.youtube.busy.connect(self._youtube_busy)
         self.youtube.quietFailure.connect(self._youtube_follow_failed)
         self.youtube.playlistListed.connect(self._playlist_listed)
@@ -690,7 +692,7 @@ class MainWindow(QMainWindow):
         self._start_at_ms = max(0, int(start_s)) * 1000
         self.setWindowTitle(f"SyncWatch: {stream.label}")
         self.stack.setCurrentWidget(self.video)
-        self.subtitles.film_closed()
+        self.subtitles.stream_opened(self._film_key, stream.id, stream.captions)
         self.controller.set_film(stream.label, 0, stream.duration_ms, yt=stream.id)
 
     def _youtube_busy(self, text: str) -> None:
@@ -986,7 +988,8 @@ class MainWindow(QMainWindow):
             action.triggered.connect(lambda _=False, s=source.id: subs.select(s))
             group.addAction(action)
         if not subs.sources:
-            none = menu.addAction("No subtitles found next to the film")
+            none = menu.addAction("YouTube has no subtitles for this video" if subs.video_id
+                                  else "No subtitles found next to the film")
             none.setEnabled(False)
         menu.addSeparator()
         load = menu.addAction("Load a subtitle file…")

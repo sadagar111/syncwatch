@@ -3,31 +3,44 @@
     python -E -P resolve.py <video ID> [--height 1080] [--codecs compatible|any] [--combined]
                             [--js deno=<path>] [--cache <folder>] [--timeout 30]
     python -E -P resolve.py <playlist ID> --playlist [--cache <folder>] [--timeout 30]
+    python -E -P resolve.py <video ID> --captions <language> [--auto] --out <file.vtt>
+                            [--js deno=<path>] [--cache <folder>] [--timeout 30]
 
 Prints exactly one line of JSON (ASCII only) and exits:
     {"ok": {"id", "title", "channel", "duration", "live", "thumbnail", "height",
             "video": {"url", "codec", "height", "fps"}, "audio": {"url", "codec"} or null,
-            "headers": {...}, "expires": <unix time>}}            exit code 0
+            "headers": {...}, "expires": <unix time>,
+            "captions": [{"lang", "name", "auto"}, ...]}}             exit code 0
     {"ok": {"playlist", "title", "entries": [{"id", "title", "duration"}, ...]}}   (--playlist: at
             most MAX_PLAYLIST videos, only their IDs and titles; nothing is looked up per video)
+    {"ok": {"id", "lang", "auto", "file", "bytes"}}   (--captions: the subtitles were written to
+            "file": --out, ending in .vtt, or .srt if YouTube had no WebVTT)
     {"error": "<kind>", "message": "<yt-dlp's text>"}                exit code 1
 
 Kinds: unavailable, private, signin (age-restricted / members only), bot (YouTube wants proof
 this isn't a bot), live, network, outdated (YouTube changed something: yt-dlp needs an update),
-missing (yt-dlp isn't installed), other.
+missing (yt-dlp isn't installed), nosubs (--captions: no subtitles in that language), other.
+
+"captions" lists the video's subtitles by language code: the uploader's ("auto": false) and
+YouTube's automatic ones ("auto": true; speech recognition, "<code>-orig" for the spoken language,
+the rest translated by YouTube). Only codes and names; the text is fetched with --captions when
+someone picks one, by yt-dlp itself (YouTube's subtitle addresses need what yt-dlp knows).
 
 Why a separate process: yt-dlp is big, changes every few weeks and runs YouTube's own JavaScript
 (through Deno). If it hangs or crashes, SyncWatch just stops the process.
 
 Safety: SyncWatch only ever passes an 11-character video ID (checked again here), and builds the
-youtube.com address itself. No cookies, no downloads, no remote code: yt-dlp may not fetch extra
-components (remote_components stays empty), Deno runs without file or network access.
+youtube.com address itself. No cookies, no remote code: yt-dlp may not fetch extra components
+(remote_components stays empty), Deno runs without file or network access. Nothing is downloaded
+except, with --captions, the one subtitle text asked for (a few hundred KB at most), into a fresh
+folder next to --out; only a .vtt or .srt file comes out of it.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -42,6 +55,10 @@ _GONE = ("[private video]", "[deleted video]", "[unavailable video]")
 DEFAULT_LIFETIME_S = 5 * 3600     # YouTube's stream addresses usually work about 6 hours
 MAX_TITLE = 200
 HEADERS_KEPT = ("User-Agent", "Accept", "Accept-Language", "Referer", "Origin")
+CAPTION_LANG_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,3}$")   # en, pt-BR, zh-Hans, en-orig
+MAX_CAPTIONS = 300               # YouTube translates its automatic captions into ~150 languages
+MAX_CAPTION_BYTES = 3_000_000
+CAPTION_SUFFIXES = (".vtt", ".srt")
 
 # What yt-dlp's message says -> kind (first match wins; matched lower-case, so order matters:
 # "Requested format is not available" means YouTube changed something, not a removed video)
@@ -135,7 +152,26 @@ def summarize(info: Dict[str, Any], now: Optional[float] = None) -> Dict[str, An
         "audio": {"url": audio["url"], "codec": str(audio.get("acodec") or "")} if audio else None,
         "headers": _headers(video),
         "expires": _expires(urls, now),
+        "captions": caption_list(info),
     }
+
+
+def caption_list(info: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The video's subtitles: {"lang", "name", "auto"} per language, the uploader's first.
+    Non-languages (YouTube's "live_chat" replay) are left out by the pattern."""
+    found: List[Dict[str, Any]] = []
+    for auto, key in ((False, "subtitles"), (True, "automatic_captions")):
+        table = info.get(key)
+        if not isinstance(table, dict):
+            continue
+        for lang, formats in table.items():
+            if not (isinstance(lang, str) and CAPTION_LANG_RE.match(lang) and isinstance(formats, list) and formats):
+                continue
+            name = next((f["name"] for f in formats if isinstance(f, dict) and isinstance(f.get("name"), str)), "")
+            found.append({"lang": lang, "name": "".join(ch for ch in name if ch.isprintable())[:80], "auto": auto})
+            if len(found) >= MAX_CAPTIONS:
+                return found
+    return found
 
 
 def ydl_options(height: int, codecs: str, combined: bool, js: Optional[str], cache: Optional[str],
@@ -158,6 +194,43 @@ def resolve(target: str, options: Dict[str, Any]) -> Dict[str, Any]:
     with yt_dlp.YoutubeDL(options) as ydl:
         info = ydl.extract_info(target, download=False)
         return summarize(ydl.sanitize_info(info))
+
+
+def caption_options(lang: str, auto: bool, folder: Path, js: Optional[str], cache: Optional[str],
+                    timeout: float) -> Dict[str, Any]:
+    """yt-dlp's options for writing one language's subtitles into ``folder`` and nothing else."""
+    options: Dict[str, Any] = {
+        "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
+        "skip_download": True, "socket_timeout": timeout, "color": {"stdout": "never", "stderr": "never"},
+        "remote_components": [], "cachedir": cache or False,
+        "ignore_no_formats_error": True,                   # only the subtitles matter here
+        "writesubtitles": not auto, "writeautomaticsub": auto,
+        "subtitleslangs": [re.escape(lang)],               # (yt-dlp reads these as patterns)
+        "subtitlesformat": "vtt/srt",
+        "outtmpl": {"default": str(folder / "caption.%(ext)s")},
+    }
+    if js:
+        name, _, path = js.partition("=")
+        options["js_runtimes"] = {name.strip().lower(): ({"path": path} if path else {})}
+    return options
+
+
+def fetch_captions(target: str, options: Dict[str, Any], folder: Path, out: Path) -> Dict[str, Any]:
+    """Let yt-dlp write the subtitles into ``folder``, then move them to ``out``. LookupError if the
+    video has none in that language; ValueError if what came is too big."""
+    import yt_dlp  # noqa: PLC0415 - only in this process
+    with yt_dlp.YoutubeDL(options) as ydl:
+        ydl.extract_info(target, download=True)        # skip_download: only the subtitles are written
+    written = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in CAPTION_SUFFIXES)
+    if not written:
+        raise LookupError("no subtitles in that language")
+    source = written[0]
+    size = source.stat().st_size
+    if not 0 < size <= MAX_CAPTION_BYTES:
+        raise ValueError(f"the subtitles are {size} bytes")
+    final = out.with_suffix(source.suffix.lower())
+    os.replace(source, final)
+    return {"file": str(final), "bytes": size}
 
 
 def summarize_playlist(info: Dict[str, Any], limit: int = MAX_PLAYLIST) -> Dict[str, Any]:
@@ -213,6 +286,9 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--js", default="", help="JavaScript runtime, e.g. deno=C:\\...\\deno.exe")
     parser.add_argument("--cache", default="")
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--captions", default="", help="fetch the subtitles in this language instead")
+    parser.add_argument("--auto", action="store_true", help="with --captions: YouTube's automatic ones")
+    parser.add_argument("--out", default="", help="with --captions: where they go (a .vtt file)")
     parser.add_argument("--test-url", default="", help=argparse.SUPPRESS)   # tests only: a local address
     args = parser.parse_args(argv)
     if args.playlist:
@@ -221,6 +297,8 @@ def main(argv: List[str]) -> int:
         say({"error": "other", "message": "not a YouTube video ID"})
         return 2
     target = args.test_url or f"https://www.youtube.com/watch?v={args.video}"
+    if args.captions or args.out:
+        return _main_captions(args, target)
     try:
         import yt_dlp  # noqa: F401, PLC0415
     except ImportError as exc:
@@ -237,6 +315,35 @@ def main(argv: List[str]) -> int:
         say({"error": classify(text), "message": text[:2000]})
         return 1
     result["id"] = args.video
+    say({"ok": result})
+    return 0
+
+
+def _main_captions(args, target: str) -> int:
+    if not CAPTION_LANG_RE.match(args.captions) or not args.out.lower().endswith(".vtt"):
+        say({"error": "other", "message": "--captions needs a language code and --out a .vtt file"})
+        return 2
+    try:
+        import yt_dlp  # noqa: F401, PLC0415
+    except ImportError as exc:
+        say({"error": "missing", "message": f"yt-dlp isn't installed ({exc})"})
+        return 1
+    out = Path(args.out)
+    folder = out.parent / f".captions-{os.getpid()}"
+    options = caption_options(args.captions, args.auto, folder, args.js or None, args.cache or None, args.timeout)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        result = fetch_captions(target, options, folder, out)
+    except LookupError as exc:
+        say({"error": "nosubs", "message": f"{exc} ({args.captions}{', automatic' if args.auto else ''})"})
+        return 1
+    except Exception as exc:  # noqa: BLE001 - everything yt-dlp can throw ends up here
+        text = f"{type(exc).__name__}: {exc}"
+        say({"error": classify(text), "message": text[:2000]})
+        return 1
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    result.update(id=args.video, lang=args.captions, auto=args.auto)
     say({"ok": result})
     return 0
 

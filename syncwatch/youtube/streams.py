@@ -7,6 +7,7 @@ front (``%LEN%``), so no character in it can break the EDL.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,10 +15,46 @@ from typing import Any, Dict, List, Optional, Tuple
 from .links import LIST_RE, is_video_id
 
 EXPIRY_MARGIN_S = 15 * 60        # ask YouTube again when an address has less than this left
+CAPTION_LANG_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,3}$")
+MAX_CAPTIONS = 300
 
 
 class BadStream(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class Caption:
+    """Subtitles YouTube has for a video (fetched only when someone picks them)."""
+    lang: str          # YouTube's code: "en", "pt-BR"; "en-orig" = the spoken language (automatic)
+    name: str          # YouTube's name for it ("English (United Kingdom)"), may be empty
+    auto: bool         # made by YouTube (speech recognition, or translated from it), not the uploader
+
+    @property
+    def original(self) -> bool:
+        return self.auto and self.lang.endswith("-orig")
+
+    @property
+    def language(self) -> str:
+        return self.lang[:-5] if self.lang.endswith("-orig") else self.lang
+
+
+def captions_from_json(raw: Any) -> Tuple[Caption, ...]:
+    """resolve.py's "captions" list -> Captions; odd entries are left out (another process wrote it)."""
+    if not isinstance(raw, list):
+        return ()
+    found, seen = [], set()
+    for item in raw[:MAX_CAPTIONS]:
+        if not isinstance(item, dict):
+            continue
+        lang, name, auto = item.get("lang"), item.get("name"), item.get("auto")
+        if not (isinstance(lang, str) and CAPTION_LANG_RE.match(lang) and isinstance(auto, bool)) \
+                or (lang, auto) in seen:
+            continue
+        seen.add((lang, auto))
+        name = "".join(ch for ch in name if ch.isprintable())[:80] if isinstance(name, str) else ""
+        found.append(Caption(lang, name, auto))
+    return tuple(found)
 
 
 @dataclass
@@ -35,6 +72,7 @@ class Stream:
     fps: float = 0.0
     headers: Dict[str, str] = field(default_factory=dict)
     expires: float = 0.0
+    captions: Tuple[Caption, ...] = ()
 
     @property
     def duration_ms(self) -> int:
@@ -119,7 +157,8 @@ def from_json(raw: Dict[str, Any]) -> Stream:
         duration_s=max(0.0, duration), thumbnail=_text(raw, "thumbnail", 2000),
         video_url=_url(video.get("url")), audio_url=_url(audio["url"]) if audio.get("url") else "",
         video_codec=_text(video, "codec", 64), audio_codec=_text(audio, "codec", 64) if audio else "",
-        height=max(0, height), fps=max(0.0, fps), headers=clean_headers, expires=expires)
+        height=max(0, height), fps=max(0.0, fps), headers=clean_headers, expires=expires,
+        captions=captions_from_json(raw.get("captions")))
 
 
 MAX_PLAYLIST = 50
