@@ -176,6 +176,7 @@ class Controller(RoomListener):
         self.queue = Queue()
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
+        self._film_followed = ""                  # the host's film I last told the window about
         self._queue_sent_at = -1e9
         self._queue_dirty = False
         self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
@@ -365,6 +366,7 @@ class Controller(RoomListener):
         self._warned_films.clear()
         self.rules = Rules()
         self._qreq_times.clear()
+        self._film_followed = ""
         if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
             self._queue_from_host = False
             self.queue.reset()
@@ -987,13 +989,25 @@ class Controller(RoomListener):
         self.ui_queue_changed()
 
     def _follow_host_video(self, film: Dict) -> None:
-        """The host plays a YouTube video I don't have open: the window opens it (if I follow the room)."""
+        """The host plays a YouTube video I don't have open: the window opens it (if I follow the room).
+        Another film: the window may open my copy of the episode the host went on to."""
         video = film.get("yt")
+        if not video and not self.is_host and self.attached:
+            self._follow_host_film(film)
         if not video or self.is_host or not self.attached or (self.film or {}).get("yt") == video:
             return
         follow = getattr(self.ui, "follow_youtube", None)
         if follow is not None:
             follow(video, film.get("name", ""))
+
+    def _follow_host_film(self, film: Dict) -> None:
+        name = film.get("name") or ""
+        if not name or film.get("magnet") or name == (self.film or {}).get("name") or name == self._film_followed:
+            return
+        self._film_followed = name          # (once per film of the host's)
+        follow = getattr(self.ui, "follow_film", None)
+        if follow is not None:
+            follow(name, int(film.get("size") or 0))
 
     def _on_req(self, peer: Peer, body: Dict) -> None:
         if not self.is_host:

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, Q
 
 from .. import errors, log as log_module, paths
 from ..filmstate import film_key
+from ..library import episodes
 from ..settings import RESTART_KEYS, SCHEMA
 from ..sync.controller import Controller, fmt_time
 from .controls import ControlBar
@@ -195,6 +196,7 @@ class MainWindow(QMainWindow):
         self._start_at_ms = 0          # a YouTube link's &t=: jump there once the video is open
         self._follow_align = False     # the video was opened because the host plays it: line up after
         self._queue_autostart = False  # the next video of the queue: start everyone together once it's open
+        self._episode_autostart = False  # the next episode: the same, once it's open
         self._following_id = ""        # the host's video I'm opening (its problems only go to the activity feed)
         self._last_resume_save = 0.0
         self._refresh_wanted = True
@@ -665,11 +667,52 @@ class MainWindow(QMainWindow):
             self._queue_autostart = False
 
     def _media_ended(self) -> None:
-        """A video ended: the next one in the queue starts (host or alone, if Play the next is on)."""
-        if getattr(self.player, "stream", None) is None or not self.settings.get("youtube.autoplay"):
+        """A video ended: the next one in the queue starts (host or alone, if Play the next is on).
+        An episode of a show: the next episode (Settings > Playback)."""
+        if getattr(self.player, "stream", None) is None:
+            ended = self.player.path
+            if ended is not None and self.settings.get("playback.next_episode") \
+                    and (self.controller.is_host or not self.controller.connected) and episodes.next_after(ended):
+                self.overlay.toast("Next episode in 3 s (N: now)", "info")
+                QTimer.singleShot(3000, lambda: self.player.path == ended and self.next_episode())
+            return
+        if not self.settings.get("youtube.autoplay"):
             return
         if self.controller.decides_queue and self.controller.queue.items:
             self.controller.queue_next()
+
+    # ---------------------------------------------------------------- episodes
+    def next_episode(self) -> None:
+        """Key N, or an episode's end: the show's next episode (host or alone); everyone starts it together."""
+        current = self.player.path if getattr(self.player, "stream", None) is None else None
+        following = self.controller.connected and not self.controller.is_host and self.controller.attached
+        if following:
+            self.overlay.toast("In a room, the host goes on to the next episode", "info")
+            return
+        path = episodes.next_after(current) if current is not None else None
+        if path is None:
+            self.overlay.toast("No next episode next to this one", "info")
+            return
+        episode = episodes.info(path.name)
+        self.activity(f"Next episode: {episode.label if episode else path.name}", "you")
+        self._episode_autostart = True
+        self.open_film(path)
+
+    def follow_film(self, name: str, size: int) -> None:
+        """The controller: the host opened another film. If it's another episode of the show I'm
+        watching and I have it next to mine, mine opens and lines up (Settings > Watching together)."""
+        current = self.player.path if getattr(self.player, "stream", None) is None else None
+        wanted, mine = episodes.info(name), (episodes.info(current.name) if current is not None else None)
+        if not self.settings.get("sync.follow_episodes") or wanted is None or mine is None \
+                or not wanted.same_show(mine) or wanted == mine:
+            return
+        path = episodes.find(wanted, current)
+        if path is None:
+            self.activity(f"The host went on to {wanted.label}, but it isn't next to your {mine.label}", "warn")
+            return
+        self.activity(f"The host went on to {wanted.label}: opening yours ({path.name})", "friend")
+        self._follow_align = True
+        self.open_film(path)
 
     def follow_youtube(self, video_id: str, title: str = "") -> None:
         """The controller: the host plays a YouTube video I don't have open."""
@@ -772,6 +815,9 @@ class MainWindow(QMainWindow):
             self.controller.set_film(path.name, path.stat().st_size if path.exists() else 0, duration)
             self.controller.queue_playing_elsewhere()
             self.activity(f"Opened {path.name} ({fmt_time(duration)})", "you")
+            if self._episode_autostart:
+                self._episode_autostart = False
+                self.controller.start_together()      # (alone: it just plays)
         self._refresh_soon()
 
     def _apply_audio_preference(self) -> None:
@@ -1108,6 +1154,7 @@ class MainWindow(QMainWindow):
             "keys.fullscreen": self.toggle_fullscreen,
             "keys.sync_me": self.controller.sync_me,
             "keys.sync_up": self.controller.sync_up,
+            "keys.next_episode": self.next_episode,
             "keys.subs_toggle": lambda: self.settings.set("subs.enabled", not self.settings.get("subs.enabled")),
             "keys.subs_earlier": lambda: self._nudge_subs(-1),
             "keys.subs_later": lambda: self._nudge_subs(1),

@@ -177,6 +177,20 @@ def run_script():
     CHECKS["removed from the library"] = not manual.exists()
     CHECKS["library list shows the films"] = lib.dialog.panel.tree.topLevelItemCount() == len(list(library_dir.glob("*.mkv")))
     print("library now:", sorted(p.name for p in library_dir.iterdir()))
+    lib.dialog.close()
+
+    # 5. A show (0.5 next episode): the end of S01E02 opens the next episode, which is in the next
+    # season's folder, and it plays by itself
+    show = data_dir / "Shows" / "Test Show"
+    second, third = show / "Season 1" / "Test.Show.S01E02.mkv", show / "Season 2" / "Test.Show.S02E01.mkv"
+    for episode in (second, show / "Season 1" / "Test.Show.S01E01.mkv", third):
+        episode.parent.mkdir(parents=True, exist_ok=True)
+        make_film(episode, seconds=3)
+    window.open_film(second)
+    spin(15, lambda: window.player.path == second and window.player.is_ready())
+    window.controller.toggle()
+    CHECKS["the next episode opens at the end"] = spin(25, lambda: window.player.path == third)
+    CHECKS["and plays by itself"] = spin(15, lambda: window.player.path == third and window.player.is_playing())
 
 
 def scripted_exec(self):

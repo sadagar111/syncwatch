@@ -14,7 +14,12 @@ is the real test.
 - [ ] Jump around, pause, play: as smooth as with a film? Settings → YouTube → *Quality* 720p / 4K: does it change?
 - [ ] An age-restricted video: **SW-603** with a plain explanation. A private or deleted one: **SW-602**
 
+- [ ] Next episode (branch `try/0.5-next-episode`, or `try/all`): open an episode of a show (S01E01…), jump
+      near its end: the next one opens and plays by itself; N jumps to it right away
+
 ## Y2. Together (two PCs, or two windows with `--profile`)
+- [ ] Next episode together: both have the show's episodes (any file names). The host goes on to the next
+      episode (N or at the end): the guest's copy of it opens and both start it together
 - [ ] Host a room, the other joins. The host pastes a link: the other opens the same video by
       itself and lines up (People list: *in sync*)
 - [ ] Play, pause, jumps, Sync up: same as with films

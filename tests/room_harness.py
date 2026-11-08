@@ -115,6 +115,12 @@ class RecorderUI:
     def followed(self):
         return [e[1] for e in self.events if e[0] == "follow"]
 
+    def follow_film(self, name, size):
+        self._add(("follow_film", name, size))
+
+    def films_followed(self):
+        return [e[1:] for e in self.events if e[0] == "follow_film"]
+
     def queue_changed(self):
         self._add(("queue", None))
 
