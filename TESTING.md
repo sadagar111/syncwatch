@@ -1,19 +1,25 @@
-# Trying the week's work: branch `try/all` (everything together)
+# Testing 0.5.0: branch `try/0.5-release`
 
-Everything from 2–8 November in one branch: YouTube (0.5), torrents (0.6), ideas and the film vote (0.7),
-chat and reactions (0.8), seek-bar pictures (0.9), plus the Windows crash fix. Each part also has its own
-branch, so whatever you keep can be put together again without the rest.
+Everything from the week, as you kept it (all of it): YouTube (Up next, playlists, YouTube's subtitles, vote to
+skip), torrents, ideas and the film vote, chat and reactions, seek-bar pictures, Sunday's extras (ready check,
+next episode, skip intro, night mode, sound delay, waiting for a loading video, pausing when a connection
+drops) and the Windows crash fix. The checklists below say which branch each part was built on; all of
+them are in this one.
 
-1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch try/all`, then start `SyncWatch.bat` as usual
-   (it checks for the new parts: yt-dlp, Deno, libtorrent). Your profile and films stay as they are; to try
-   it without touching your own settings, start it with `--profile test`.
+1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch try/0.5-release`, then start `SyncWatch.bat`
+   as usual (it checks for the new parts: yt-dlp, Deno, libtorrent). Your profile and films stay as they are;
+   to try it without touching your own settings, start it with `--profile test`.
 2. **One thing to set:** a free TMDB key for the Ideas window (D1 below). Everything else works out of the box.
-3. **Alone (about 20 minutes):** Y1 (YouTube, a playlist), T1 (a torrent; a public-domain film from
-   archive.org is a good one), D1 (Ideas), P1 (seek-bar pictures).
-4. **With a friend** (two PCs, or two windows on one PC with `--profile`): Y2–Y3 (YouTube together, the
-   queue), C1 (chat, reactions), D2 (film vote), T2 (*Get it from …*; best between two homes).
+3. **Alone (about 30 minutes):** Y1 and Y4 (YouTube, a playlist, subtitles), T1 (a torrent; a public-domain film
+   from archive.org is a good one), D1 (Ideas), P1 (seek-bar pictures), and Sunday's: next episode, skip intro,
+   night mode, sound delay.
+4. **With a friend** (two PCs, or two windows on one PC with `--profile`): Y2–Y3 (YouTube together, the queue,
+   vote to skip), C1 (chat, reactions), D2 (film vote), T2 (*Get it from …*; best between two homes), the ready
+   check, waiting for a loading video, pausing when a connection drops.
 5. **When something breaks:** the Activity panel says what happened; the log folder is in Settings >
    Diagnostics. Tell me in the chat which step and what you saw.
+6. **When it's good:** tell me, and I open the pull request for 0.5.0. You merge it and run
+   `tools\release.bat publish` (or `publish --test` first, for friends who get test versions).
 
 ---
 
