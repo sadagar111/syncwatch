@@ -1,6 +1,6 @@
 """Temporary, only on branch try/diag-utp (never merged): why does the helper sometimes never connect to a
-seeder on this PC? Runs the throttled download (as test_a_jump_is_fetched_first has it) 12 times and the
-unthrottled one 6 times, with libtorrent's connection alerts from both sides. Prints DIAG lines; for a trial
+seeder on this PC? Runs the throttled download (as test_a_jump_is_fetched_first has it) 40 times and the
+unthrottled one 5 times, with libtorrent's connection alerts from both sides. Prints DIAG lines; for a trial
 that never gets ready it prints everything both sides saw."""
 import os
 import shutil
@@ -72,8 +72,8 @@ class ConnectDiagnosis(unittest.TestCase):
 
     def test_connecting(self):
         results = []
-        for number in range(18):
-            kbps = 1500 if number % 3 != 2 else 0         # 12 throttled, 6 not
+        for number in range(45):
+            kbps = 1500 if number % 9 != 8 else 0         # 40 throttled, 5 not
             result = self.trial(kbps)
             results.append(f"{'throttled' if kbps else 'full-speed'} {number + 1}: {result}")
             print(f"DIAG {results[-1]}", flush=True)
