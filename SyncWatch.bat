@@ -42,9 +42,9 @@ rem ---- 2. Python version -----------------------------------------------------
 
 rem ---- 3. Install the libraries, only if something is missing --------------------------------
 rem (mpv is only looked for here, not loaded: its DLL comes in step 3b.)
-%PY% -c "import PySide6.QtMultimedia, cryptography, av, importlib.util as u; assert u.find_spec('mpv')" >nul 2>&1
+%PY% -c "import PySide6.QtMultimedia, cryptography, av, yt_dlp, yt_dlp_ejs, deno, libtorrent, importlib.util as u; assert u.find_spec('mpv')" >nul 2>&1
 if errorlevel 1 (
-  echo Installing the libraries SyncWatch needs ^(PySide6, cryptography, mpv, PyAV^). This happens only once...
+  echo Installing the libraries SyncWatch needs ^(PySide6, cryptography, mpv, PyAV, yt-dlp, Deno, libtorrent^). This happens only once...
   %PY% -m pip install --disable-pip-version-check -r requirements.txt
   if errorlevel 1 goto install_failed
 )

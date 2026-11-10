@@ -46,13 +46,21 @@ class Hex:
 
 
 @dataclass(frozen=True)
+class Pattern:
+    """Text that must match ``regex`` completely (e.g. a YouTube video ID). ``example``: a valid one."""
+    regex: str
+    example: str = ""
+
+
+@dataclass(frozen=True)
 class ListOf:
     item: Any
     max_items: int
+    item_limit: Any = None     # for a list of plain values: each one's limit (as in the tables)
 
 
 # field name -> (kind, required, limit)
-#   kind: str/int/float/bool, a tuple of allowed values, a nested spec (dict), B64, Hex, ListOf
+#   kind: str/int/float/bool, a tuple of allowed values, a nested spec (dict), B64, Hex, Pattern, ListOf
 #   limit: max length for str, (min, max) for numbers
 Spec = Dict[str, Tuple[Any, bool, Any]]
 
@@ -68,8 +76,26 @@ NONCE = (B64(16), True, None)
 SEQ = (int, True, (0, MAX_CLOCK))
 CLOCK = (int, True, (0, MAX_CLOCK))
 POS = (int, True, (0, MAX_POSITION_MS))
+YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}", "dQw4w9WgXcQ")
+# "ip:port" or "[ipv6]:port" where someone in the room can be reached (checked again before use)
+ADDRESS = Pattern(r"(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]{2,45}\]):\d{1,5}", "192.0.2.10:6881")
+TMDB_IMAGE = Pattern(r"/[A-Za-z0-9_-]{1,80}\.(jpg|jpeg|png|webp)", "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg")
+REACTIONS = ("😂", "😮", "😍", "😱", "😢", "👏", "🔥", "🍿")   # the only emoji a reaction can be (0.5)
+CHAT_TEXT = 300                                                  # characters in one chat message
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
-              "dur": (int, False, (0, MAX_POSITION_MS))}
+              "dur": (int, False, (0, MAX_POSITION_MS)),
+              "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
+              "magnet": (str, False, 3000)}      # since 0.5: streamed from this torrent (checked again on use)
+QUEUE_ITEM: Spec = {"k": (int, True, (1, 1 << 31)), "yt": (YOUTUBE_ID, True, None), "title": (str, True, 120),
+                    "dur": (int, False, (0, MAX_POSITION_MS)), "by": (str, False, 32)}
+VOTE_CHOICE: Spec = {"k": (int, True, (1, 1 << 31)), "title": (str, True, 120), "year": (int, False, (0, 2200)),
+                     "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
+                     "by": (str, False, 32), "voters": (ListOf(str, 64, 32), False, None),
+                     "have": (ListOf(str, 64, 32), False, None)}
+QUEUE_RULES: Spec = {"add": (("everyone", "host"), True, None), "control": (("host", "everyone"), True, None),
+                     "vote": (bool, False, None)}           # vote to skip (since 0.5)
+SKIP_VOTES: Spec = {"k": (int, True, (1, 1 << 31)), "n": (int, True, (0, MAX_PEOPLE)),
+                    "need": (int, True, (1, MAX_PEOPLE + 1))}
 RULES: Spec = {"host_only": (bool, True, None), "cd_pp": (float, False, (0, 3600)),
                "cd_sync": (float, False, (0, 3600)),
                "jump": (("together", "ahead"), False, None)}   # since 0.4.1
@@ -116,7 +142,8 @@ ROOM: Dict[str, Spec] = {
     "state": {"pos": POS, "playing": (bool, True, None), "at": CLOCK, "ready": (bool, False, None),
               "film": (FILM, False, None), "rules": (RULES, True, None)},
     "status": {"pos": POS, "playing": (bool, True, None), "at": CLOCK, "separate": (bool, False, None),
-               "ready": (bool, False, None), "film": (FILM, False, None)},
+               "ready": (bool, False, None), "film": (FILM, False, None),
+               "stall": (bool, False, None)},   # true: my video stopped to load more (since 0.5)
     "req": {"action": (("play", "pause", "seek", "syncup"), True, None),
             "pos": (int, False, (0, MAX_POSITION_MS))},
     "cmd": {"action": (("play", "pause", "seek"), True, None), "pos": POS, "playing": (bool, True, None),
@@ -125,10 +152,39 @@ ROOM: Dict[str, Spec] = {
                "reason": (("cooldown", "host_only", "busy"), True, None), "wait": (float, False, (0, 3600))},
     "sync_prepare": {"id": (int, True, (0, 1 << 31)), "pos": POS, "by": (str, False, 32),
                      "by_id": (B64(8), False, None),
-                     "jump": (bool, False, None)},   # true: after a jump (0.4.1); missing: Sync up
+                     "jump": (bool, False, None),    # true: after a jump (0.4.1); missing: Sync up
+                     "next": (bool, False, None),    # true: the next video of the queue starts (0.5)
+                     "wait": (str, False, 64)},      # who's video is loading: everyone waits for them (0.5)
     "sync_ready": {"id": (int, True, (0, 1 << 31))},
     "sync_go": {"id": (int, True, (0, 1 << 31)), "start": CLOCK},
     "sync_abort": {"id": (int, True, (0, 1 << 31))},
+    # the YouTube queue (0.5): the host's app sends all of it after every change; members ask
+    "queue": {"no": SEQ, "items": (ListOf(QUEUE_ITEM, 50), True, None), "now": (QUEUE_ITEM, False, None),
+              "rules": (QUEUE_RULES, True, None), "skip": (SKIP_VOTES, False, None)},
+    # sharing a film with the room (0.5): someone asks, the one who has it shares it as a private
+    # torrent and says where to connect; addresses only ever travel inside the encrypted room
+    "share_req": {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
+                  "addrs": (ListOf(ADDRESS, 8), False, None)},
+    "share": {"magnet": (str, True, 3000), "name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
+              "addrs": (ListOf(ADDRESS, 8), True, None)},
+    "share_peer": {"addrs": (ListOf(ADDRESS, 8), True, None)},
+    # the ready check (0.5): the host asks, sends who it still waits for after every answer; closed when done
+    "rcheck": {"id": (int, True, (1, 1 << 31)), "open": (bool, True, None),
+               "waiting": (ListOf({"n": (str, True, 32)}, MAX_PEOPLE), False, None)},
+    "rready": {"id": (int, True, (1, 1 << 31))},
+    "qreq": {"op": (("add", "remove", "skip", "play", "move", "voteskip"), True, None), "yt": (YOUTUBE_ID, False, None),
+             "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
+             "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
+    # the film vote (0.5): the host's app sends all of it after every change; members ask
+    "vote": {"no": SEQ, "open": (bool, True, None), "choices": (ListOf(VOTE_CHOICE, 12), True, None),
+             "winner": (int, False, (0, 1 << 31))},
+    "vreq": {"op": (("start", "suggest", "withdraw", "cast", "have"), True, None),
+             "k": (int, False, (0, 1 << 31)), "title": (str, False, 120), "year": (int, False, (0, 2200)),
+             "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
+             "keys": (ListOf(int, 12, (1, 1 << 31)), False, None)},
+    # chat and reactions (0.5): to everyone in the room, shown when they come, kept nowhere
+    "chat": {"text": (str, True, CHAT_TEXT)},
+    "react": {"e": (REACTIONS, True, None)},
 }
 
 COMMON: Spec = {"s": (Hex(16), True, None), "n": SEQ}
@@ -142,7 +198,7 @@ def _check_value(name: str, value: Any, kind: Any, limit: Any) -> Any:
     if isinstance(kind, ListOf):
         if not isinstance(value, list) or len(value) > kind.max_items:
             raise BadMessage(f"{name}: expected a list of at most {kind.max_items}")
-        return [_check_value(f"{name}[{i}]", item, kind.item, None) for i, item in enumerate(value)]
+        return [_check_value(f"{name}[{i}]", item, kind.item, kind.item_limit) for i, item in enumerate(value)]
     if isinstance(kind, B64):
         if not isinstance(value, str) or len(value) > (kind.size + 2) // 3 * 4:
             raise BadMessage(f"{name}: expected base64")
@@ -153,6 +209,10 @@ def _check_value(name: str, value: Any, kind: Any, limit: Any) -> Any:
         if len(data) != kind.size:
             raise BadMessage(f"{name}: expected {kind.size} bytes")
         return data
+    if isinstance(kind, Pattern):
+        if not isinstance(value, str) or len(value) > 200 or not re.fullmatch(kind.regex, value):
+            raise BadMessage(f"{name}: unexpected text")
+        return value
     if isinstance(kind, Hex):
         if not isinstance(value, str) or len(value) != kind.chars or not _HEX.match(value):
             raise BadMessage(f"{name}: expected {kind.chars} hex characters")

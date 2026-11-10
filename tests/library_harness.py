@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+import faulthandler
+faulthandler.enable(all_threads=sys.platform != "win32")   # a crash inside Qt or mpv prints where every thread was
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -175,6 +177,32 @@ def run_script():
     CHECKS["removed from the library"] = not manual.exists()
     CHECKS["library list shows the films"] = lib.dialog.panel.tree.topLevelItemCount() == len(list(library_dir.glob("*.mkv")))
     print("library now:", sorted(p.name for p in library_dir.iterdir()))
+    lib.dialog.close()
+
+    # 5. A show (0.5 next episode): the end of S01E02 opens the next episode, which is in the next
+    # season's folder, and it plays by itself
+    show = data_dir / "Shows" / "Test Show"
+    second, third = show / "Season 1" / "Test.Show.S01E02.mkv", show / "Season 2" / "Test.Show.S02E01.mkv"
+    for episode in (second, show / "Season 1" / "Test.Show.S01E01.mkv", third):
+        episode.parent.mkdir(parents=True, exist_ok=True)
+        make_film(episode, seconds=3)
+    window.open_film(second)
+    spin(15, lambda: window.player.path == second and window.player.is_ready())
+    window.controller.toggle()
+    CHECKS["the next episode opens at the end"] = spin(25, lambda: window.player.path == third)
+    CHECKS["and plays by itself"] = spin(15, lambda: window.player.path == third and window.player.is_playing())
+
+    # 6. A show's intro (0.5 skip intro): Skip intro shows during the "Intro" chapter, and skips it
+    intro_film = data_dir / "Shows" / "Intro.Show.S01E01.mkv"
+    intro_film.parent.mkdir(parents=True, exist_ok=True)
+    make_film(intro_film, seconds=7, chapters=[(0, 4, "Intro"), (4, 7, "Episode")])
+    window.open_film(intro_film)
+    spin(15, lambda: window.player.path == intro_film and window.player.is_ready())
+    window.controller.toggle()
+    CHECKS["Skip intro shows during the intro"] = spin(5, lambda: window.controls.skip_intro.isVisible())
+    window.controls.skip_intro.click()
+    CHECKS["it jumps past the intro"] = spin(5, lambda: window.player.position() >= 3900)
+    CHECKS["and goes away"] = spin(3, lambda: not window.controls.skip_intro.isVisible())
 
 
 def scripted_exec(self):

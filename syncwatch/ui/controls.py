@@ -5,7 +5,7 @@ import time
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QSizePolicy, QSlider, QToolButton,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider, QToolButton,
                                QVBoxLayout)
 
 from ..sync.controller import fmt_time
@@ -26,6 +26,7 @@ class ControlBar(QFrame):
     forwardClicked = Signal()
     syncUpClicked = Signal()
     syncMeClicked = Signal()
+    skipIntroClicked = Signal()
     followToggled = Signal(bool)
     muteClicked = Signal()
     volumeChanged = Signal(int)
@@ -33,6 +34,7 @@ class ControlBar(QFrame):
     sidebarClicked = Signal()
     settingsClicked = Signal()
     openClicked = Signal()
+    reactionChosen = Signal(str)
 
     def __init__(self, colors: dict, parent=None):
         super().__init__(parent)
@@ -44,6 +46,10 @@ class ControlBar(QFrame):
         row1 = QHBoxLayout()
         row1.addWidget(self.time_label)
         row1.addWidget(self.seek, 1)
+        self.source_label = QLabel("")      # e.g. a torrent: "⬇ 45 % · 3.2 MB/s · 18 people"
+        self.source_label.setObjectName("Dim")
+        self.source_label.hide()
+        row1.addWidget(self.source_label)
         row1.addWidget(self.right_label)
 
         self.back = IconButton("back", "⏪ 10", "Skip back")
@@ -63,6 +69,13 @@ class ControlBar(QFrame):
         self.subs.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.subs_menu = QMenu(self)
         self.subs.setMenu(self.subs_menu)
+        from ..net.protocol import REACTIONS
+        self.react = IconButton("react", "😊 ▾", "Send a reaction to everyone (keys 1–8)")
+        self.react.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.react_menu = QMenu(self)
+        for number, emoji in enumerate(REACTIONS, 1):
+            self.react_menu.addAction(f"{emoji}   ({number})", lambda e=emoji: self.reactionChosen.emit(e))
+        self.react.setMenu(self.react_menu)
         self.mute = IconButton("volume", "🔊", "Mute (M)")
         self.volume = QSlider(Qt.Orientation.Horizontal)
         self.volume.setRange(0, 100)
@@ -74,6 +87,10 @@ class ControlBar(QFrame):
         self.sidebar = IconButton("sidebar", "☰", "Show/hide the sidebar (Tab)")
         self.settings = IconButton("settings", "⚙", "Settings")
         self.open = IconButton("open", "📂", "Library: your films")
+        self.skip_intro = QPushButton("Skip intro ⏭")
+        self.skip_intro.setToolTip("Jump to the end of this intro, opening or recap (key I)")
+        self.skip_intro.setObjectName("Attention")
+        self.skip_intro.hide()
 
         self.back.clicked.connect(self.backClicked)
         self.play.clicked.connect(self.playClicked)
@@ -86,12 +103,13 @@ class ControlBar(QFrame):
         self.sidebar.clicked.connect(self.sidebarClicked)
         self.settings.clicked.connect(self.settingsClicked)
         self.open.clicked.connect(self.openClicked)
+        self.skip_intro.clicked.connect(self.skipIntroClicked)
 
         row2 = QHBoxLayout()
-        for widget in (self.open, self.back, self.play, self.forward):
+        for widget in (self.open, self.back, self.play, self.forward, self.skip_intro):
             row2.addWidget(widget)
         row2.addSpacing(10)
-        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label):
+        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label, self.react):
             row2.addWidget(widget)
         row2.addStretch(1)
         for widget in (self.subs, self.mute, self.volume, self.volume_label, self.fullscreen,
@@ -105,7 +123,7 @@ class ControlBar(QFrame):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         # Room-only buttons start hidden (set_sync / set_following show them in a room). Visible at the
         # start, they made the window open about 90 px wider than asked, past the edge of small screens.
-        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label):
+        for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label, self.react):
             widget.hide()
 
     # ------------------------------------------------------------ updates from the main window
@@ -129,6 +147,10 @@ class ControlBar(QFrame):
             self.play.set_face("pause", "⏸  Pause")
         else:
             self.play.set_face("play", "▶  Play")
+
+    def set_source_text(self, text: str) -> None:
+        self.source_label.setText(text)
+        self.source_label.setVisible(bool(text))
 
     def set_times(self, position: float, duration: int, show_remaining: bool, show_end: bool) -> None:
         self.time_label.setText(fmt_time(position))
@@ -157,6 +179,7 @@ class ControlBar(QFrame):
                  attention: bool, gap_kind: str) -> None:
         self.sync_up.setVisible(connected)
         self.sync_me.setVisible(connected)
+        self.react.setVisible(connected)
         self.sync_up.setEnabled(can_sync_up)
         label = "⟲ Sync up" + (f" ({cooldown_sync:.0f})" if cooldown_sync > 0 else "")
         if self.sync_up.text() and self.sync_up.text() != label:

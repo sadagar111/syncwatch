@@ -65,6 +65,7 @@ class Player(QObject):
         self.devices = QMediaDevices(self)
         self.devices.audioOutputsChanged.connect(self._audio_devices_changed)
         self.path: Optional[Path] = None
+        self.stream = None            # a YouTube video with picture and sound in one stream (see youtube/)
         self._anchor_pos = 0.0
         self._anchor_time = time.monotonic()
         self._seek_target: Optional[float] = None
@@ -103,6 +104,12 @@ class Player(QObject):
     def set_hwdec(self, value: str) -> None:
         """Qt decides about hardware decoding itself."""
 
+    def set_audio_delay(self, ms: int) -> None:
+        """Qt's player can't move the sound against the picture (the setting says it's mpv only)."""
+
+    def set_night_mode(self, on: bool) -> None:
+        """Qt's player has no audio filters (the setting says it's mpv only)."""
+
     def shutdown(self) -> None:
         self.mp.stop()
 
@@ -126,9 +133,14 @@ class Player(QObject):
         return self.mp.playbackState() == QMediaPlayer.PlaybackState.PlayingState
 
     def has_media(self) -> bool:
-        return self.path is not None and self.mp.mediaStatus() not in (
+        return (self.path is not None or self.stream is not None) and self.mp.mediaStatus() not in (
             QMediaPlayer.MediaStatus.NoMedia, QMediaPlayer.MediaStatus.InvalidMedia,
             QMediaPlayer.MediaStatus.LoadingMedia)
+
+    def is_stalled(self) -> bool:
+        """Playing, but Qt waits for more of the video (a slow stream)."""
+        return self.is_playing() and self.mp.mediaStatus() in (QMediaPlayer.MediaStatus.BufferingMedia,
+                                                               QMediaPlayer.MediaStatus.StalledMedia)
 
     def is_ready(self) -> bool:
         if not self.has_media():
@@ -174,20 +186,34 @@ class Player(QObject):
         except OSError as exc:
             errors.report("SW-205", f"{type(exc).__name__}: {exc}")
             return False
-        self.path = path
+        self.path, self.stream = path, None
+        self._open(QUrl.fromLocalFile(str(path)))
+        log.info("loading film %s (%d MB)", path.name, path.stat().st_size // 1_000_000)
+        return True
+
+    def load_stream(self, stream) -> bool:
+        """A YouTube video. Qt's player can't join separate picture and sound streams, so SyncWatch
+        asks yt-dlp for one with both (lower quality: that's what YouTube offers)."""
+        if getattr(stream, "audio_url", ""):
+            errors.report(stream.problem, "Qt's player needs one stream with picture and sound")
+            return False
+        self.path, self.stream = None, stream
+        self._open(QUrl(stream.address()))
+        log.info("loading %s %s (%s)", stream.kind, stream.id, stream.describe())
+        return True
+
+    def _open(self, url: QUrl) -> None:
         self._loaded_once = False
         self._error_reported = False
         self._awaiting_frame = False
         self._seek_target = None
         self._anchor_pos, self._anchor_time = 0.0, time.monotonic()
-        self.mp.setSource(QUrl.fromLocalFile(str(path)))
-        log.info("loading film %s (%d MB)", path.name, path.stat().st_size // 1_000_000)
-        return True
+        self.mp.setSource(url)
 
     def unload(self) -> None:
         self.mp.stop()
         self.mp.setSource(QUrl())
-        self.path = None
+        self.path = self.stream = None
 
     # ------------------------------------------------------------ sound
     def set_volume(self, percent: int, muted: bool) -> None:
@@ -211,6 +237,10 @@ class Player(QObject):
                 log.info("sound now plays on %s", default.description())
 
     # ------------------------------------------------------------ tracks
+    def chapters(self) -> List[Tuple[int, str]]:
+        """Qt's player doesn't say which chapters a film has."""
+        return []
+
     def audio_tracks(self) -> List[Tuple[int, str, str]]:
         """[(index, label, language code)]"""
         tracks = []
@@ -266,7 +296,8 @@ class Player(QObject):
             self.loaded.emit()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia and not self._error_reported:
             self._error_reported = True
-            errors.report("SW-205", f"Qt reports invalid media: {self.mp.errorString() or '-'}")
+            errors.report(self.stream.problem if self.stream is not None else "SW-205",
+                          f"Qt reports invalid media: {self.mp.errorString() or '-'}")
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.ended.emit()
         if self._seek_target is not None and status in (QMediaPlayer.MediaStatus.BufferedMedia,

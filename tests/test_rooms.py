@@ -8,11 +8,13 @@ import os
 import sys
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from syncwatch.sync import chat as chat_module  # noqa: E402
 from room_harness import Room  # noqa: E402
 
 from syncwatch import PROTOCOL_VERSION  # noqa: E402
@@ -250,6 +252,409 @@ class WatchingTests(RoomTestCase):
                                   and self.guests[1].peer(marek).name == "Marek K"))
 
 
+class YouTubeTests(RoomTestCase):
+    """From 0.5: the host plays a YouTube video, the others open the same one by themselves."""
+    VIDEO = "dQw4w9WgXcQ"
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex")
+        self.marek = self.room.person("Marek")
+        self.kuba = self.room.person("Kuba")
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.pump(until=lambda: self.marek.c.session.clock_ready and self.kuba.c.session.clock_ready)
+
+    def test_members_follow_the_hosts_video(self):
+        self.kuba.c.set_attached(False)    # watching on his own: he isn't pulled along
+        self.alex.c.set_film("A test video", 0, 212_000, yt=self.VIDEO)
+        self.assertTrue(self.pump(until=lambda: self.VIDEO in self.marek.ui.followed()))
+        self.pump(1.5)
+        self.assertEqual(self.kuba.ui.followed(), [])
+        self.assertEqual(self.alex.ui.followed(), [])      # the host never follows anyone
+        # Marek has it open now: no more asking, and it counts as the same "film"
+        self.marek.c.set_film("A test video", 0, 212_000, yt=self.VIDEO)
+        count = len(self.marek.ui.followed())
+        self.pump(2.5)
+        self.assertEqual(len(self.marek.ui.followed()), count)
+        self.assertTrue(self.pump(until=lambda: self.alex.peer(self.marek).match == "same"))
+        self.assertNotIn("SW-501", self.marek.ui.problems() + self.alex.ui.problems())
+
+    def test_members_stream_the_hosts_torrent(self):
+        magnet = "magnet:?xt=urn:btih:4b0c7aed0cff8b7804a5955b9d68b712369c4792&dn=Film.mkv"
+        self.alex.c.set_film("Film.mkv", 4_000_000, 0, magnet=magnet)
+        self.assertTrue(self.pump(until=lambda: ("follow_torrent", magnet) in self.marek.ui.events))
+        self.kuba.c.set_film("Film.mkv", 4_000_000, 7_200_000)     # he has the same film: nothing to stream
+        count = len([e for e in self.kuba.ui.events if e[0] == "follow_torrent"])
+        self.pump(2.5)
+        self.assertEqual(len([e for e in self.kuba.ui.events if e[0] == "follow_torrent"]), count)
+
+    def test_sharing_a_film_with_someone_who_doesnt_have_it(self):
+        events = lambda person, kind: [e[1] for e in person.ui.events if e[0] == kind]
+        self.alex.c.set_film("Dune.mkv", 4_200_000_000, 9_000_000)
+        self.kuba.c.set_film("Dune.mkv", 4_200_000_000, 9_000_000)       # Kuba has it
+        self.assertTrue(self.pump(until=lambda: self.marek.c.can_ask_for_film() is not None
+                                  and self.kuba.peer(self.alex) is not None and self.kuba.peer(self.alex).known))
+        self.pump(until=lambda: self.kuba.peer(self.alex).match == "same")
+        self.assertIsNone(self.kuba.c.can_ask_for_film())
+        self.assertTrue(self.marek.c.ask_for_film(["198.51.100.7:6881"]))
+        self.assertTrue(self.pump(until=lambda: events(self.alex, "share_requested")))
+        self.assertEqual(events(self.alex, "share_requested")[0], ("Marek", ("198.51.100.7:6881",)))
+        self.marek.c.ask_for_film([])                                     # asking again at once: ignored
+        self.pump(1.0)
+        self.assertEqual(len(events(self.alex, "share_requested")), 1)
+        magnet = "magnet:?xt=urn:btih:4b0c7aed0cff8b7804a5955b9d68b712369c4792&dn=Dune.mkv"
+        self.alex.c.share_ready(magnet, "Dune.mkv", 4_200_000_000, ["203.0.113.5:50000", "192.168.1.20:50000"])
+        self.assertTrue(self.pump(until=lambda: events(self.marek, "receive_share")))
+        self.assertEqual(events(self.marek, "receive_share")[0][3], ("203.0.113.5:50000", "192.168.1.20:50000"))
+        self.assertEqual(events(self.kuba, "receive_share"), [])          # he didn't ask
+        self.marek.c.share_addresses(["198.51.100.7:6881"])
+        self.assertTrue(self.pump(until=lambda: events(self.alex, "share_peer")))
+        # a broken address makes the whole message invalid: dropped, not passed on
+        self.alex.c.session.send_room("share", magnet=magnet, name="Dune.mkv", size=1, addrs=["999.1.1.1:1;rm"])
+        self.pump(1.0)
+        self.assertEqual(len(events(self.marek, "receive_share")), 1)
+
+    def test_members_hear_when_the_host_goes_on_to_another_episode(self):
+        """(next episode) The window decides whether it's the next episode and opens the member's copy."""
+        self.kuba.c.set_attached(False)
+        for person in (self.alex, self.marek, self.kuba):
+            person.c.set_film("Show.S01E01.mkv", 1000, 60_000)
+        self.pump(1.5)
+        self.alex.c.set_film("Show.S01E02.mkv", 2000, 60_000)
+        self.assertTrue(self.pump(until=lambda: self.marek.ui.films_followed() == [("Show.S01E02.mkv", 2000)]))
+        self.pump(2.5)                                   # once per film of the host's, not every heartbeat
+        self.assertEqual(self.marek.ui.films_followed(), [("Show.S01E02.mkv", 2000)])
+        self.assertEqual(self.kuba.ui.films_followed(), [])     # watching on his own
+        self.assertEqual(self.alex.ui.films_followed(), [])
+
+    def test_a_film_and_a_video_arent_compared_by_length(self):
+        self.alex.c.set_film("A test video", 0, 7_200_000, yt=self.VIDEO)
+        self.kuba.c.set_attached(False)
+        self.kuba.c.set_film("film.mkv", 1000, 7_200_000)    # same length by chance
+        self.assertTrue(self.pump(until=lambda: self.alex.peer(self.kuba).match == "elsewhere"))
+        self.assertNotIn("SW-501", self.alex.ui.problems())
+
+
+class FilmVoteTests(RoomTestCase):
+    """The film vote (0.5): anyone suggests and votes, the host's app holds it and closes it."""
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex")
+        self.marek = self.room.person("Marek")
+        self.kuba = self.room.person("Kuba")
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.kuba.c.votes.have_check = lambda choices: [c.key for c in choices if c.title == "Inception"]
+
+    def titles(self, person):
+        return [choice.title for choice in person.c.votes.vote.choices]
+
+    def choice(self, person, title):
+        return next(c for c in person.c.votes.vote.choices if c.title == title)
+
+    def test_suggest_vote_and_the_host_closes_it(self):
+        self.marek.c.votes.suggest("The Matrix", 1999, 603, "/matrix.jpg")    # starts the vote too
+        self.assertTrue(self.pump(until=lambda: self.titles(self.kuba) == ["The Matrix"]))
+        self.assertTrue(self.kuba.c.votes.vote.open)
+        self.assertTrue(any("Marek suggested The Matrix (1999)" in t for t in self.alex.ui.activities()))
+        self.kuba.c.votes.suggest("Inception", 2010, 27205)
+        self.assertTrue(self.pump(until=lambda: self.titles(self.marek) == ["The Matrix", "Inception"]))
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+        matrix, inception = self.choice(self.marek, "The Matrix").key, self.choice(self.marek, "Inception").key
+        self.alex.c.votes.cast(matrix)
+        self.marek.c.votes.cast(inception)
+        self.kuba.c.votes.cast(inception)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.marek, "Inception").voters == ["Kuba", "Marek"]
+                                  and self.choice(self.kuba, "The Matrix").voters == ["Alex"]))
+        self.assertEqual(self.marek.c.votes.my_vote, inception)
+        self.marek.c.votes.cast(inception)                                    # again: taken back
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").voters == ["Kuba"]))
+        self.marek.c.votes.cast(inception)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").voters == ["Kuba", "Marek"]))
+        self.marek.c.votes.close()                                            # members can't close
+        self.marek.c.session.send_room("vreq", op="close")                   # not even a modified app
+        self.pump(0.5)
+        self.assertTrue(self.alex.c.votes.vote.open)
+        self.alex.c.votes.close()
+        for person in (self.alex, self.marek, self.kuba):
+            self.assertTrue(self.pump(until=lambda p=person: p.ui.winners() == ["Inception"]), person.name)
+            self.assertFalse(person.c.votes.vote.open)
+        self.assertTrue(any("Inception (2010) won (2 votes)" in t for t in self.kuba.ui.activities()))
+
+    def test_limits_taking_back_and_leaving(self):
+        for n in range(4):                                                    # three each
+            self.marek.c.votes.suggest(f"Marek's film {n}")
+        self.assertTrue(self.pump(until=lambda: len(self.titles(self.alex)) == 3))
+        self.assertTrue(self.pump(until=lambda: any("enough films" in t for t in self.marek.ui.activities())))
+        self.assertTrue(self.pump(until=lambda: len(self.titles(self.kuba)) == 3))   # his copy comes later, through the relay
+        first = self.choice(self.kuba, "Marek's film 0").key
+        self.kuba.c.votes.withdraw(first)                                     # not his
+        self.assertTrue(self.pump(until=lambda: any("take it out" in t for t in self.kuba.ui.activities())))
+        self.assertEqual(len(self.titles(self.alex)), 3)
+        self.marek.c.votes.withdraw(first)                                    # his own: fine
+        self.assertTrue(self.pump(until=lambda: "Marek's film 0" not in self.titles(self.kuba)))
+        second = self.choice(self.kuba, "Marek's film 1").key
+        self.kuba.c.votes.cast(second)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Marek's film 1").voters == ["Kuba"]))
+        self.kuba.c.leave()
+        self.assertTrue(self.pump(until=lambda: self.choice(self.marek, "Marek's film 1").voters == []))
+        self.assertEqual(self.kuba.c.votes.vote.choices, [])                  # his copy went with him
+
+    def test_have_floods_are_dropped(self):
+        from syncwatch.sync import film_vote
+        self.alex.c.votes.suggest("Inception", 2010)
+        self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+        key = self.choice(self.alex, "Inception").key
+        before = self.alex.c.votes.vote.version
+        for n in range(40):                                          # a modified app floods "have"
+            self.marek.c.session.send_room("vreq", op="have", keys=[key] if n % 2 else [])
+        self.pump(1.0)
+        self.assertLessEqual(self.alex.c.votes.vote.version - before, film_vote.HAVE_RATE + 1)
+
+    def test_a_lost_have_is_made_good(self):
+        from syncwatch.sync import film_vote
+        saved = film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S
+        film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S = 0.3, 1.0
+        try:
+            self.alex.c.votes.suggest("Inception", 2010)
+            self.assertTrue(self.pump(until=lambda: self.choice(self.alex, "Inception").have == ["Kuba"]))
+            self.pump(0.5)
+            self.alex.c.votes.vote.mark_have(self.kuba.id, "Kuba", [])      # as if Kuba's message got lost
+            self.alex.c.votes._changed()
+            self.assertNotIn("Kuba", self.choice(self.alex, "Inception").have)
+            healed = self.pump(until=lambda: "Kuba" in self.choice(self.alex, "Inception").have, timeout=30)
+            kuba = self.kuba.c.votes
+            self.assertTrue(healed, f"Kuba's app: told {kuba._told_have} at {kuba._told_at:.1f} "
+                                    f"(now {self.kuba.c.clock():.1f}), sees {[(c.title, c.have) for c in kuba.vote.choices]}, "
+                                    f"in the room: {self.alex.c.peers and [p.name for p in self.alex.c.peers.values()]}")
+        finally:
+            film_vote.HAVE_GAP_S, film_vote.VOTE_RESEND_S = saved
+
+    def test_flooding_the_host_is_dropped(self):
+        for index in range(30):
+            self.kuba.c.session.send_room("vreq", op="suggest", title=f"Film {index}")
+        self.pump(1.5)
+        self.assertLessEqual(len(self.alex.c.votes.vote.choices), 3)
+        self.alex.c.votes.cancel()
+        self.assertTrue(self.pump(until=lambda: not self.marek.c.votes.vote.active))
+
+
+class ChatTests(RoomTestCase):
+    """Chat and reactions (0.5): to everyone in the room, in order, floods dropped."""
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex")
+        self.marek = self.room.person("Marek")
+        self.kuba = self.room.person("Kuba")
+        self.room.let_in(self.alex, self.marek, self.kuba)
+
+    def test_messages_and_reactions_reach_everyone(self):
+        self.assertTrue(self.marek.c.chat.say("  hello   everyone "))
+        self.assertTrue(self.kuba.c.chat.say("hi Marek"))
+        for person in (self.alex, self.kuba):
+            self.assertTrue(self.pump(until=lambda p=person: ("Marek", "hello everyone", False) in p.ui.chats()))
+        self.assertTrue(self.pump(until=lambda: self.alex.ui.chats()[-1:] == [("Kuba", "hi Marek", False)]
+                                  or ("Kuba", "hi Marek", False) in self.alex.ui.chats()))
+        self.assertEqual(self.marek.ui.chats()[0], ("Marek", "hello everyone", True))      # mine, once
+        self.assertEqual(sum(1 for c in self.marek.ui.chats() if c[1] == "hello everyone"), 1)
+        self.assertFalse(self.marek.c.chat.say("   "))
+        self.assertTrue(self.alex.c.chat.react("🍿"))
+        for person in (self.marek, self.kuba):
+            self.assertTrue(self.pump(until=lambda p=person: ("Alex", "🍿", False) in p.ui.reactions()))
+        self.assertFalse(self.alex.c.chat.react("💩"))
+        self.marek.c.session.send_room("react", e="💩")                    # a modified app: refused
+        self.pump(0.5)
+        self.assertNotIn("💩", [r[1] for r in self.kuba.ui.reactions()])
+
+    def test_floods_are_limited(self):
+        sent = [self.marek.c.chat.say(f"message {n}") for n in range(8)]
+        self.assertEqual(sent, [True] * chat_module.SEND_RATE + [False] * (8 - chat_module.SEND_RATE))
+        self.assertTrue(any("Slow down" in t for t in self.marek.ui.activities()))
+        for n in range(20):                                                 # a modified app floods
+            self.kuba.c.session.send_room("chat", text=f"spam {n}")
+        self.pump(1.5)
+        spam = [c for c in self.alex.ui.chats() if c[1].startswith("spam")]
+        self.assertLessEqual(len(spam), chat_module.TAKE_RATE)
+        self.assertGreaterEqual(len([c for c in self.alex.ui.chats() if c[1].startswith("message")]),
+                                chat_module.SEND_RATE - 1)
+
+    def test_alone_no_chat(self):
+        self.kuba.c.leave()
+        self.pump(0.5)
+        self.assertFalse(self.kuba.c.chat.say("anyone?"))
+        self.assertTrue(self.kuba.c.chat.react("😂"))                      # alone: only over my own video
+        self.assertIn(("Kuba", "😂", True), self.kuba.ui.reactions())
+
+
+class QueueTests(RoomTestCase):
+    """The YouTube queue (0.5): the host's app holds it, members ask, everyone sees it."""
+    A, B, C, D = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex", seek_delay=0.2)
+        self.marek = self.room.person("Marek", seek_delay=0.2)
+        self.kuba = self.room.person("Kuba", seek_delay=0.2)
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.pump(until=lambda: self.marek.c.session.clock_ready and self.kuba.c.session.clock_ready)
+
+    def ids(self, person):
+        return [item.id for item in person.c.queue.items]
+
+    def test_everyone_sees_it_and_the_hosts_rules_count(self):
+        self.alex.c.queue_add(self.A, "First", 60_000)       # a film is open: it doesn't start by itself
+        self.assertEqual(self.alex.ui.played_items(), [])
+        self.assertTrue(self.pump(until=lambda: self.ids(self.marek) == [self.A] and self.ids(self.kuba) == [self.A]))
+        self.marek.c.queue_add(self.B, "Second", 30_000)
+        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.A, self.B]
+                                  and self.ids(self.marek) == [self.A, self.B]))
+        self.assertTrue(any("Marek added Second" in text for text in self.kuba.ui.activities()))
+        self.marek.c.queue_skip()                             # only the host may skip (default)
+        self.assertIn("SW-610", self.marek.ui.problems())
+        self.assertEqual(self.alex.ui.played_items(), [])
+        second = self.marek.c.queue.items[1]
+        self.marek.c.queue_remove(second.key)                 # but everyone may remove their own
+        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.A]))
+        first = self.marek.c.queue.items[0]
+        self.marek.c.session.send_room("qreq", op="remove", key=first.key)   # not his: refused
+        self.pump(1.0)
+        self.assertEqual(self.ids(self.alex), [self.A])
+        self.alex.settings.set("youtube.queue_control", "everyone")
+        self.assertTrue(self.pump(until=lambda: self.marek.c.can_queue("control")))
+        self.marek.c.queue_skip()
+        self.assertTrue(self.pump(until=lambda: self.alex.ui.played_items() == [self.A]))
+        self.assertTrue(self.pump(until=lambda: self.marek.c.queue.now is not None
+                                  and self.marek.c.queue.now.id == self.A))
+
+    def test_no_adding_when_the_host_says_so(self):
+        self.alex.settings.set("youtube.queue_add", "host")
+        self.alex.c.queue_add(self.A, "First", 60_000)
+        self.assertTrue(self.pump(until=lambda: self.ids(self.marek) == [self.A]))
+        self.assertFalse(self.marek.c.queue_add(self.B, "Second"))
+        self.assertIn("SW-610", self.marek.ui.problems())
+        self.marek.c.session.send_room("qreq", op="add", yt=self.B, title="Second")   # a modified app
+        self.pump(1.0)
+        self.assertEqual(self.ids(self.alex), [self.A])
+
+    def test_flooding_the_host_is_dropped(self):
+        for index in range(30):
+            self.marek.c.session.send_room("qreq", op="add", yt=f"video{index:06d}", title=f"V{index}")
+        self.pump(1.5)
+        from syncwatch.sync.controller import QREQ_RATE
+        self.assertEqual(len(self.alex.c.queue.items), QREQ_RATE)
+
+    def test_the_room_can_vote_to_skip(self):
+        """Only the host may skip (default), but the others can vote: more than half of the room skips."""
+        self.alex.c.queue_add(self.D, "Video D", 45_000)
+        self.alex.c.queue_next()
+        self.alex.c.queue_add(self.A, "Video A", 60_000)
+        self.assertEqual(self.alex.ui.played_items(), [self.D])
+        self.assertTrue(self.pump(until=lambda: self.marek.c.can_vote_skip() and self.kuba.c.can_vote_skip()))
+        self.marek.c.queue_vote_skip()
+        self.assertTrue(self.pump(until=lambda: self.kuba.c.queue.skip_votes() == (1, 2)))    # 1 of 2 needed (of 3)
+        self.assertTrue(any("Marek voted to skip Video D" in text for text in self.alex.ui.activities()))
+        self.marek.c.queue_vote_skip()                        # twice doesn't count twice
+        self.assertIn("You've already voted to skip this video", self.marek.ui.activities())
+        self.kuba.c.session.send_room("qreq", op="voteskip", key=12345)    # an old video's vote: ignored
+        self.pump(0.5)
+        self.assertEqual(self.alex.ui.played_items(), [self.D])
+        self.kuba.c.queue_vote_skip()
+        self.assertTrue(self.pump(until=lambda: self.alex.ui.played_items() == [self.D, self.A]))
+        self.assertTrue(any("The room voted to skip Video D (2 of 3)" in text for text in self.alex.ui.activities()))
+        self.assertTrue(self.pump(until=lambda: self.marek.c.queue.now is not None
+                                  and self.marek.c.queue.now.id == self.A and self.marek.c.queue.skip_votes() is None))
+        self.alex.settings.set("youtube.vote_skip", False)    # the host turns it off
+        self.assertTrue(self.pump(until=lambda: not self.marek.c.can_vote_skip()))
+        self.marek.c.queue_vote_skip()
+        self.assertIn("SW-610", self.marek.ui.problems())
+        self.marek.c.session.send_room("qreq", op="voteskip", key=self.marek.c.queue.now.key)   # a modified app
+        self.pump(0.5)
+        self.assertEqual(self.alex.c.queue.skip_votes(), None)
+
+    def test_the_next_video_starts_together(self):
+        for person in (self.alex, self.marek, self.kuba):
+            person.c.set_film("Video C", 0, 60_000, yt=self.C)
+        self.alex.c.queue_add(self.D, "Video D", 45_000)
+        self.assertTrue(self.pump(until=lambda: self.ids(self.kuba) == [self.D]))
+        self.alex.c.queue_next()                               # Video C ended
+        self.assertEqual(self.alex.ui.played_items(), [self.D])
+        # the host's window opens it, then starts everyone together
+        self.alex.c.set_film("Video D", 0, 45_000, yt=self.D)
+        self.alex.player.pause()
+        self.alex.player.seek(0)
+        self.alex.c.start_together()
+        self.assertTrue(self.pump(until=lambda: self.D in self.marek.ui.followed() and self.D in self.kuba.ui.followed()))
+        self.marek.c.set_film("Video D", 0, 45_000, yt=self.D)  # Marek's window opened it
+        self.marek.player.seek(0)
+        self.pump(1.5)                                          # Kuba still finding it: nobody starts
+        self.assertFalse(self.alex.player.is_playing() or self.marek.player.is_playing())
+        self.kuba.c.set_film("Video D", 0, 45_000, yt=self.D)
+        self.kuba.player.seek(0)
+        self.assertTrue(self.pump(until=lambda: all(p.player.is_playing() for p in (self.alex, self.marek, self.kuba))))
+        positions = [p.player.position() for p in (self.alex, self.marek, self.kuba)]
+        self.assertLess(max(positions) - min(positions), 300)
+        self.assertNotIn("SW-503", self.alex.ui.problems())
+
+
+class ReadyCheckTests(RoomTestCase):
+    """The host asks "everyone ready?"; when everyone following has answered, Sync up starts the film."""
+
+    def setUp(self):
+        super().setUp()
+        self.alex = self.room.person("Alex", seek_delay=0.2)
+        self.marek = self.room.person("Marek", seek_delay=0.2)
+        self.kuba = self.room.person("Kuba", seek_delay=0.2)
+        self.room.let_in(self.alex, self.marek, self.kuba)
+        self.pump(until=lambda: all(p.c.session.clock_ready for p in (self.marek, self.kuba)))
+        self.pump(until=lambda: all(p.known for p in self.alex.c.peers.values()))
+
+    def waiting(self, person):
+        view = person.c.ready_view
+        return sorted(view["waiting"]) if view else None
+
+    def test_everyone_ready_starts_the_film_with_the_countdown(self):
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.kuba) == ["Kuba", "Marek"]))
+        self.assertTrue(any("Alex asks: everyone ready?" in a for a in self.marek.ui.activities()))
+        self.marek.c.i_am_ready()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.kuba) == ["Kuba"]))
+        self.assertTrue(self.marek.c.ready_view["me"])
+        self.kuba.c.session.send_room("rready", id=999)               # an answer to another check: ignored
+        self.pump(0.5)
+        self.assertEqual(self.waiting(self.alex), ["Kuba"])
+        self.assertFalse(any(p.player.playing for p in (self.alex, self.marek, self.kuba)))
+        self.kuba.c.i_am_ready()
+        self.assertTrue(self.pump(until=lambda: self.kuba.c.ready_view is None and self.alex.c.ready_view is None))
+        self.assertTrue(self.pump(until=lambda: all(p.player.playing for p in (self.alex, self.marek, self.kuba)),
+                                  timeout=15))
+        self.assertTrue(self.alex.ui.countdowns or self.marek.ui.countdowns)   # 3-2-1, like Sync up
+
+    def test_called_off_and_someone_leaving(self):
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.marek) is not None))
+        self.alex.c.ready_check()                                      # again: called off
+        self.assertTrue(self.pump(until=lambda: self.marek.c.ready_view is None and self.kuba.c.ready_view is None))
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.marek) == ["Kuba", "Marek"]))
+        self.marek.c.i_am_ready()
+        self.assertTrue(self.pump(until=lambda: self.waiting(self.marek) == ["Kuba"]))
+        self.kuba.c.leave()                                            # the one it waits for leaves: it starts
+        self.assertTrue(self.pump(until=lambda: self.alex.player.playing and self.marek.player.playing, timeout=15))
+
+    def test_nobody_answers(self):
+        import room_harness
+        constants = room_harness.Controller.tick.__globals__
+        patcher = mock.patch.dict(constants, {"READY_CHECK_TIMEOUT_S": 1.0})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.alex.c.ready_check()
+        self.assertTrue(self.pump(until=lambda: any("didn't answer" in a for a in self.alex.ui.activities()),
+                                  timeout=10))
+        self.assertTrue(self.pump(until=lambda: self.marek.c.ready_view is None))
+        self.assertFalse(self.alex.player.playing)
+
+
 class SecurityTests(RoomTestCase):
     def setUp(self):
         super().setUp()
@@ -371,6 +776,87 @@ class JumpTests(RoomTestCase):
             self.assertEqual(person.ui.countdowns, [], person.name)   # no 3-2-1 for a jump
         self.assertTrue(any("Alex jumped to 10:00" in a or "Alex jumped to 0:10:00" in a
                             for a in self.guests[0].ui.activities()), self.guests[0].ui.activities())
+
+    def test_a_friends_video_that_stops_to_load_is_waited_for(self):
+        """Guest 1's stream runs dry: everyone pauses until it can play (longer than the 5 s for slow
+        PCs), then all start together; not again right away."""
+        self.room_of(0.05, 0.05)
+        loading = self.guests[0]
+        loading.player.seek_delay = 7.0          # (its jump to where the host is takes 7 s to load)
+        loading.player.stall(True)
+        self.assertTrue(self.pump(until=lambda: not self.alex.player.playing, timeout=10))
+        self.assertTrue(self.pump(until=lambda: not any(g.player.playing for g in self.guests)))
+        self.assertIn("Waiting for Guest 1: the video is still loading there…",
+                      " ".join(self.guests[1].ui.activities()))
+        self.assertIn("Everyone waits until your video has loaded…", " ".join(loading.ui.activities()))
+        self.pump(5.5)                            # past "Wait for slow PCs at most" (5 s): still waiting
+        self.assertFalse(any(p.player.playing for p in self.everyone()))
+        self.assertTrue(self.pump(until=self.all_playing, timeout=10))
+        self.pump(0.5)
+        self.assertLess(self.spread(), 150)
+        loading.player.stall(True)                # again at once: not waited for within 20 s
+        self.pump(5)
+        self.assertTrue(self.alex.player.playing)
+
+    def test_a_connection_that_cant_keep_up_isnt_waited_for_forever(self):
+        import room_harness
+        # (the globals of the module the room's controllers run: another test may have imported a fresh copy)
+        constants = room_harness.Controller.tick.__globals__
+        patcher = mock.patch.dict(constants, {"STALL_AFTER_S": 0.3, "LOADING_WAIT_GAP_S": 0.2,
+                                              "HEARTBEAT_MEMBER_S": 0.3, "MY_STALL_MIN_S": 0.2})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.room_of(0.05)
+        loading = self.guests[0]
+        for _ in range(constants["LOADING_WAITS_MAX"]):
+            loading.player.stall(True)
+            self.assertTrue(self.pump(until=lambda: not self.alex.player.playing, timeout=15))
+            self.assertTrue(self.pump(until=self.all_playing, timeout=15))
+        loading.player.stall(True)
+        self.assertTrue(self.pump(until=lambda: any("keeps stopping to load" in a for a in self.alex.ui.activities()),
+                                  timeout=10))
+        self.pump(2)
+        self.assertTrue(self.alex.player.playing)
+
+    def test_not_waited_for_when_the_host_says_no(self):
+        self.room_of(0.05)
+        self.alex.settings.set("sync.wait_for_loading", False)
+        self.guests[0].player.stall(True)
+        self.pump(6)
+
+    def test_the_room_pauses_when_someones_connection_drops(self):
+        import room_harness
+        # (heartbeats every 0.5 s, so a friend who's fine never looks silent for 2 s on a slow test machine)
+        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0,
+                                                                             "HEARTBEAT_MEMBER_S": 0.5})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.room_of(0.05, 0.05)
+        dropped = self.guests[0]
+        dropped.frozen = True
+        self.assertTrue(self.pump(until=lambda: not self.alex.player.playing, timeout=10))
+        self.assertTrue(self.pump(until=lambda: not self.guests[1].player.playing))
+        self.assertTrue(any("no word from Guest 1's app" in a for a in self.alex.ui.activities()))
+        self.pump(1.0)
+        self.assertFalse(self.alex.player.playing)        # still waiting
+        dropped.frozen = False                            # back: everyone starts together
+        self.assertTrue(self.pump(until=self.all_playing, timeout=15))
+        self.assertTrue(any("Guest 1 is back" in a for a in self.alex.ui.activities()))
+        self.pump(0.5)
+        self.assertLess(self.spread(), 150)
+
+    def test_not_paused_for_a_drop_when_the_host_says_no(self):
+        import room_harness
+        # (heartbeats every 0.5 s, so a friend who's fine never looks silent for 2 s on a slow test machine)
+        patcher = mock.patch.dict(room_harness.Controller.tick.__globals__, {"DROP_AFTER_S": 2.0,
+                                                                             "HEARTBEAT_MEMBER_S": 0.5})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.room_of(0.05)
+        self.alex.settings.set("sync.pause_on_drop", False)
+        self.guests[0].frozen = True
+        self.pump(4)
+        self.assertTrue(self.alex.player.playing)
 
     def test_together_a_members_jump(self):
         self.room_of(0.05, 0.8)

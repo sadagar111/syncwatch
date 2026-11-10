@@ -1,7 +1,7 @@
 """The real-app checks (offscreen): the whole window, the film library, three apps in one room,
 the update cycle.
 
-    python tests/gui_checks.py [ui|library|room|update|all] [--out FOLDER]
+    python tests/gui_checks.py [ui|library|youtube|discover|room|update|all] [--out FOLDER]
 
 Exit code 0 only if every chosen check passes. Screenshots and logs go to
 --out (GitHub uploads that folder, so you can look at the screenshots of each
@@ -13,6 +13,7 @@ import bisect
 import json
 import os
 import subprocess
+import time
 import sys
 import tempfile
 from pathlib import Path
@@ -20,7 +21,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 FILM = HERE / "media" / "demo.mkv"
-ENV = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+ENV = dict(os.environ, QT_QPA_PLATFORM="offscreen", SYNCWATCH_FAULTS_TO_STDERR="1")   # a crash shows where
 if sys.platform.startswith("linux"):
     ENV.setdefault("QT_AUDIO_BACKEND", "pulseaudio")  # avoids a PipeWire crash without a sound server
 
@@ -30,12 +31,15 @@ def check_ui(out: Path) -> bool:
                             env=ENV, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
     (out / "ui.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
     print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("KEY CHECKS", "UI HARNESS",
-                                                                                     "ROOM CHECKS", "PLAYER",
+                                                                                     "ROOM CHECKS", "CHAT CHECKS", "PREVIEW CHECKS", "PLAYER",
                                                                                      "subtitle sources"))))
     player = next((line[len("PLAYER:"):].strip() for line in result.stdout.splitlines()
                    if line.startswith("PLAYER:")), "")
     if player and os.environ.get("GITHUB_ACTIONS"):   # shown on the pull request page
         print(f"::notice title=Video player in the app check ({sys.platform})::{player}", flush=True)
+    if result.returncode != 0:
+        print(f"ui check failed (exit code {result.returncode}); end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
     return result.returncode == 0
 
 
@@ -48,6 +52,33 @@ def check_library(out: Path) -> bool:
                     if line.startswith(("LIBRARY", "steps seen", "converted copy", "library now", "ERRORS SEEN"))))
     if result.returncode != 0:
         print("library check failed; end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
+    return result.returncode == 0
+
+
+def check_youtube(out: Path) -> bool:
+    """A pasted link, the queue moving on by itself, Skip, a deleted video (YouTube itself replaced by
+    a local web server; the resolver process, yt-dlp and mpv are real)."""
+    result = subprocess.run([sys.executable, str(HERE / "youtube_harness.py"), str(out / "youtube")], env=ENV,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    (out / "youtube.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
+    print("\n".join(line for line in result.stdout.splitlines()
+                    if line.startswith(("YOUTUBE", "activity", "ERRORS SEEN"))))
+    if result.returncode != 0:
+        print(f"youtube check failed (exit code {result.returncode}); end of its output:")
+        print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
+    return result.returncode == 0
+
+
+def check_discover(out: Path) -> bool:
+    """What should we watch? (0.5): ideas from the library, posters, details, the trailer, the film
+    vote in a room, playing the winner (TMDB replaced by tests/fake_tmdb.py, a relay on this PC)."""
+    result = subprocess.run([sys.executable, str(HERE / "discover_harness.py"), str(out / "discover")], env=ENV,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+    (out / "discover.log").write_text(result.stdout + "\n" + result.stderr, encoding="utf-8")
+    print("\n".join(line for line in result.stdout.splitlines() if line.startswith(("DISCOVER", "ERRORS SEEN"))))
+    if result.returncode != 0:
+        print(f"discover check failed (exit code {result.returncode}); end of its output:")
         print("\n".join((result.stdout + "\n" + result.stderr).strip().splitlines()[-40:]))
     return result.returncode == 0
 
@@ -85,18 +116,26 @@ def check_room(out: Path) -> bool:
     for stale in [code_file, *out.glob("room-ready-*")]:
         stale.unlink(missing_ok=True)
     procs = {}
+    # Each app's output goes to a file, not a pipe: a pipe nobody reads yet (they were read one after
+    # the other) fills up (4 KB on Windows) and then blocks that app until the one before it has ended.
+    printed = {role: out / f"room-{role}.out" for role in roles}
+    files = {role: printed[role].open("w", encoding="utf-8") for role in roles}
     try:
         for role in roles:
             procs[role] = subprocess.Popen(
                 [sys.executable, str(HERE / "room_gui_harness.py"), role, str(FILM), str(logs[role]), relay.url,
-                 str(code_file), str(out / "ui")], env=ENV, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace")
-        outputs = {role: proc.communicate(timeout=180)[0] for role, proc in procs.items()}
+                 str(code_file), str(out / "ui")], env=ENV, stdout=files[role], stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + 180
+        for proc in procs.values():
+            proc.wait(timeout=max(1.0, deadline - time.monotonic()))
     finally:
         for proc in procs.values():
             if proc.poll() is None:
                 proc.kill()
+        for file in files.values():
+            file.close()
         relay.stop()
+    outputs = {role: printed[role].read_text(encoding="utf-8", errors="replace") for role in roles}
     (out / "room.log").write_text("\n----\n".join(f"[{r}]\n{o}" for r, o in outputs.items()), encoding="utf-8")
     if not all(p.exists() for p in logs.values()):
         print("room: a log is missing (an app didn't run its script)")
@@ -115,6 +154,9 @@ def check_room(out: Path) -> bool:
     missing = [n for n in needed if n not in events]
     if missing:
         print(f"room: events missing: {missing}")
+        for role, proc in procs.items():
+            print(f"room: {role} exited with {proc.returncode}; end of its output:")
+            print("\n".join(outputs[role].strip().splitlines()[-25:]))
         return False
 
     def gap_at(guest, seconds):
@@ -160,6 +202,82 @@ def check_room(out: Path) -> bool:
     passed = after_sync_me is not None and abs(after_sync_me) < 400
     ok &= passed
     print(f"room: after Marek's Sync me: {after_sync_me:.0f} ms {'OK' if passed else 'FAIL'}")
+    ok &= _room_extras(out)
+    ok &= _torrent_offer(out)
+    ok &= _ready_check(out)
+    return ok
+
+
+def _room_extras(out: Path) -> bool:
+    """Chat, a reaction and a film vote between the three apps, when they have them."""
+    got = {}
+    for role in ("host", "marek", "kuba"):
+        lines = (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines()
+        got[role] = [json.loads(line) for line in lines if '"got_' in line]
+    ok = True
+    expected = {
+        "Marek's chat message reached the others": lambda role: any(
+            e["event"] == "got_chat_message" and e["args"][:2] == ["Marek", "hello from Marek"] for e in got[role]),
+        "Kuba's 🍿 reached the others": lambda role: any(
+            e["event"] == "got_reaction" and e["args"][:2] == ["Kuba", "🍿"] for e in got[role]),
+        "everyone heard the vote's winner (Inception)": lambda role: any(
+            e["event"] == "got_vote_won" and e["args"] == ["Inception"] for e in got[role]),
+    }
+    senders = {"Marek's chat message reached the others": "marek", "Kuba's 🍿 reached the others": "kuba"}
+    for name, test in expected.items():
+        roles = [r for r in ("host", "marek", "kuba") if r != senders.get(name)]
+        passed = all(test(role) for role in roles)
+        ok &= passed
+        print(f"room: {name} {'OK' if passed else 'FAIL'}")
+    return ok
+
+
+def _torrent_offer(out: Path) -> bool:
+    """(0.5) The host streams a torrent: Marek (ask first, the default) is asked in the sidebar and
+    streams it only after his click; Kuba (Settings > Torrents: don't) is neither asked nor streams."""
+    seen = {}
+    for role in ("marek", "kuba"):
+        for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():
+            if ':seen"' in line:
+                entry = json.loads(line)
+                seen[entry["event"]] = entry
+    marek, after, kuba = (seen.get(k, {}) for k in ("marek:offer_state:seen", "marek:offer_state2:seen",
+                                                     "kuba:offer_state:seen"))
+    ok = True
+    for name, passed in (
+            ("Marek is asked before the host's torrent streams", marek.get("banner") == "Stream it too"
+             and marek.get("streaming") is False),
+            ("after his click it streams", after.get("streaming") is True),
+            ("Kuba (Settings: don't) isn't asked and streams nothing", kuba.get("banner") == ""
+             and kuba.get("streaming") is False)):
+        ok &= passed
+        print(f"room: {name} {'OK' if passed else 'FAIL'}")
+    if not ok:
+        print(f"room: what they saw: {seen}")
+    return ok
+
+
+def _ready_check(out: Path) -> bool:
+    """(0.5) The host's ready check through the People panel's buttons: both members asked, it starts
+    for everyone (Sync up's countdown) once both clicked I'm ready."""
+    seen = {}
+    for role in ("host", "marek", "kuba"):
+        for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():
+            if ':ready:seen"' in line:
+                entry = json.loads(line)
+                seen.setdefault(role, []).append(entry)
+    asked = [entries[0] for role, entries in seen.items() if role != "host" and entries]
+    after = [entries[-1] for entries in seen.values() if entries]
+    ok = True
+    for name, passed in (
+            ("both members are asked, with a button", len(asked) == 2 and all(
+                e["button"] == "✓ I'm ready" and "everyone ready?" in e["line"] for e in asked)),
+            ("once both said so, everyone plays again", len(after) == 3 and all(
+                e["playing"] and e["line"] == "" for e in after))):
+        ok &= passed
+        print(f"room: ready check: {name} {'OK' if passed else 'FAIL'}")
+    if not ok:
+        print(f"room: what they saw: {seen}")
     return ok
 
 
@@ -176,12 +294,15 @@ def check_update(out: Path) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("which", nargs="?", default="all", choices=["ui", "library", "room", "update", "all"])
+    parser.add_argument("which", nargs="?", default="all",
+                        choices=["ui", "library", "youtube", "discover", "room", "update", "all"])
     parser.add_argument("--out", default=str(Path(tempfile.gettempdir()) / "syncwatch-gui-checks"))
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    checks = {"ui": check_ui, "library": check_library, "room": check_room, "update": check_update}
+    checks = {"ui": check_ui, "library": check_library, "youtube": check_youtube, "discover": check_discover,
+              "room": check_room,
+              "update": check_update}
     chosen = list(checks) if args.which == "all" else [args.which]
     results = {}
     for name in chosen:

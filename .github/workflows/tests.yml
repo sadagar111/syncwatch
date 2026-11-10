@@ -50,6 +50,8 @@ jobs:
         run: python tools/get_libmpv.py
       - name: Unit and integration tests
         run: python tests/ci_run.py python -m unittest discover -s tests -p "test_*.py" -v
+      - name: YouTube for real (information only, YouTube often blocks GitHub's machines)
+        run: python tests/youtube_live.py
       - name: Real-app checks (window, film library, a room of three apps, update cycle)
         run: python tests/ci_run.py python tests/gui_checks.py all --out gui-artifacts
       - name: Upload screenshots and logs
@@ -81,6 +83,8 @@ jobs:
           $zip = Get-ChildItem dist/SyncWatch-runtime-*.zip | Select-Object -First 1
           Expand-Archive $zip.FullName -DestinationPath rt
           python tests/ci_run.py rt/python.exe tests/gui_checks.py ui --out portable-artifacts
+          rt/python.exe tests/youtube_live.py --runtime
+          rt/python.exe -c "import libtorrent; print('libtorrent', libtorrent.__version__, 'works in the runtime')"
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v7

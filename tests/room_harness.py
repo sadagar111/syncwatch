@@ -48,9 +48,10 @@ class FakePlayer:
         self.seeks = 0
         self.media = media
         self.rate = 1.0          # 1.01 = runs 1 % fast (a "drifting" PC)
+        self.stalled = False     # waiting for more of the video (a slow stream): the clock stands still
 
     def position(self):
-        if not self.playing:
+        if not self.playing or self.stalled:
             return self.base
         now = time.monotonic()
         start = self.base_time if self.clock_runs else max(self.base_time, self.ready_at)
@@ -65,6 +66,17 @@ class FakePlayer:
     def is_ready(self):
         return time.monotonic() >= self.ready_at
 
+    def is_stalled(self):
+        return self.playing and self.stalled
+
+    def stall(self, on: bool):
+        """The stream runs dry (True) or has more again (False)."""
+        if on and not self.stalled:
+            self.base, self.base_time = self.position(), time.monotonic()
+        elif not on and self.stalled:
+            self.base_time = time.monotonic()
+        self.stalled = on
+
     def has_media(self):
         return self.media
 
@@ -76,6 +88,7 @@ class FakePlayer:
         self.base, self.playing = self.position(), False
 
     def seek(self, ms):
+        self.stalled = False     # (a jump fetches the new spot: loading is seek_delay from here)
         self.base, self.base_time = float(ms), time.monotonic()
         self.ready_at = time.monotonic() + self.seek_delay
         self.seeks += 1
@@ -108,6 +121,59 @@ class RecorderUI:
 
     def countdown(self, ms):
         self.countdowns.append(ms)
+
+    def follow_youtube(self, video_id, title=""):
+        self._add(("follow", video_id))
+
+    def share_requested(self, who, addresses):
+        self._add(("share_requested", (who, tuple(addresses))))
+
+    def receive_share(self, magnet, name, size, addresses):
+        self._add(("receive_share", (magnet, name, size, tuple(addresses))))
+
+    def share_peer(self, who, addresses):
+        self._add(("share_peer", (who, tuple(addresses))))
+
+    def follow_torrent(self, magnet, name="", size=0):
+        self._add(("follow_torrent", magnet))
+
+    def followed(self):
+        return [e[1] for e in self.events if e[0] == "follow"]
+
+    def follow_film(self, name, size):
+        self._add(("follow_film", name, size))
+
+    def films_followed(self):
+        return [e[1:] for e in self.events if e[0] == "follow_film"]
+
+    def queue_changed(self):
+        self._add(("queue", None))
+
+    def play_queue_item(self, item):
+        self._add(("play_item", item.id))
+
+    def played_items(self):
+        return [e[1] for e in self.events if e[0] == "play_item"]
+
+    def vote_changed(self):
+        self._add(("vote", None))
+
+    def vote_won(self, choice):
+        self._add(("vote_won", choice.title))
+
+    def winners(self):
+        return [e[1] for e in self.events if e[0] == "vote_won"]
+    def chat_message(self, name, text, mine):
+        self._add(("chat", (name, text, mine)))
+
+    def chats(self):
+        return [e[1] for e in self.events if e[0] == "chat"]
+
+    def reaction(self, name, emoji, mine):
+        self._add(("react", (name, emoji, mine)))
+
+    def reactions(self):
+        return [e[1] for e in self.events if e[0] == "react"]
 
     def join_request(self, knock):
         self.requests.append(knock)
@@ -149,7 +215,11 @@ class Person:
     def code(self) -> str:
         return self.c.session.code.text()
 
+    frozen = False      # True: this person's app hears and says nothing (their connection dropped)
+
     def pump(self) -> None:
+        if self.frozen:
+            return
         while True:
             try:
                 event = self.inbox.get_nowait()

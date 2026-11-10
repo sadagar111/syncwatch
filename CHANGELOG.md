@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.5.0 (YouTube, torrents, what to watch, chat, and more)
+**Watch YouTube together**
+- Paste a YouTube link on the start screen (or Ctrl+L, or Ctrl+V anywhere, or drag it from your browser onto SyncWatch). In a room, everyone following the host opens it too and lines up; play, pause, jumps, Sync up and Sync me work as with films.
+- **Up next:** ➕ Queue lines videos up in the sidebar, and the next one starts for everyone together. Paste a playlist and its videos go into Up next (at most 50). The host decides who may add, skip and reorder; the others can **vote to skip** (more than half of the room skips the video).
+- **YouTube's subtitles** in the CC menu: the uploader's, and YouTube's automatic ones in the spoken language and in your languages. Yours turn on by themselves when the uploader made them.
+- No ads, up to 1080p by default (Settings > YouTube > Quality, up to 4K).
+
+**Watch a torrent while it downloads**
+- Paste a magnet link (or drop a .torrent file onto SyncWatch): it plays after the first few MB. The part you're watching comes first, and a jump fetches the new spot next. The control bar shows how far it is, the speed and the time left.
+- In a room, friends following the host are asked before they stream the host's torrent (*Stream it too*), because a torrent also shares its parts with others.
+- **Get it from Alex:** a friend who doesn't have the host's film gets it straight from the host's PC (the host is asked first); nothing goes through the relay. **Open my copy:** SyncWatch notices when you already have the host's film under another name.
+- Only what you open yourself: SyncWatch doesn't search for films anywhere. Settings > Torrents has the rest.
+
+**What should we watch?**
+- **💡 Ideas** (start screen): recommendations from your library and what you've watched, trending films and search, each with its rating, length, where to watch it in your country and its trailer; **🎲 Pick one for me**. Needs a free TMDB key: Settings > Discover.
+- **🗳 Film vote** in a room: everyone suggests films and votes, and the sidebar shows who already has each one. The host closes the vote; whoever has the winner gets **▶ Play it**.
+
+**In a room**
+- **Chat** (press T) and **reactions** (😊, or the keys 1–8) that float up over everyone's video.
+- **Ready check** (✋ under People, or R): everyone says they're ready, then the film starts for all with the 3-2-1.
+- If someone's video **stops to load** (a slow connection, a torrent still coming), everyone pauses until it can play, then all start together.
+- If someone's **connection drops**, everyone pauses; when they're back, all start together.
+
+**Films and shows**
+- **Next episode:** at the end of an episode the next one plays (from the same folder, or the next season's); friends following get their own copy opened. N: next episode now.
+- **Skip intro** for chapters called Intro, Opening, OP or Recap (or press I).
+- **Pictures over the seek bar:** hover over it to see that moment of the film.
+- **Night mode** (Alt+N): loud scenes quieter, quiet talking louder. **Sound delay** for Bluetooth headphones (Alt+Z / Alt+X).
+
+**Also**
+- Nothing to install: yt-dlp and Deno (for YouTube) and libtorrent (for torrents) come with SyncWatch, so this update is about 50 MB bigger (once).
+- The start screen scrolls on a short window instead of squeezing its cards, and Settings opens wide enough for its tabs.
+- Fixes a crash on Windows: SyncWatch could close by itself now and then while a film was open. mpv's own little scripts (which SyncWatch doesn't use) clashed with SyncWatch's crash report; mpv now starts without them, and the crash report only notes the part of SyncWatch that crashed.
+- New problems with plain explanations: SW-601 to SW-611 (YouTube), SW-620 to SW-626 (torrents), SW-631 to SW-635 (TMDB).
+
 ## 0.4.2 (new video player, and your film library)
 **A new video player: mpv**
 - Films now play with **mpv**, which handles practically every film, including AC3, E-AC3 and DTS sound that didn't always play before.

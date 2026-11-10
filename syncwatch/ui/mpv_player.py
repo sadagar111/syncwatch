@@ -53,6 +53,19 @@ CHANNELS = {1: "mono", 2: "stereo", 6: "5.1", 8: "7.1"}
 VIDEO_OUTPUTS = ("window", "opengl", "none")
 
 
+
+# mpv's own Lua scripts (console, menus, auto profiles...) aren't used: SyncWatch has its own controls.
+# Off, they can't run Lua at all: on Windows every Lua error, even one a script catches itself,
+# shows up as a "fatal exception" (0xE24C4A02, LuaJIT's way of unwinding), and Python's crash
+# logger then wrote out every thread while they ran, which could itself crash SyncWatch.
+LUA_SCRIPTS_OFF = (
+    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_positioning": "no",   # mpv 0.40+
+     "load_context_menu": "no", "load_auto_profiles": "no"},
+    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_auto_profiles": "no"},   # 0.39
+    {"load_osd_console": "no", "load_auto_profiles": "no"},                                         # 0.33-0.38
+    {},
+)
+
 class StartFailed(Exception):
     """mpv couldn't be started; the window falls back to the Qt player (SW-209)."""
 
@@ -183,6 +196,7 @@ class MpvPlayer(QObject):
         self.core = None
         self.widget: Optional[QWidget] = None
         self.path: Optional[Path] = None
+        self.stream = None            # a YouTube video (youtube/streams.py) instead of a file
         self.version = ""
         self._pos = 0.0               # ms, as last reported by mpv
         self._pos_time = time.monotonic()
@@ -202,6 +216,7 @@ class MpvPlayer(QObject):
         self._wait_started = 0.0
         self._eof = False
         self._tracks: list = []
+        self._chapters: List[Tuple[int, str]] = []    # (start in ms, title)
         self._volume, self._muted = 80, False
         self._last_playing = False
         self._last_child_check = 0.0
@@ -215,6 +230,15 @@ class MpvPlayer(QObject):
         else:
             self.widget = NativeVideo(background, self.video_output == "window", parent)
         return self.widget
+
+    def _lua_choices(self):
+        """Which LUA_SCRIPTS_OFF this libmpv knows (by its client API: 2.5 = mpv 0.40, 2.4 = 0.39), then older ones."""
+        try:
+            version = tuple(self.module._mpv_client_api_version())
+        except Exception:  # noqa: BLE001 - unknown: try them all
+            version = (9, 9)
+        start = 0 if version >= (2, 5) else 1 if version >= (2, 4) else 2
+        return LUA_SCRIPTS_OFF[start:]
 
     def start(self) -> None:
         """Start mpv, after the video widget has its place in the window. Raises StartFailed."""
@@ -235,10 +259,16 @@ class MpvPlayer(QObject):
         else:
             options["vo"], options["ao"], options["hwdec"] = "null", "null", "no"
             self.hwdec = "no"
-        try:
-            self.core = self.module.MPV(log_handler=self._log_from_mpv, loglevel="warn", **options)
-        except Exception as exc:  # noqa: BLE001 - whatever libmpv says, we fall back
-            raise StartFailed(errors.describe_exception(exc)) from exc
+        self.core = None
+        failure = None
+        for lua_off in self._lua_choices():
+            try:   # (the Lua options go first: an mpv that doesn't know one stops before it gets a window)
+                self.core = self.module.MPV(log_handler=self._log_from_mpv, loglevel="warn", **{**lua_off, **options})
+                break
+            except Exception as exc:  # noqa: BLE001 - whatever libmpv says, we try the next or fall back
+                failure = exc           # (python-mpv frees the half-made mpv itself when it's collected)
+        if self.core is None:
+            raise StartFailed(errors.describe_exception(failure)) from failure
         try:
             self.core["drag-and-drop"] = "no"   # dropped files go to SyncWatch, not straight to mpv
         except Exception:  # noqa: BLE001 - option only exists in newer mpv versions
@@ -246,7 +276,7 @@ class MpvPlayer(QObject):
         self.version = mpvlib.version_text(self.core)
         self.core.register_event_callback(self._event_from_mpv)
         # Not "pause": SyncWatch decides that itself (mpv only pauses on its own at the end, eof-reached).
-        for name in ("time-pos", "core-idle", "duration", "eof-reached", "track-list"):
+        for name in ("time-pos", "core-idle", "duration", "eof-reached", "track-list", "chapter-list"):
             self.core.observe_property(name, self._property_from_mpv)
         log.info("mpv started: %s, video output %s, hardware decoding %s", self.version, self.video_output,
                  self.hwdec)
@@ -261,6 +291,17 @@ class MpvPlayer(QObject):
     def set_hwdec(self, value: str) -> None:
         self.hwdec = value
         self._async("set", "hwdec", value)
+
+    def set_audio_delay(self, ms: int) -> None:
+        """The sound this much later than the picture (below zero: earlier, for Bluetooth headphones)."""
+        self._async("set", "audio-delay", f"{max(-2000, min(2000, int(ms))) / 1000:.3f}")
+
+    # FFmpeg's Dynamic Audio Normalizer: follows the loudness over ~2 s (15 frames of 150 ms) and evens it out
+    NIGHT_FILTER = "lavfi=[dynaudnorm=f=150:g=15:p=0.95]"
+
+    def set_night_mode(self, on: bool) -> None:
+        """Loud parts quieter, quiet parts louder (an audio filter), or the sound as it is."""
+        self._async("set", "af", self.NIGHT_FILTER if on else "")
 
     def shutdown(self) -> None:
         """Stop mpv (when the window closes). Safe to call twice."""
@@ -290,10 +331,14 @@ class MpvPlayer(QObject):
         return self.has_media() and not self._paused and not self._eof
 
     def has_media(self) -> bool:
-        return self.path is not None and self._loaded and not self._failed
+        return (self.path is not None or self.stream is not None) and self._loaded and not self._failed
 
     def is_ready(self) -> bool:
         return self.has_media() and not self._waiting
+
+    def is_stalled(self) -> bool:
+        """Playing, but mpv isn't moving forward: it waits for more of the video (a slow stream)."""
+        return self.is_playing() and self._idle and not self._waiting
 
     def play(self) -> None:
         if not self.has_media():
@@ -344,31 +389,60 @@ class MpvPlayer(QObject):
         except OSError as exc:
             errors.report("SW-205", f"{type(exc).__name__}: {exc}")
             return False
-        self.path = path
+        self.path, self.stream = path, None
+        self._set_headers("", [])
+        if not self._open(str(path), "SW-205"):
+            return False
+        log.info("loading film %s (%d MB)", path.name, path.stat().st_size // 1_000_000)
+        return True
+
+    def load_stream(self, stream) -> bool:
+        """A stream: a YouTube video (picture and sound joined in one EDL) or a torrent that streams
+        from the torrent helper's local web server. Anything with address(), headers, header_fields()."""
+        if self.core is None:
+            return False
+        self.path, self.stream = None, stream
+        self._set_headers(stream.headers.get("User-Agent", ""), stream.header_fields())
+        if not self._open(stream.address(), stream.problem):
+            return False
+        log.info("loading %s %s (%s)", stream.kind, stream.id, stream.describe())
+        return True
+
+    def _set_headers(self, user_agent: str, fields: List[str]) -> None:
+        """HTTP headers for streams (YouTube wants the ones yt-dlp used); none for files."""
+        self._async("set", "user-agent", user_agent or "libmpv")
+        self._async("change-list", "http-header-fields", "clr", "")
+        for field in fields:   # "append" takes the text as one item, commas and all
+            self._async("change-list", "http-header-fields", "append", field)
+
+    def _open(self, address: str, problem: str) -> bool:
         self._loaded = self._failed = self._eof = False
         self._paused = True
         self._waiting, self._wait_kind, self._target, self._wait_started = True, "load", 0.0, time.monotonic()
         self._pos, self._pos_time = 0.0, time.monotonic()
         self._duration = 0
         self._tracks = []
+        self._chapters = []
         self._reported.clear()
         self._load_seq += 1
         self._wanted_entry = None
         self._async("set", "pause", "yes")          # open paused: shows the first picture
         seq = self._load_seq
         try:
-            self.core.command_async("loadfile", str(path), "replace",
+            self.core.command_async("loadfile", address, "replace",
                                     callback=lambda error, result: self._send("loadfile-reply", (seq, error, result)))
         except Exception as exc:  # noqa: BLE001 - mpv refused straight away
-            errors.report("SW-205", f"mpv: {errors.describe_exception(exc)}")
+            errors.report(problem, f"mpv: {errors.describe_exception(exc)}")
             return False
         self._report_playing()
-        log.info("loading film %s (%d MB)", path.name, path.stat().st_size // 1_000_000)
         return True
+
+    def _load_problem(self) -> str:
+        return self.stream.problem if self.stream is not None else "SW-205"
 
     def unload(self) -> None:
         self._async("stop")
-        self.path = None
+        self.path = self.stream = None
         self._loaded = False
         self._waiting = False
         self._report_playing()
@@ -386,6 +460,10 @@ class MpvPlayer(QObject):
     # ------------------------------------------------------------ tracks
     def _audio(self) -> list:
         return [t for t in self._tracks if isinstance(t, dict) and t.get("type") == "audio"]
+
+    def chapters(self) -> List[Tuple[int, str]]:
+        """The film's chapters: (start in ms, title)."""
+        return list(self._chapters)
 
     def audio_tracks(self) -> List[Tuple[int, str, str]]:
         """[(index, label, language code)]"""
@@ -500,13 +578,21 @@ class MpvPlayer(QObject):
         elif what == "track-list":
             self._tracks = list(value or [])
             self.tracksChanged.emit()
+        elif what == "chapter-list":
+            chapters = []
+            for chapter in value or []:
+                try:
+                    chapters.append((int(float(chapter.get("time", 0)) * 1000), str(chapter.get("title") or "")[:100]))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+            self._chapters = chapters
         elif what == "loadfile-reply":
             seq, error, result = value
             if seq != self._load_seq:
                 return   # a film that was replaced in the meantime
             if error:
                 self._failed, self._waiting = True, False
-                self._problem("SW-205", f"mpv refused the file: {error}")
+                self._problem(self._load_problem(), f"mpv refused it: {error}")
                 self._report_playing()
             else:
                 self._wanted_entry = (result or {}).get("playlist_entry_id") if isinstance(result, dict) else None
@@ -516,7 +602,7 @@ class MpvPlayer(QObject):
                 self._wanted_entry is None or self._current_entry != self._wanted_entry):
             return   # about a film that was replaced in the meantime
         elif what == "file-loaded":
-            if self.path is None:
+            if self.path is None and self.stream is None:
                 return
             self._loaded = True
             duration = self._read("duration")
@@ -540,10 +626,10 @@ class MpvPlayer(QObject):
             reason, error, entry = value
             if entry != self._wanted_entry:
                 return   # about a film that was replaced in the meantime
-            if reason == self.module.MpvEventEndFile.ERROR and self.path is not None:
+            if reason == self.module.MpvEventEndFile.ERROR and (self.path is not None or self.stream is not None):
                 self._failed = True
                 self._waiting = False
-                self._problem("SW-205", f"mpv: {self._error_text(error)}")
+                self._problem(self._load_problem(), f"mpv: {self._error_text(error)}")
                 self._report_playing()
         elif what == "decoder-failed":
             prefix, text = value

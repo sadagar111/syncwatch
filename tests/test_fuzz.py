@@ -12,6 +12,7 @@ import base64
 import json
 import os
 import random
+import re
 import socket
 import sys
 import threading
@@ -27,7 +28,7 @@ from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305  # noqa
 from room_harness import Room  # noqa: E402
 
 from syncwatch.net import protocol  # noqa: E402
-from syncwatch.net.protocol import B64, BadMessage, Hex, ListOf  # noqa: E402
+from syncwatch.net.protocol import B64, BadMessage, Hex, ListOf, Pattern  # noqa: E402
 from syncwatch.net.websocket import WebSocket, WebSocketError  # noqa: E402
 from syncwatch.room import crypto, session as session_module  # noqa: E402
 from syncwatch.room.codes import CodeError, RoomCode, parse  # noqa: E402
@@ -58,11 +59,13 @@ def example(spec_entry, rng=None):
     if isinstance(kind, dict):
         return {name: example(entry) for name, entry in kind.items() if entry[1]}
     if isinstance(kind, ListOf):
-        return [example((kind.item, True, None))]
+        return [example((kind.item, True, kind.item_limit))]
     if isinstance(kind, B64):
         return base64.b64encode(bytes(kind.size)).decode("ascii")
     if isinstance(kind, Hex):
         return "0" * kind.chars
+    if isinstance(kind, Pattern):
+        return kind.example
     if isinstance(kind, tuple):
         return kind[0]
     if kind is bool:
@@ -110,11 +113,13 @@ def conforms(value, entry) -> bool:
             conforms(v, kind[k]) for k, v in value.items())
     if isinstance(kind, ListOf):
         return isinstance(value, list) and len(value) <= kind.max_items and all(
-            conforms(v, (kind.item, True, None)) for v in value)
+            conforms(v, (kind.item, True, kind.item_limit)) for v in value)
     if isinstance(kind, B64):
         return isinstance(value, bytes) and len(value) == kind.size
     if isinstance(kind, Hex):
         return isinstance(value, str) and len(value) == kind.chars
+    if isinstance(kind, Pattern):
+        return isinstance(value, str) and re.fullmatch(kind.regex, value) is not None
     if isinstance(kind, tuple):
         return value in kind
     if kind is bool:

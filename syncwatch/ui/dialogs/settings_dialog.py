@@ -116,6 +116,13 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(self.advanced)
         layout.addWidget(self.tabs, 1)
+        # Every section's tab in view (YouTube, torrents, Discover... added more): as wide as the tabs need
+        wanted = self.tabs.tabBar().sizeHint().width() + 48
+        screen = self.screen()
+        if screen is not None:
+            wanted = min(wanted, screen.availableGeometry().width() - 80)
+        if wanted > self.width():
+            self.resize(wanted, self.height())
         layout.addWidget(self.note)
         layout.addLayout(buttons)
         self._apply_visibility()
@@ -214,6 +221,8 @@ class SettingsDialog(QDialog):
         line = QLineEdit()
         line.setMaxLength(setting.max_len)
         line.editingFinished.connect(lambda l=line: self._set(key, l.text()))
+        if kind == "secret":
+            line.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
         if kind == "path":
             wrapper = QWidget()
             row = QHBoxLayout(wrapper)

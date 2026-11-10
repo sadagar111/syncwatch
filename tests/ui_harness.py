@@ -11,6 +11,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+import faulthandler
+faulthandler.enable(all_threads=sys.platform != "win32")   # a crash inside Qt or mpv prints where every thread was
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -33,7 +35,7 @@ if SCRIPT != "first_launch":
     (profile_dir / "settings.json").write_text(json.dumps({"_version": 1, "values": values}), encoding="utf-8")
 
 from PySide6.QtCore import QPoint  # noqa: E402
-from PySide6.QtGui import QPainter, QPixmap  # noqa: E402
+from PySide6.QtGui import QColor, QPainter, QPixmap  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from syncwatch import app as app_module  # noqa: E402
@@ -52,6 +54,15 @@ def main_window():
         if isinstance(widget, MainWindow):
             return widget
     return None
+
+
+def spin_until(seconds, until):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if until():
+            return True
+        spin(0.1)
+    return bool(until())
 
 
 def shot(name):
@@ -129,6 +140,21 @@ def run_script(errors_seen):
         window.controller.toggle()
         spin(1.0)
         shot("03_playing")
+        # pictures over the seek bar (0.5): made in the background, shown while hovering
+        made = spin_until(30, lambda: window.previews.file is not None)
+        from PySide6.QtTest import QTest
+        seek = window.controls.seek
+        QTest.mouseMove(seek, QPoint(seek.width() // 3, 20))
+        spin(0.3)
+        popup = seek._popup
+        checks = {"pictures made": made,
+                  "picture shown while hovering": popup is not None and popup.isVisible() and popup.pixmap is not None}
+        if popup is not None and popup.pixmap is not None:
+            popup.grab().save(str(OUT / "03b_seek_picture.png"))
+        QTest.mouseMove(window.controls.play, QPoint(5, 5))
+        spin(0.2)
+        print("PREVIEW CHECKS:", checks)
+        FAILED.extend(name for name, ok in checks.items() if not ok)
         print("position after play:", int(window.player.position()), "playing:", window.player.is_playing())
         window.controller.toggle()
         spin(0.5)
@@ -182,6 +208,39 @@ def run_script(errors_seen):
               "room code shown": window.sidebar.room.code_label.text().startswith("Room code: SW-"),
               "Sync up shown in a room": window.controls.sync_up.isVisible()}
     print("ROOM CHECKS:", checks)
+    FAILED.extend(name for name, ok in checks.items() if not ok)
+    # chat and reactions (0.5), in the room just opened
+    from PySide6.QtTest import QTest
+    from PySide6.QtCore import Qt
+    activity = window.sidebar.activity
+    checks = {"chat box in a room": activity.chat_box.isVisible(),
+              "reaction button in a room": window.controls.react.isVisible()}
+    window.activateWindow()
+    spin(0.2)
+    QTest.keyClick(window, Qt.Key.Key_T)
+    spin(0.2)
+    checks["T goes to the chat box"] = activity.chat_box.hasFocus()
+    QTest.keyClicks(activity.chat_box, "hello room 1")       # the digit is typed, not a reaction
+    QTest.keyClick(activity.chat_box, Qt.Key.Key_Return)
+    spin(0.3)
+    last = activity.list.item(activity.list.count() - 1).text() if activity.list.count() else ""
+    checks["my message shows"] = last.endswith("💬 You: hello room 1")
+    checks["the box is empty again"] = activity.chat_box.text() == ""
+    checks["typing a digit sent no reaction"] = len(window.overlay._reactions) == 0
+    QTest.keyClick(activity.chat_box, Qt.Key.Key_Escape)
+    spin(0.2)
+    QTest.keyClick(window, Qt.Key.Key_7)
+    spin(0.2)
+    checks["7 sends 🔥"] = [r[0] for r in window.overlay._reactions] == ["🔥"]
+    window.controls.reactionChosen.emit("🍿")
+    spin(0.3)
+    checks["the button sends 🍿"] = [r[0] for r in window.overlay._reactions] == ["🔥", "🍿"]
+    frame = QPixmap(window.overlay.size())
+    frame.fill(QColor("#30343c"))
+    window.overlay.render(frame)
+    frame.save(str(OUT / "05b_reactions_over_video.png"))
+    shot("05c_chat")
+    print("CHAT CHECKS:", checks)
     FAILED.extend(name for name, ok in checks.items() if not ok)
     from syncwatch.ui.dialogs.settings_dialog import SettingsDialog
     dialog = SettingsDialog(window.settings)

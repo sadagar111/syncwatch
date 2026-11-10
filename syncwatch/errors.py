@@ -11,7 +11,7 @@ Code ranges:
     3xx  the network
     4xx  rooms and the relay server
     5xx  watching in sync
-    6xx  film sources such as Real-Debrid / Stremio (later)
+    6xx  film sources: YouTube (60x), later torrents and sharing films in a room
     7xx  updates
     8xx  profile pictures
     9xx  unexpected errors and crashes
@@ -356,6 +356,126 @@ CATALOG: Dict[str, Problem] = {
         "Only the host can do that right now. Your buttons work just for you until the host "
         "allows everyone again.",
         [], INFO, popup=False),
+
+    # ---- 60x: YouTube --------------------------------------------------------
+    "SW-601": Problem(
+        "That isn't a YouTube video link",
+        "SyncWatch can play links to YouTube videos (youtube.com/watch?v=..., youtu.be/..., Shorts).",
+        ["Copy the link from the address bar or YouTube's Share button and paste it again."], INFO),
+    "SW-602": Problem(
+        "This YouTube video isn't available",
+        "YouTube says the video doesn't exist, was removed, is private, or isn't shown in your country.",
+        ["Check that the link opens in your browser.",
+         "If it's private, ask whoever posted it to make it public or unlisted."], WARNING),
+    "SW-603": Problem(
+        "YouTube wants a sign-in for this video",
+        "This video is age-restricted or for channel members only, and SyncWatch doesn't sign in to "
+        "YouTube.",
+        ["Pick another video, or watch this one in your browser."], WARNING),
+    "SW-604": Problem(
+        "YouTube is blocking this PC for a while",
+        "YouTube asked this PC to prove it isn't a bot. That happens after many requests in a short "
+        "time, or on some networks (VPNs, shared or university Wi-Fi).",
+        ["Wait half an hour and try again.",
+         "Turn off a VPN, or try another network (e.g. a phone hotspot)."], WARNING),
+    "SW-605": Problem(
+        "YouTube changed something",
+        "SyncWatch's YouTube part (yt-dlp) can't read YouTube's pages any more. YouTube changes them every "
+        "few weeks, and then yt-dlp needs an update.",
+        ["Update SyncWatch (Settings > Updates > Check now).",
+         "If there's no update yet, tell whoever publishes SyncWatch: \"Copy details\" and send them."]),
+    "SW-606": Problem(
+        "Can't reach YouTube",
+        "SyncWatch couldn't connect to YouTube.",
+        ["Check that this PC is online (open youtube.com in your browser).",
+         "A firewall or antivirus may be blocking SyncWatch's Python. Allow it."]),
+    "SW-607": Problem(
+        "Live streams can't be watched together yet",
+        "This video is a live stream or a premiere that hasn't started. SyncWatch plays normal videos.",
+        ["Wait until the stream is over and its recording is online."], INFO),
+    "SW-608": Problem(
+        "YouTube support is missing",
+        "This copy of SyncWatch can't play YouTube videos, because yt-dlp or Deno (which yt-dlp needs for "
+        "YouTube) isn't there.",
+        ["If you run SyncWatch from its source code, start it with SyncWatch.bat once: it installs "
+         "what's missing.",
+         "Otherwise download the full SyncWatch zip again and unzip it over this folder."]),
+    "SW-609": Problem(
+        "Couldn't play the YouTube video",
+        "The video was found, but the player couldn't play its stream.",
+        ["Try again: YouTube's stream addresses sometimes fail once.",
+         "Try a lower quality (Settings > YouTube > Quality).",
+         "Still nothing? Click \"Copy details\" and send them to whoever gave you SyncWatch."]),
+
+    "SW-610": Problem(
+        "Only the host can do that with the queue",
+        "The host's settings decide who may add videos, skip, remove and reorder.",
+        ["Ask the host, or watch on your own (click \"Following the room\")."], INFO),
+    "SW-611": Problem(
+        "Couldn't get the subtitles from YouTube",
+        "The video plays, but YouTube didn't give SyncWatch the subtitles you picked.",
+        ["Try again in a minute: YouTube sometimes says no once.",
+         "Pick another language, or load a subtitle file (Subtitles > Load a subtitle file…)."],
+        WARNING, popup=False),
+
+    # ---- 62x: torrents ------------------------------------------------------
+    "SW-620": Problem(
+        "That isn't a magnet link or torrent file",
+        "SyncWatch streams magnet links (magnet:?xt=urn:btih:...) and .torrent files.",
+        ["Copy the whole magnet link again, or pick the .torrent file you downloaded."], INFO),
+    "SW-621": Problem(
+        "Nobody seems to share this torrent",
+        "SyncWatch couldn't get the torrent's description from anyone, so it can't start.",
+        ["Try again later, or another torrent.",
+         "Settings > Torrents (advanced): *Find others without trackers* should be on."], WARNING),
+    "SW-622": Problem(
+        "This torrent has no video",
+        "None of the files in the torrent is a film SyncWatch can play.",
+        ["Pick another torrent."], WARNING),
+    "SW-623": Problem(
+        "Not enough space to stream this film",
+        "The download folder's drive doesn't have room for the film.",
+        ["Free up some space, or choose another download folder: Settings > Torrents."]),
+    "SW-624": Problem(
+        "The torrent part is missing",
+        "This copy of SyncWatch can't stream torrents, because libtorrent isn't there.",
+        ["If you run SyncWatch from its source code, start it with SyncWatch.bat once: it installs "
+         "what's missing.",
+         "Otherwise download the full SyncWatch zip again and unzip it over this folder."]),
+    "SW-625": Problem(
+        "Streaming the torrent stopped",
+        "Something went wrong while downloading.",
+        ["Try again. If it keeps happening, click \"Copy details\" and send them to whoever gave you "
+         "SyncWatch."]),
+    "SW-626": Problem(
+        "Couldn't play the film from the torrent",
+        "The film started downloading, but the player couldn't play it.",
+        ["Wait a little and open it again: more of it may be needed first.",
+         "Try another torrent (another release of the film)."]),
+    # ---- 63x: what should we watch? (TMDB, the film vote; 0.5) ----------------
+    "SW-631": Problem(
+        "Add a TMDB key for recommendations",
+        "Recommendations, posters and trailers come from TMDB (The Movie Database). It's free, but needs a key.",
+        ["Sign up at themoviedb.org, open Settings > API and ask for a key (personal use).",
+         "Copy the \"API Read Access Token\" into SyncWatch: Settings > Discover > TMDB key."], INFO, popup=False),
+    "SW-632": Problem(
+        "TMDB didn't accept the key",
+        "The key in Settings > Discover isn't right, or TMDB withdrew it.",
+        ["Copy it again from themoviedb.org > Settings > API: the long \"API Read Access Token\" or the "
+         "\"API Key\" (32 letters and digits)."], WARNING, popup=False),
+    "SW-633": Problem(
+        "Couldn't reach TMDB",
+        "SyncWatch got no answer from themoviedb.org. Your own films and the film vote still work.",
+        ["Check your internet connection and try again.",
+         "Some networks (school, work, antivirus web protection) block it: try another network."], INFO, popup=False),
+    "SW-634": Problem(
+        "TMDB is busy",
+        "TMDB asked SyncWatch to wait a moment.",
+        ["Try again in a minute."], INFO, popup=False),
+    "SW-635": Problem(
+        "TMDB sent something unexpected",
+        "Part of TMDB's answer didn't make sense, so it was left out.",
+        ["Try again later. If it keeps happening, send the log to whoever gave you SyncWatch."], INFO, popup=False),
 
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(

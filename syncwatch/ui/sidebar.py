@@ -255,6 +255,7 @@ class PersonRow(QWidget):
 
 class PeoplePanel(Panel):
     actionRequested = Signal(str, bytes)     # (action id, who)
+    readyClicked = Signal()                  # the ready check button (host: ask/call off; member: I'm ready)
 
     def __init__(self, parent=None):
         super().__init__("People", parent)
@@ -263,6 +264,27 @@ class PeoplePanel(Panel):
         self.body.addLayout(self.rows_box)
         self.rows: Dict[bytes, PersonRow] = {}
         self._order: Tuple = ()
+        self.ready_line = QLabel()
+        self.ready_line.setWordWrap(True)
+        self.ready_line.setTextFormat(Qt.TextFormat.PlainText)
+        self.ready_line.hide()
+        self.body.addWidget(self.ready_line)
+        self.ready_button = _small_button("✋ Ready check", "Ask everyone whether they're ready: when all are, the "
+                                          "film starts for everyone with a countdown")
+        self.ready_button.clicked.connect(self.readyClicked)
+        self.ready_button.hide()
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.ready_button)
+        buttons.addStretch(1)
+        self.body.addLayout(buttons)
+
+    def update_ready(self, text: str, button: str) -> None:
+        """The ready check: a line about it ("" = none) and the button's text ("" = no button)."""
+        self.ready_line.setText(text)
+        self.ready_line.setVisible(bool(text))
+        if button:
+            self.ready_button.setText(button)
+        self.ready_button.setVisible(bool(button))
 
     def update_people(self, entries: List[PersonEntry]) -> None:
         order = tuple(e.key for e in entries)
@@ -289,6 +311,107 @@ class PeoplePanel(Panel):
         for label, action in entry.actions:
             menu.addAction(label, lambda a=action, k=entry.key: self.actionRequested.emit(a, k))
         menu.exec(point)
+
+
+# ============================================================================ the YouTube queue (0.5)
+@dataclass
+class QueueEntry:
+    key: int
+    title: str
+    length: str          # "3:32", "" if not known
+    by: str
+    mine: bool
+
+
+class QueuePanel(Panel):
+    """What plays now and what's next. Right-click a video: play now, move, remove."""
+    playRequested = Signal(int)
+    removeRequested = Signal(int)
+    moveRequested = Signal(int, int)       # (key, new position)
+    skipClicked = Signal()
+    addClicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__("Up next", parent)
+        self.now = QLabel("")
+        self.now.setObjectName("Dim")
+        self.now.setWordWrap(True)
+        self.list = QListWidget()
+        self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.list.customContextMenuRequested.connect(self._menu)
+        self.list.itemDoubleClicked.connect(lambda item: self._double_clicked(item))
+        self.empty = QLabel("Nothing queued. Paste YouTube links (Ctrl+L) to line up videos.")
+        self.empty.setObjectName("Hint")
+        self.empty.setWordWrap(True)
+        self.add_button = _small_button("➕ Add", "Add a YouTube video to the queue (Ctrl+L)")
+        self.add_button.clicked.connect(self.addClicked)
+        self.skip_button = _small_button("⏭ Skip", "Play the next video now")
+        self.skip_button.clicked.connect(self.skipClicked)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.add_button)
+        buttons.addWidget(self.skip_button)
+        buttons.addStretch(1)
+        self.body.addWidget(self.now)
+        self.body.addWidget(self.list)
+        self.body.addWidget(self.empty)
+        self.body.addLayout(buttons)
+        self.entries: List[QueueEntry] = []
+        self.can_control = False
+
+    def update_queue(self, now_text: str, entries: List[QueueEntry], can_add: bool, can_control: bool,
+                     vote: str = "") -> None:
+        """vote: for someone who may not skip, the vote-to-skip button's text ("" = no such button)."""
+        self.can_control = can_control
+        self.now.setText(now_text)
+        self.now.setVisible(bool(now_text))
+        if [(e.key, e.title, e.length) for e in entries] != [(e.key, e.title, e.length) for e in self.entries]:
+            self.list.clear()
+            for number, entry in enumerate(entries, 1):
+                text = f"{number}. {entry.title}" + (f"  ·  {entry.length}" if entry.length else "")
+                item = QListWidgetItem(text)
+                item.setData(Qt.ItemDataRole.UserRole, entry.key)
+                item.setToolTip(f"{entry.title}\nAdded by {entry.by or 'someone'}")
+                self.list.addItem(item)
+        self.entries = list(entries)
+        if entries:   # just tall enough for the videos, up to six rows (then it scrolls)
+            row = self.list.sizeHintForRow(0) if self.list.count() else 0
+            row = row if row > 0 else self.fontMetrics().height() + 6
+            self.list.setFixedHeight(row * min(len(entries), 6) + 2 * self.list.frameWidth() + 8)
+        self.list.setVisible(bool(entries))
+        self.empty.setVisible(not entries)
+        self.add_button.setEnabled(can_add)
+        self.skip_button.setVisible((can_control or bool(vote)) and bool(entries))
+        self.skip_button.setText("⏭ Skip" if can_control else vote)
+        self.skip_button.setToolTip("Play the next video now" if can_control else
+                                    "Vote to skip this video: when more than half of the room votes, it's skipped")
+        total = len(entries)
+        self.heading.setText(f"UP NEXT ({total})" if total else "UP NEXT")
+
+    def _entry(self, key: int) -> Optional[QueueEntry]:
+        return next((e for e in self.entries if e.key == key), None)
+
+    def _double_clicked(self, item: QListWidgetItem) -> None:
+        if self.can_control:
+            self.playRequested.emit(int(item.data(Qt.ItemDataRole.UserRole)))
+
+    def _menu(self, point: QPoint) -> None:
+        item = self.list.itemAt(point)
+        if item is None:
+            return
+        key = int(item.data(Qt.ItemDataRole.UserRole))
+        entry = self._entry(key)
+        index = self.list.row(item)
+        menu = QMenu(self)
+        if self.can_control:
+            menu.addAction("Play now", lambda: self.playRequested.emit(key))
+            if index > 0:
+                menu.addAction("Move up", lambda: self.moveRequested.emit(key, index - 1))
+            if index < self.list.count() - 1:
+                menu.addAction("Move down", lambda: self.moveRequested.emit(key, index + 1))
+        if self.can_control or (entry is not None and entry.mine):
+            menu.addAction("Remove from the queue", lambda: self.removeRequested.emit(key))
+        if not menu.isEmpty():
+            menu.exec(self.list.viewport().mapToGlobal(point))
 
 
 # ============================================================================ friends
@@ -361,8 +484,21 @@ class FriendsPanel(Panel):
 
 
 # ============================================================================ activity
+class ChatBox(QLineEdit):
+    """Where a chat message is written (Enter sends it, Esc goes back to the video)."""
+    leave = Signal()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        if event.key() == Qt.Key.Key_Escape:
+            self.leave.emit()
+            return
+        super().keyPressEvent(event)
+
+
 class ActivityPanel(Panel):
+    """What happens in the room, and (in a room, 0.5) the chat: a box under the list."""
     COLOURS = {"you": "#9BE8B4", "friend": "#9CC9FF", "warn": "#FFC46B", "error": "#FF8A9B", "info": None}
+    chatSubmitted = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__("Activity", parent)
@@ -371,7 +507,20 @@ class ActivityPanel(Panel):
         self.list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.body.addWidget(self.list, 1)
+        self.chat_box = ChatBox()
+        self.chat_box.setPlaceholderText("Say something… (T)")
+        self.chat_box.setToolTip("Write to everyone in the room: T jumps here, Enter sends, Esc goes back")
+        from ..net.protocol import CHAT_TEXT
+        self.chat_box.setMaxLength(CHAT_TEXT)
+        self.chat_box.returnPressed.connect(lambda: self.chatSubmitted.emit(self.chat_box.text()))
+        self.chat_box.hide()
+        self.body.addWidget(self.chat_box)
         self.max_items = 200
+
+    def set_chat(self, on: bool) -> None:
+        """The chat box shows in a room only."""
+        self.chat_box.setVisible(on)
+        self.heading.setText("ACTIVITY AND CHAT" if on else "ACTIVITY")
 
     def add(self, text: str, kind: str = "info") -> None:
         item = QListWidgetItem(f"{time.strftime('%H:%M')}  {text}")
@@ -382,6 +531,34 @@ class ActivityPanel(Panel):
         while self.list.count() > self.max_items:
             self.list.takeItem(0)
         self.list.scrollToBottom()
+
+
+class ShareBanner(QFrame):
+    """(0.5) "Alex is watching Dune.mkv (4.2 GB), you don't have it: [Get it from Alex]"."""
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("Panel")
+        self.text = QLabel("")
+        self.text.setWordWrap(True)
+        self.button = QPushButton("Get it")
+        self.button.setObjectName("Accent")
+        self.button.clicked.connect(self.clicked)
+        column = QVBoxLayout(self)
+        column.setContentsMargins(10, 8, 10, 8)
+        column.setSpacing(6)
+        column.addWidget(self.text)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(self.button)
+        column.addLayout(row)
+        self.setVisible(False)
+
+    def offer(self, text: str, button: str) -> None:
+        self.text.setText(text)
+        self.button.setText(button)
+        self.setVisible(bool(text))
 
 
 class UpdateBanner(QFrame):
@@ -443,16 +620,21 @@ class Sidebar(QWidget):
         header.addWidget(version)
         header.addStretch(1)
         self.update_banner = UpdateBanner()
+        self.share_banner = ShareBanner()
         self.room = RoomPanel(last_code)
         self.people = PeoplePanel()
+        self.queue = QueuePanel()
+        self.queue.hide()                  # shown once YouTube is used (see apply_settings / the window)
         self.friends = FriendsPanel()
         self.activity = ActivityPanel()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 8, 8, 8)
         layout.addLayout(header)
         layout.addWidget(self.update_banner)
+        layout.addWidget(self.share_banner)
         layout.addWidget(self.room)
         layout.addWidget(self.people)
+        layout.addWidget(self.queue)
         layout.addWidget(self.friends)
         layout.addWidget(self.activity, 1)
 

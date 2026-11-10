@@ -90,6 +90,29 @@ def video_checks() -> List[CheckResult]:
     return results
 
 
+def youtube_check(js_setting: str = "") -> CheckResult:
+    """YouTube (from 0.5): yt-dlp, and Deno for YouTube's JavaScript puzzles."""
+    import importlib.util  # noqa: PLC0415
+    from .youtube_ui import find_js_runtime  # noqa: PLC0415
+    if importlib.util.find_spec("yt_dlp") is None:
+        return CheckResult("Video", "YouTube", WARN, "yt-dlp is missing", "SW-608")
+    if find_js_runtime(js_setting) is None:
+        return CheckResult("Video", "YouTube", WARN, "Deno is missing", "SW-608")
+    try:
+        from yt_dlp.version import __version__ as version  # noqa: PLC0415
+    except ImportError:
+        version = "?"
+    return CheckResult("Video", "YouTube", OK, f"yt-dlp {version} with Deno")
+
+
+def torrent_check() -> CheckResult:
+    """Streaming torrents (from 0.5): libtorrent, which runs in its own process."""
+    import importlib.util  # noqa: PLC0415
+    if importlib.util.find_spec("libtorrent") is None:
+        return CheckResult("Video", "Torrents", WARN, "libtorrent is missing", "SW-624")
+    return CheckResult("Video", "Torrents", OK, "libtorrent installed")
+
+
 def player_check(player, fallback_reason: str = "") -> CheckResult:
     """Which video player plays films: mpv (normal), or Qt's (chosen, or because mpv failed)."""
     if player.engine == "mpv":

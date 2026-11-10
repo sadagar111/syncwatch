@@ -32,6 +32,8 @@ class SeekBar(QWidget):
         self.show_markers = True
         self._hover_x: Optional[float] = None
         self._drag_ms: Optional[int] = None
+        self.previews = None              # pictures of the film while hovering (0.5): ui/previews_ui.py
+        self._popup = None
 
     # ------------------------------------------------------------ data
     def set_state(self, position: float, duration: int) -> None:
@@ -81,6 +83,8 @@ class SeekBar(QWidget):
         marker = self._marker_near(event.position())
         if marker:
             QToolTip.showText(event.globalPosition().toPoint(), f"{marker[2]}: {fmt_time(marker[0])}", self)
+        else:
+            self._show_picture(self._hover_x)
         self.update()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
@@ -93,7 +97,22 @@ class SeekBar(QWidget):
 
     def leaveEvent(self, event) -> None:  # noqa: N802
         self._hover_x = None
+        if self._popup is not None:
+            self._popup.hide()
         self.update()
+
+    def _show_picture(self, x: float) -> None:
+        """The film's picture at the mouse (if the pictures are made), just above the bar."""
+        pixmap = self.previews.pixmap_at(self._ms_at(x)) if self.previews is not None and self.duration > 0 else None
+        if pixmap is None:
+            if self._popup is not None:
+                self._popup.hide()
+            return
+        if self._popup is None:
+            from .previews_ui import PreviewPopup
+            self._popup = PreviewPopup(self)
+        ms = self._drag_ms if self._drag_ms is not None else self._ms_at(x)
+        self._popup.show_at(pixmap, fmt_time(ms), self.mapToGlobal(QPointF(x, 0).toPoint()))
 
     def _marker_near(self, point: QPointF):
         if not self.show_markers:

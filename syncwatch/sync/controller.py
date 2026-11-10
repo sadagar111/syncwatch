@@ -46,6 +46,9 @@ from ..room.codes import CodeError, parse
 from ..room.context import Rooms
 from ..room.friends import Friends
 from ..room.session import JOINING, Member, RoomListener, RoomSession
+from ..youtube.queue import Item, Queue, QueueFull
+from .film_vote import FilmVoteRoom
+from .chat import RoomChat
 
 log = logging.getLogger("syncwatch.sync")
 
@@ -65,11 +68,25 @@ PLAY_ALIGN_MS = 300          # on play, jump first if further apart than this
 READY_TOLERANCE_MS = 500
 SAME_SPOT_MS = 40            # already there: no need to jump again
 JUMP_MEASURE_AFTER_S = 2.0   # how a jump while playing turned out is measured this long after it
+MY_STALL_MIN_S = 1.0         # my video stuck loading this long (not a blip): my heartbeat says so
+STALL_AFTER_S = 2.5          # a friend's video has stopped to load for this long: the room waits for it
+STALL_FRESH_S = 6.0          # (only reports newer than this count: someone who went quiet isn't waited for)
+LOADING_WAIT_GAP_S = 20.0    # not again sooner than this after the last such wait began
+LOADING_WAITS_MAX = 3        # if the same friend's video needs this many waits within
+LOADING_WAITS_WINDOW_S = 180.0   # this long, their connection can't keep up: not waited for any more
+DROP_AFTER_S = 6.0           # a friend following the room silent this long while we play: their connection dropped
+BACK_WITHIN_S = 2.5          # (a report this recent: they're back)
+BACK_STEADY_S = 3.0          # back for this long (their app may first reconnect to the room): start together
+DROP_GIVE_UP_S = 90.0        # not back after this long: the host decides
 JUMP_LEARN_RATE = 0.3        # how much one measured jump changes what this PC has learned
 MAX_JUMP_AHEAD_MS = 2000.0
 JUMP_ANSWER_WAIT_S = 3.0     # after my jump, I wait this long (plus "wait for slow PCs") for the host
 SEND_JUMP_WAIT_S = 2.0       # "Keep playing": a jump is sent once my film shows the new spot, but no later
 MATCH_TOLERANCE_MS = 1000    # films whose lengths differ by less than this count as the same
+SHARE_ASK_GAP_S = 10.0       # someone may ask for the film at most this often
+QREQ_RATE = 6                # the host takes at most this many queue requests per person ...
+QREQ_WINDOW_S = 10.0         # ... in this many seconds (more are dropped)
+QUEUE_RESEND_S = 15.0        # the host repeats the queue now and then (for people who just came in)
 
 REASONS_LEFT = {"left": "left", "timeout": "lost connection", "removed": "was removed by the host",
                 "banned": "was removed and blocked by the host", "": "left"}
@@ -90,6 +107,7 @@ class Peer:
     playing: bool = False
     separate: bool = False
     ready: bool = True
+    stalled: bool = False        # playing, but their video has stopped to load more (a slow stream)
     at: int = 0                  # the room clock (ms) when ``pos`` was measured; 0 = unknown
     received_at: float = 0.0     # my clock (s) when the report arrived
     known: bool = False          # at least one report received
@@ -114,6 +132,16 @@ class Rules:
     cd_pp: float = 2.0
     cd_sync: float = 15.0
     jump: str = "together"     # jumps while playing: "together" or "ahead" (the host decides)
+
+
+@dataclass
+class _ReadyCheck:
+    id: int
+    waiting: Set[bytes]          # who hasn't said they're ready yet
+    deadline: float
+
+
+READY_CHECK_TIMEOUT_S = 180.0    # a ready check nobody finishes closes after this long
 
 
 @dataclass
@@ -168,6 +196,38 @@ class Controller(RoomListener):
         self._align_on_next_state = False
         self._profile_due: Optional[float] = None
         self._warned_films: Set[bytes] = set()
+        # The YouTube queue (0.5): mine when I host or am alone, else a copy of the host's
+        self.queue = Queue()
+        self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
+        self._qreq_times: Dict[bytes, Deque[float]] = {}
+        self.votes = FilmVoteRoom(self)     # the film vote (0.5)
+        self.chat = RoomChat(self)          # chat and reactions (0.5)
+        self._skip_votes: Dict[bytes, str] = {}    # the host: who voted to skip the video that plays now
+        self._skip_key = 0                          # (its queue key)
+        self._voted_key = 0                         # a member: the video I voted to skip
+        self._stalled_since: Dict[bytes, tuple] = {}           # (host) whose video is loading since when
+        self._loading_waits: Dict[bytes, Deque[float]] = {}    # (host) when the room waited for whom
+        self._loading_given_up: Set[bytes] = set()            # (host) connections that can't keep up
+        self._last_loading_wait = -1e9
+        self._my_stall_since: Optional[float] = None           # (member) my video stuck loading since
+        self._ready_check: Optional[_ReadyCheck] = None    # (host) the ready check that's open
+        self._ready_ids = 0
+        self.ready_view: Optional[Dict] = None             # what the People panel shows: {id, waiting, me}
+        self._film_followed = ""                  # the host's film I last told the window about
+        self._paused_for_drop: Optional[bytes] = None    # (host) the friend the room paused for
+        self._drop_paused_at = 0.0
+        self._back_since: Optional[float] = None
+        self._drops_noticed: Set[bytes] = set()          # (host) silent friends already paused for
+        self._queue_sent_at = -1e9
+        self._queue_dirty = False
+        self._queue_from_host = False      # my queue is a copy of a host's (dropped when I leave)
+        self._share_asked: Dict[bytes, float] = {}   # (host) who asked for the film when
+        self._share_waiting = False                    # (member) I asked the host for their film
+        self._share_magnet = ""                        # (member) the film I'm getting from the host
+        subscribe = getattr(settings, "subscribe", None)
+        if subscribe is not None:          # the host changed who may add/skip: tell the room now
+            subscribe("youtube.queue_", lambda _key, _value: self._queue_rules_changed())
+            subscribe("youtube.vote_skip", lambda _key, _value: self._queue_rules_changed())
 
     # ================================================================ setup
     def start(self) -> None:
@@ -191,8 +251,14 @@ class Controller(RoomListener):
                 self.session.rename()
             self._send_profile()
 
-    def set_film(self, name: str, size: int, duration_ms: int) -> None:
+    def set_film(self, name: str, size: int, duration_ms: int, yt: str = "", magnet: str = "") -> None:
+        """What I have open. yt: a YouTube video's ID (then name is its title and size 0).
+        magnet: the torrent it streams from (so others in the room can stream it too)."""
         film = {"name": name[:255], "size": int(size), "dur": max(0, int(duration_ms))}
+        if yt:
+            film["yt"] = yt
+        if magnet and len(magnet) <= 3000:
+            film["magnet"] = magnet
         if film == self.film:
             return
         self.film = film
@@ -347,6 +413,24 @@ class Controller(RoomListener):
         self._last_reject.clear()
         self._warned_films.clear()
         self.rules = Rules()
+        self._qreq_times.clear()
+        self._share_waiting, self._share_magnet = False, ""
+        self._share_asked.clear()
+        self.votes.reset()
+        self.chat.reset()
+        self._skip_votes, self._skip_key, self._voted_key = {}, 0, 0
+        self._stalled_since.clear()
+        self._loading_waits.clear()
+        self._loading_given_up.clear()
+        self._ready_check, self.ready_view = None, None
+        self._film_followed = ""
+        self._paused_for_drop = None
+        self._drops_noticed.clear()
+        if self._queue_from_host:   # a member's copy of the host's queue goes; my own stays
+            self._queue_from_host = False
+            self.queue.reset()
+            self.queue_rules = {"add": "everyone", "control": "host"}
+            self.ui_queue_changed()
 
     # ================================================================ user actions
     def toggle(self) -> None:
@@ -408,6 +492,101 @@ class Controller(RoomListener):
         debounce = int(self.settings.get("sync.seek_debounce_ms")) / 1000.0
         self._pending_seek_at = self.clock() + debounce
         self._send_jump_by = None
+
+    # ---------------------------------------------------------------- the ready check (0.5)
+    def ready_check(self) -> None:
+        """The host: ask everyone following whether they're ready. When all are, Sync up starts the film
+        for everyone with the countdown. Again while it's open: cancel it."""
+        if not (self.connected and self.is_host):
+            return
+        if self._ready_check is not None:
+            self._close_ready_check("You called off the ready check", start=False)
+            return
+        waiting = {p.id for p in self.peers.values() if not p.separate}
+        if not waiting:
+            self.ui.activity("Nobody follows the room yet: nobody to ask", "info")
+            return
+        self._ready_ids += 1
+        self._ready_check = _ReadyCheck(self._ready_ids, waiting, self.clock() + READY_CHECK_TIMEOUT_S)
+        self.ui.activity("You asked: everyone ready?", "you")
+        self._send_ready_check()
+
+    def i_am_ready(self) -> None:
+        """A member answers the host's ready check."""
+        view = self.ready_view
+        if self.is_host or view is None or view.get("me"):
+            return
+        view["me"] = True
+        self.session.send_room("rready", id=view["id"])
+        self.ui.activity("You said you're ready", "you")
+        self.ui.changed()
+
+    def _send_ready_check(self) -> None:
+        check = self._ready_check
+        names = [self.peers[pid].name for pid in check.waiting if pid in self.peers]
+        self.ready_view = {"id": check.id, "waiting": names, "me": True}
+        self.session.send_room("rcheck", id=check.id, open=True, waiting=[{"n": name[:32]} for name in names])
+        self.ui.changed()
+
+    def _close_ready_check(self, text: str, start: bool) -> None:
+        check, self._ready_check, self.ready_view = self._ready_check, None, None
+        if check is not None:
+            self.session.send_room("rcheck", id=check.id, open=False)
+        self.ui.activity(text, "friend" if start else "info")
+        if start:
+            self._start_host_sync(by="")      # everyone lines up on me, 3-2-1, all play
+        self.ui.changed()
+
+    def _watch_ready_check(self, now: float) -> None:
+        check = self._ready_check
+        if check is None:
+            return
+        if not (self.connected and self.is_host):
+            self._ready_check = self.ready_view = None
+            return
+        gone = {pid for pid in check.waiting if pid not in self.peers or self.peers[pid].separate}
+        if gone:           # left the room, or watches on their own now: not waited for
+            check.waiting -= gone
+            if not check.waiting:
+                self._close_ready_check("Everyone's ready: here we go", start=True)
+                return
+            self._send_ready_check()
+        if now > check.deadline:
+            names = ", ".join(self.peers[pid].name for pid in check.waiting if pid in self.peers)
+            self._close_ready_check(f"The ready check is over: {names or 'someone'} didn't answer", start=False)
+
+    def _on_rready(self, peer: Peer, body: Dict) -> None:
+        check = self._ready_check
+        if not self.is_host or check is None or body["id"] != check.id or peer.id not in check.waiting:
+            return
+        check.waiting.discard(peer.id)
+        self.ui.activity(f"{peer.name} is ready", "friend")
+        if not check.waiting:
+            self._close_ready_check("Everyone's ready: here we go", start=True)
+        else:
+            self._send_ready_check()
+
+    def _on_rcheck(self, peer: Peer, body: Dict) -> None:
+        if self.is_host or not peer.is_host:
+            return
+        view = self.ready_view
+        if not self.attached:           # watching on my own: the host doesn't wait for me
+            if view is not None:
+                self.ready_view = None
+                self.ui.changed()
+            return
+        if not body["open"]:
+            if view is not None and view["id"] == body["id"]:
+                self.ready_view = None
+                self.ui.changed()
+            return
+        new = view is None or view["id"] != body["id"]
+        waiting = [entry["n"] for entry in body.get("waiting", [])]
+        self.ready_view = {"id": body["id"], "waiting": waiting,
+                           "me": (not new and view["me"]) or self.name not in waiting}
+        if new:
+            self.ui.activity(f"{peer.name} asks: everyone ready? (✓ I'm ready in People, or R)", "friend")
+        self.ui.changed()
 
     def sync_up(self) -> None:
         if not self.connected or not self.peers:
@@ -504,6 +683,10 @@ class Controller(RoomListener):
                 self.ui.activity("The host didn't start everyone again after your jump, so your film plays on",
                                  "warn")
         self._advance_host_sync(now)
+        self._note_stall(now)
+        self._wait_for_loading(now)
+        self._watch_ready_check(now)
+        self._watch_drops(now)
         self._advance_client_sync(now)
         if self._play_at is not None and now >= self._play_at:
             self._play_at = None
@@ -512,6 +695,11 @@ class Controller(RoomListener):
         if self._profile_due is not None and now >= self._profile_due:
             self._profile_due = None
             self._send_profile()
+        if self.connected and self.is_host and (self._queue_dirty or (
+                now - self._queue_sent_at > QUEUE_RESEND_S and (self.queue.items or self.queue.now))):
+            self._send_queue(now)
+        if self.connected:
+            self.votes.tick(now)
         if self.connected and now >= self._next_heartbeat:
             self._next_heartbeat = now + (HEARTBEAT_HOST_S if self.is_host else HEARTBEAT_MEMBER_S)
             self._send_heartbeat()
@@ -722,6 +910,7 @@ class Controller(RoomListener):
         peer.at = body["at"]
         peer.received_at = self.clock()
         peer.ready = body.get("ready", True)
+        peer.stalled = body.get("stall", False)
         peer.known = True
         film = body.get("film")
         if film != peer.film:
@@ -734,9 +923,14 @@ class Controller(RoomListener):
         self._report(peer, body)
         peer.separate = body.get("separate", False)
 
+    def align_on_next_state(self) -> None:
+        """After opening the host's video: jump to where the host is when their next heartbeat comes."""
+        self._align_on_next_state = True
+
     def _on_state(self, peer: Peer, body: Dict) -> None:
         """The host's heartbeat."""
         self._report(peer, body)
+        self._follow_host_video(body.get("film") or {})
         peer.separate = False
         rules = body["rules"]
         old = self.rules.host_only
@@ -748,6 +942,365 @@ class Controller(RoomListener):
         if self._align_on_next_state and self.p.has_media():
             self._align_on_next_state = False
             self.sync_me()
+
+    # ================================================================ the YouTube queue (0.5)
+    def ui_queue_changed(self) -> None:
+        changed = getattr(self.ui, "queue_changed", None)
+        if changed is not None:
+            changed()
+
+    @property
+    def decides_queue(self) -> bool:
+        """My app holds the queue: I host, or I'm not in a room."""
+        return not self.connected or self.is_host
+
+    def my_queue_rules(self) -> Dict[str, str]:
+        return {"add": str(self.settings.get("youtube.queue_add")),
+                "control": str(self.settings.get("youtube.queue_control")),
+                "vote": bool(self.settings.get("youtube.vote_skip"))}
+
+    def can_queue(self, what: str) -> bool:
+        """"add" or "control" (skip, remove others' videos, reorder, play now) allowed for me?"""
+        return self.decides_queue or self.queue_rules.get(what) == "everyone"
+
+    def queue_add(self, video_id: str, title: str = "", dur: int = 0, quiet: bool = False) -> bool:
+        if self.decides_queue:
+            return self._queue_do("add", None, yt=video_id, title=title, dur=dur, quiet=quiet) is None
+        if not self.can_queue("add"):
+            self.ui.problem("SW-610")
+            return False
+        self.session.send_room("qreq", op="add", yt=video_id, title=(title or video_id)[:120], dur=max(0, int(dur)))
+        self.ui.activity(f"You asked to add {title or video_id} to the queue", "you")
+        return True
+
+    def queue_skip(self) -> None:
+        self._queue_request("skip")
+
+    def can_vote_skip(self) -> bool:
+        """A member who may not skip can ask the room to (the host's setting)."""
+        return (not self.can_queue("control") and bool(self.queue_rules.get("vote"))
+                and self.queue.now is not None)
+
+    def voted_to_skip(self) -> bool:
+        return self.queue.now is not None and self._voted_key == self.queue.now.key
+
+    def queue_vote_skip(self) -> None:
+        """My vote to skip the video that plays (the host's app counts: more than half the room skips it)."""
+        now = self.queue.now
+        if self.can_queue("control"):
+            self.queue_skip()
+            return
+        if not self.can_vote_skip():
+            self.ui.problem("SW-610")
+            return
+        if self._voted_key == now.key:
+            self.ui.activity("You've already voted to skip this video", "info")
+            return
+        self._voted_key = now.key
+        self.session.send_room("qreq", op="voteskip", key=now.key)
+        self.ui.activity(f"You voted to skip {now.title}", "you")
+
+    def queue_remove(self, key: int) -> None:
+        self._queue_request("remove", key=key)
+
+    def queue_play(self, key: int) -> None:
+        self._queue_request("play", key=key)
+
+    def queue_move(self, key: int, index: int) -> None:
+        self._queue_request("move", key=key, to=max(0, min(50, int(index))))
+
+    def queue_next(self) -> Optional[Item]:
+        """The video ended (host or alone): the next one starts, if the queue has one."""
+        if not self.decides_queue:
+            return None
+        return self._queue_start(self.queue.advance())
+
+    def queue_info(self, video_id: str, title: str, dur: int) -> None:
+        """A video was looked up: its real title and length go into the queue."""
+        if self.decides_queue and self.queue.update_info(video_id, title, dur):
+            self._queue_changed()
+
+    def queue_now_playing(self, video_id: str, title: str, dur: int) -> None:
+        """I (host or alone) opened a video straight away, not through the queue."""
+        if not self.decides_queue:
+            return
+        now = self.queue.now
+        if now is None or now.id != video_id:
+            self.queue.set_now(video_id, title, dur, self.name)
+            self._queue_changed()
+
+    def queue_playing_elsewhere(self) -> None:
+        """I (host or alone) opened a film: nothing from YouTube plays now."""
+        if self.decides_queue and self.queue.now is not None:
+            self.queue.playing_elsewhere()
+            self._queue_changed()
+
+    def start_together(self) -> None:
+        """The host's next video is open: everyone starts it at 0:00 at the same moment, once they
+        have it open too (slow PCs are waited for, at most youtube.start_wait_s)."""
+        if self.connected and self.is_host and any(not p.separate for p in self.peers.values()):
+            self._start_host_sync(by="", kind="jump", pos=0, next_video=True)
+        elif not self.connected or self.is_host:
+            self.p.play()
+            self.ui.changed()
+
+    def _queue_request(self, op: str, **fields) -> None:
+        if self.decides_queue:
+            self._queue_do(op, None, **fields)
+            return
+        mine = op == "remove" and self._queue_item_is_mine(fields.get("key"))
+        if not mine and not self.can_queue("control"):
+            self.ui.problem("SW-610")
+            return
+        self.session.send_room("qreq", op=op, **fields)
+
+    def _queue_item_is_mine(self, key) -> bool:
+        item = self.queue.find(key) if key else None
+        return item is not None and item.by == self.name
+
+    def _queue_do(self, op: str, peer: Optional[Peer], **fields) -> Optional[str]:
+        """Change the queue (host or alone). peer: who asked (None = me). Returns why not, or None."""
+        who = peer.name if peer is not None else self.name
+        key = fields.get("key")
+        if op == "add":
+            video = fields.get("yt")
+            if not video:
+                return "bad"
+            if self.queue.contains(video):
+                if peer is None:
+                    self.ui.activity("That video is already in the queue", "info")
+                return None
+            try:
+                item = self.queue.add(video, fields.get("title") or video, int(fields.get("dur") or 0), who)
+            except (QueueFull, ValueError):
+                if peer is None:
+                    self.ui.activity("The queue is full (50 videos)", "warn")
+                return "busy"
+            item.by_id = peer.id if peer is not None else None
+            if not fields.get("quiet"):     # (a playlist says it once for all of its videos)
+                self.ui.activity(f"{'You' if peer is None else who} added {item.title} to the queue",
+                                 "you" if peer is None else "friend")
+            self._queue_changed()
+            if len(self.queue.items) == 1 and self._idle_for_queue():
+                self._queue_start(self.queue.advance())   # nothing (more) playing: start right away
+            return None
+        if op == "skip":
+            self.ui.activity(f"{'You' if peer is None else who} skipped to the next video",
+                             "you" if peer is None else "friend")
+            if self._queue_start(self.queue.advance()) is None:
+                self.ui.activity("Nothing more in the queue", "info")
+            return None
+        if op == "play":
+            item = self.queue.play(key) if key else None
+            if item is not None:
+                self._queue_start(item)
+            return None
+        if op == "remove":
+            item = self.queue.remove(key) if key else None
+            if item is not None:
+                self._queue_changed()
+            return None
+        if op == "move":
+            if key and self.queue.move(key, fields.get("to", 0)):
+                self._queue_changed()
+            return None
+        return "bad"
+
+    def _idle_for_queue(self) -> bool:
+        """Nothing open, or a YouTube video that has ended: a newly added video can start at once.
+        (A film that's open, even paused, isn't replaced by adding a video.)"""
+        if not self.p.has_media():
+            return True
+        if not (self.film or {}).get("yt"):
+            return False
+        duration = self.p.duration()
+        return not self.p.is_playing() and duration > 0 and self.p.position() >= duration - 1500
+
+    def _queue_start(self, item: Optional[Item]) -> Optional[Item]:
+        if item is None:
+            return None
+        self._queue_changed()
+        play = getattr(self.ui, "play_queue_item", None)
+        if play is not None:
+            play(item)
+        return item
+
+    def _queue_rules_changed(self) -> None:
+        if self.connected and self.is_host:
+            self._queue_dirty = True
+        self.ui_queue_changed()
+
+    def _queue_changed(self) -> None:
+        self._queue_dirty = True
+        self.ui_queue_changed()
+
+    def _send_queue(self, now: float) -> None:
+        self._queue_dirty = False
+        self._queue_sent_at = now
+        self.session.send_room("queue", **self.queue.to_message(), rules=self.my_queue_rules())
+
+    def _on_qreq(self, peer: Peer, body: Dict) -> None:
+        if not self.is_host:
+            return
+        now = self.clock()
+        times = self._qreq_times.setdefault(peer.id, collections.deque(maxlen=QREQ_RATE))
+        if len(times) == QREQ_RATE and now - times[0] < QREQ_WINDOW_S:
+            return   # flood protection: silently dropped
+        times.append(now)
+        op, rules = body["op"], self.my_queue_rules()
+        if op == "voteskip":
+            if rules["vote"]:
+                self._queue_vote(peer, body.get("key"))
+            else:
+                self._reject(peer, "queue", "host_only")
+            return
+        if op == "add":
+            allowed = rules["add"] == "everyone"
+        else:
+            item = self.queue.find(body["key"]) if body.get("key") else None
+            own = op == "remove" and item is not None and getattr(item, "by_id", None) == peer.id
+            allowed = own or rules["control"] == "everyone"
+        if not allowed:
+            self._reject(peer, "queue", "host_only")
+            return
+        fields = {name: body[name] for name in ("yt", "title", "dur", "key", "to") if name in body}
+        if self._queue_do(op, peer, **fields) == "busy":
+            self._reject(peer, "queue", "busy")
+
+    def _on_vote(self, peer: Peer, body: Dict) -> None:
+        self.votes.on_vote(peer, body)
+
+    def _on_vreq(self, peer: Peer, body: Dict) -> None:
+        self.votes.on_vreq(peer, body)
+    def _on_chat(self, peer: Peer, body: Dict) -> None:
+        self.chat.on_chat(peer, body)
+
+    def _on_react(self, peer: Peer, body: Dict) -> None:
+        self.chat.on_react(peer, body)
+
+    def _queue_vote(self, peer: Peer, key) -> None:
+        """The host: a vote to skip the video that plays now. More than half of the room skips it."""
+        now = self.queue.now
+        if now is None or key != now.key:
+            return              # a vote for a video that isn't playing any more
+        if self._skip_key != now.key:
+            self._skip_votes, self._skip_key = {}, now.key
+        self._skip_votes[peer.id] = peer.name
+        people = 1 + len(self.peers)             # me (the host) and everyone in the room
+        votes, need = len(self._skip_votes), people // 2 + 1
+        if votes >= need:
+            self.ui.activity(f"The room voted to skip {now.title} ({votes} of {people})", "friend")
+            self._skip_votes, self._skip_key, self.queue.skip = {}, 0, None
+            if self._queue_start(self.queue.advance()) is None:
+                self.ui.activity("Nothing more in the queue", "info")
+                self._queue_changed()
+            return
+        self.queue.skip = (now.key, votes, need)
+        self.ui.activity(f"{peer.name} voted to skip {now.title} ({votes} of {need} needed)", "friend")
+        self._queue_changed()
+
+    def _on_queue(self, peer: Peer, body: Dict) -> None:
+        if self.is_host or not peer.is_host:
+            return
+        before = {item.key for item in self.queue.items}
+        if not self.queue.load_message(body):
+            return
+        self._queue_from_host = True
+        self.queue_rules = dict(body["rules"])
+        for item in self.queue.items:
+            if item.key not in before and before and item.by != self.name:
+                self.ui.activity(f"{item.by or 'Someone'} added {item.title} to the queue", "friend")
+        self.ui_queue_changed()
+
+    # ================================================================ sharing a film (0.5)
+    def can_ask_for_film(self) -> Optional[Dict]:
+        """The host's film, if I could ask for it: they play a file (not YouTube or a torrent) that
+        I don't have (not the same name and size, and not a file of the same length)."""
+        host = self.host_peer
+        if self.is_host or host is None or not self.attached or not host.film:
+            return None
+        film = host.film
+        if film.get("yt") or film.get("magnet") or not film.get("size") or host.match in ("same", "similar"):
+            return None
+        return film
+
+    def ask_for_film(self, my_addresses: List[str]) -> bool:
+        film = self.can_ask_for_film()
+        if film is None:
+            return False
+        self._share_waiting = True
+        self.session.send_room("share_req", name=film["name"], size=film["size"], addrs=my_addresses[:8])
+        self.ui.activity(f"You asked {self.host_peer.name} for {film['name']}", "you")
+        return True
+
+    def share_ready(self, magnet: str, name: str, size: int, addresses: List[str]) -> None:
+        """(the one sharing) the film is ready to be fetched: tell the room where."""
+        if self.connected:
+            self.session.send_room("share", magnet=magnet, name=name[:255], size=int(size), addrs=addresses[:8])
+
+    def share_addresses(self, addresses: List[str]) -> None:
+        """(the one fetching) where the sharer can reach me (a second way in, through other routers)."""
+        if self.connected and addresses:
+            self.session.send_room("share_peer", addrs=addresses[:8])
+
+    def _on_share_req(self, peer: Peer, body: Dict) -> None:
+        if not self.is_host or not self.film:
+            return
+        now = self.clock()
+        if now - self._share_asked.get(peer.id, -1e9) < SHARE_ASK_GAP_S:
+            return   # asked a moment ago
+        self._share_asked[peer.id] = now
+        if (body["name"], body["size"]) != (self.film["name"], self.film["size"]):
+            return   # asking for a film I don't have open (any more)
+        handler = getattr(self.ui, "share_requested", None)
+        if handler is not None:
+            handler(peer.name, list(body.get("addrs", [])))
+
+    def _on_share(self, peer: Peer, body: Dict) -> None:
+        """The host shares: the film I asked for, or new addresses for the one I'm already getting."""
+        if self.is_host or not peer.is_host:
+            return
+        if not self._share_waiting and body["magnet"] != self._share_magnet:
+            return
+        self._share_waiting = False
+        self._share_magnet = body["magnet"]
+        handler = getattr(self.ui, "receive_share", None)
+        if handler is not None:
+            handler(body["magnet"], body["name"], body["size"], list(body["addrs"]))
+
+    def _on_share_peer(self, peer: Peer, body: Dict) -> None:
+        if not self.is_host:
+            return
+        handler = getattr(self.ui, "share_peer", None)
+        if handler is not None:
+            handler(peer.name, list(body["addrs"]))
+
+    def _follow_host_video(self, film: Dict) -> None:
+        """The host plays a YouTube video, or streams a torrent, that I don't have open: the window
+        opens the same (if I follow the room). A film I have under the same name and size counts."""
+        if self.is_host or not self.attached:
+            return
+        video, magnet = film.get("yt"), film.get("magnet")
+        mine = self.film or {}
+        if video and mine.get("yt") != video:
+            follow = getattr(self.ui, "follow_youtube", None)
+            if follow is not None:
+                follow(video, film.get("name", ""))
+        elif magnet and not video and (mine.get("name"), mine.get("size")) != (film.get("name"), film.get("size")):
+            follow = getattr(self.ui, "follow_torrent", None)
+            if follow is not None:
+                follow(magnet, film.get("name", ""), int(film.get("size", 0)))
+        elif not video and not magnet:
+            self._follow_host_film(film)        # perhaps the next episode of what we watch (the window decides)
+
+    def _follow_host_film(self, film: Dict) -> None:
+        name = film.get("name") or ""
+        if not name or film.get("magnet") or name == (self.film or {}).get("name") or name == self._film_followed:
+            return
+        self._film_followed = name          # (once per film of the host's)
+        follow = getattr(self.ui, "follow_film", None)
+        if follow is not None:
+            follow(name, int(film.get("size") or 0))
 
     def _on_req(self, peer: Peer, body: Dict) -> None:
         if not self.is_host:
@@ -864,6 +1417,16 @@ class Controller(RoomListener):
         if not peer.is_host or body["to"] != self.rooms.identity.public.key_id:
             return
         reason = body["reason"]
+        if body["action"] == "vote":
+            self.ui.activity("The vote has enough films (12 in all, 3 each)" if reason == "busy"
+                             else "Only the one who suggested a film (or the host) can take it out", "warn")
+            return
+        if body["action"] == "queue":
+            if reason == "host_only":
+                self.ui.problem("SW-610")
+            else:
+                self.ui.activity("The queue is full (or you asked too often): try again in a moment", "warn")
+            return
         if reason == "cooldown":
             wait = body.get("wait", 1.0)
             self._my_cooldown_until["pp" if body["action"] in ("play", "pause") else "sync"] = self.clock() + wait
@@ -893,7 +1456,13 @@ class Controller(RoomListener):
         if kind != "jump" or abs(self.p.position() - pos) > SAME_SPOT_MS:
             self.p.seek(pos)
         self._client_sync = {"id": body["id"], "pos": pos, "sent": False, "kind": kind}
-        if kind == "jump":
+        if body.get("next"):
+            self.ui.activity("Next video: waiting until everyone has it open…", "friend")
+        elif body.get("wait"):
+            waiting = body["wait"]
+            self.ui.activity("Everyone waits until your video has loaded…" if waiting == self.name else
+                             f"Waiting for {waiting}: the video is still loading there…", "friend")
+        elif kind == "jump":
             if not mine:
                 self.ui.activity(f"{who} jumped to {fmt_time(pos)}", "friend")
         else:
@@ -1075,6 +1644,8 @@ class Controller(RoomListener):
             self.session.send_room("state", **fields)
         else:
             fields["separate"] = not self.attached
+            if self._my_stall_since is not None and self.clock() - self._my_stall_since >= MY_STALL_MIN_S:
+                fields["stall"] = True
             self.session.send_room("status", **fields)
 
     def _send_profile(self) -> None:
@@ -1093,8 +1664,96 @@ class Controller(RoomListener):
                 data = None
         return data
 
+    def _note_stall(self, now: float) -> None:
+        """Since when my video has been stuck loading while playing (None: it isn't)."""
+        stalled = getattr(self.p, "is_stalled", None)
+        if stalled is not None and stalled():
+            if self._my_stall_since is None:
+                self._my_stall_since = now
+        else:
+            self._my_stall_since = None
+
+    def _wait_for_loading(self, now: float) -> None:
+        """The host: a friend following the room whose video has stopped to load (a slow connection, a
+        torrent that's still coming) for a few seconds: everyone pauses where I am and starts together
+        once all can play (like after a jump, but waiting longer). Not again right away, and not for
+        a connection that keeps needing it."""
+        if not (self.connected and self.is_host and self.settings.get("sync.wait_for_loading")) \
+                or self._host_sync is not None or not self.p.is_playing():
+            self._stalled_since.clear()
+            return
+        stalled = {p.id: p for p in self.peers.values()
+                   if p.stalled and p.playing and not p.separate and p.id not in self._loading_given_up
+                   and now - p.received_at < STALL_FRESH_S}
+        # since when, and the report that first said so: a later report must say so too
+        self._stalled_since = {pid: self._stalled_since.get(pid, (now, stalled[pid].received_at)) for pid in stalled}
+        due = [stalled[pid] for pid, (since, first) in self._stalled_since.items()
+               if now - since >= STALL_AFTER_S and stalled[pid].received_at > first]
+        if not due or now - self._last_loading_wait < LOADING_WAIT_GAP_S:
+            return
+        waited_for = []
+        for peer in due:
+            times = self._loading_waits.setdefault(peer.id, collections.deque(maxlen=LOADING_WAITS_MAX))
+            if len(times) == LOADING_WAITS_MAX and now - times[0] < LOADING_WAITS_WINDOW_S:
+                self._loading_given_up.add(peer.id)
+                self.ui.activity(f"{peer.name}'s video keeps stopping to load: the room doesn't wait for it "
+                                 "any more", "warn")
+                continue
+            times.append(now)
+            waited_for.append(peer.name)
+        if not waited_for:
+            return
+        self._last_loading_wait = now
+        self._stalled_since.clear()
+        names = ", ".join(waited_for)[:64]
+        self.ui.activity(f"Waiting for {names}: the video is still loading there…", "friend")
+        self._start_host_sync(by="", kind="jump", wait_for=names)
+    def _watch_drops(self, now: float) -> None:
+        """The host: a friend following the room has gone silent while we play (their internet or PC
+        stopped answering): everyone pauses. When they're back, everyone starts together. If they
+        leave (or the room drops them after 20 s), the host decides."""
+        if not (self.connected and self.is_host and self.settings.get("sync.pause_on_drop")):
+            self._paused_for_drop = None
+            self._drops_noticed.clear()
+            return
+        waiting_for = self._paused_for_drop
+        if waiting_for is not None:
+            peer = self.peers.get(waiting_for)       # (missing for a moment while their app rejoins)
+            fresh = peer is not None and peer.known and now - peer.received_at < BACK_WITHIN_S
+            if self.p.is_playing() or self._host_sync is not None:
+                self._paused_for_drop = None          # someone started it again meanwhile
+            elif now - self._drop_paused_at > DROP_GIVE_UP_S:
+                self._paused_for_drop = None
+                self.ui.activity("They didn't come back: press play when you're ready", "info")
+            elif not fresh:
+                self._back_since = None
+            elif self._back_since is None:
+                self._back_since = now
+            elif now - self._back_since >= BACK_STEADY_S:
+                self._paused_for_drop = self._back_since = None
+                self._drops_noticed.discard(waiting_for)
+                self.ui.activity(f"{peer.name} is back: everyone starts together", "friend")
+                self._start_host_sync(by="")
+            return
+        if not self.p.is_playing() or self._host_sync is not None:
+            return
+        for peer in self.peers.values():
+            silent = now - peer.received_at
+            if peer.separate or not peer.known or silent < DROP_AFTER_S:
+                if silent < DROP_AFTER_S:
+                    self._drops_noticed.discard(peer.id)
+                continue
+            if peer.id in self._drops_noticed:
+                continue
+            self._drops_noticed.add(peer.id)
+            self._paused_for_drop, self._drop_paused_at, self._back_since = peer.id, now, None
+            self.ui.activity(f"Paused: no word from {peer.name}'s app for {silent:.0f} s (their connection?). "
+                             "When they're back, everyone starts together.", "warn")
+            self.pause()
+            return
+
     def _start_host_sync(self, by: str, kind: str = "syncup", pos: Optional[float] = None,
-                         by_id: Optional[bytes] = None) -> None:
+                         by_id: Optional[bytes] = None, next_video: bool = False, wait_for: str = "") -> None:
         """Everyone pauses at ``pos``, says when their film shows it, then all start together
         (Sync up: after a countdown; a jump: right away)."""
         if self._host_sync is not None:
@@ -1110,11 +1769,19 @@ class Controller(RoomListener):
         if kind != "jump" or abs(self.p.position() - pos) > SAME_SPOT_MS:
             self.p.seek(pos)
         timeout = float(self.settings.get("sync.ready_timeout_s"))
+        if next_video:   # everyone first has to find and open the new video
+            timeout = max(timeout, float(self.settings.get("youtube.start_wait_s")))
+        if wait_for:     # someone's video has to load first
+            timeout = max(timeout, float(self.settings.get("sync.loading_wait_s")))
         waiting = {p.id for p in self.peers.values() if not p.separate}  # those on their own aren't waited for
         self._host_sync = _HostSync(self._sync_counter, pos, self.clock() + timeout, by, kind, by_id, waiting)
         fields = {"id": self._sync_counter, "pos": pos}
         if kind == "jump":
             fields["jump"] = True
+        if next_video:
+            fields["next"] = True
+        if wait_for:
+            fields["wait"] = wait_for
         if by:
             fields["by"] = by
         if by_id is not None:
@@ -1156,6 +1823,10 @@ class Controller(RoomListener):
         client = self._client_sync
         if client is None or client["sent"]:
             return
+        host = self.host_peer
+        wanted = (host.film or {}).get("yt") if host is not None else None
+        if wanted and (self.film or {}).get("yt") != wanted:
+            return   # still opening the host's (new) video: not ready yet
         if self.p.is_ready() and abs(self.p.position() - client["pos"]) < READY_TOLERANCE_MS:
             client["sent"] = True
             self.session.send_room("sync_ready", id=client["id"])
@@ -1186,7 +1857,10 @@ class Controller(RoomListener):
             theirs = peer.film
             if not theirs:
                 continue
-            if mine["size"] == theirs["size"] and mine["name"] == theirs["name"]:
+            if mine.get("yt") or theirs.get("yt"):
+                # YouTube: the same video or not; a member who follows opens the host's by itself
+                state = "same" if mine.get("yt") == theirs.get("yt") else "elsewhere"
+            elif mine["size"] == theirs["size"] and mine["name"] == theirs["name"]:
                 state = "same"
             elif mine.get("dur") and theirs.get("dur") and abs(mine["dur"] - theirs["dur"]) <= MATCH_TOLERANCE_MS:
                 state = "similar"
