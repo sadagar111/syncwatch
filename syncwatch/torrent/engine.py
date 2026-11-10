@@ -138,6 +138,12 @@ class Engine:
             "alert_mask": (lt.alert.category_t.status_notification | lt.alert.category_t.error_notification
                            | lt.alert.category_t.storage_notification | lt.alert.category_t.port_mapping_notification),
         })
+        self.debug = bool(os.environ.get("SYNCWATCH_TORRENT_DEBUG"))   # diagnosis branch only
+        if self.debug:
+            cats = lt.alert.category_t
+            self.session.apply_settings({"alert_mask": cats.status_notification | cats.error_notification
+                                         | cats.storage_notification | cats.port_mapping_notification
+                                         | cats.connect_notification | cats.peer_notification})
         self.handle = None
         self.info = None
         self.index: Optional[int] = None
@@ -287,6 +293,9 @@ class Engine:
             if not self.direct:
                 self.direct = True
                 self.session.apply_settings(DIRECT_RECONNECT)
+            if getattr(self, "debug", False):
+                print(f"{time.monotonic():.3f} connect_peer {host}:{port}, listening {self.session.is_listening()} "
+                      f"on {self.session.listen_port()}, state {self.handle.status().state}", file=sys.stderr, flush=True)
             self.handle.connect_peer((host.strip("[]"), int(port)))
         except Exception as exc:  # noqa: BLE001
             say({"ev": "error", "kind": "peer", "message": f"{type(exc).__name__}: {exc}"})
@@ -470,6 +479,8 @@ class Engine:
                 continue
             for alert in self.session.pop_alerts():
                 kind = type(alert).__name__
+                if self.debug:
+                    print(f"{time.monotonic():.3f} {kind}: {alert.message()[:200]}", file=sys.stderr, flush=True)
                 if kind == "read_piece_alert":
                     self._piece_read(alert)
                 elif kind == "metadata_received_alert":
