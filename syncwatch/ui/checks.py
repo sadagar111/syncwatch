@@ -91,7 +91,7 @@ def video_checks() -> List[CheckResult]:
 
 
 def youtube_check(js_setting: str = "") -> CheckResult:
-    """YouTube (from 0.5): yt-dlp, and Deno for YouTube's JavaScript puzzles."""
+    """YouTube (from 0.9): yt-dlp, and Deno for YouTube's JavaScript puzzles."""
     import importlib.util  # noqa: PLC0415
     from .youtube_ui import find_js_runtime  # noqa: PLC0415
     if importlib.util.find_spec("yt_dlp") is None:
@@ -106,7 +106,7 @@ def youtube_check(js_setting: str = "") -> CheckResult:
 
 
 def torrent_check() -> CheckResult:
-    """Streaming torrents (from 0.6): libtorrent, which runs in its own process."""
+    """Streaming torrents (from 0.9): libtorrent, which runs in its own process."""
     import importlib.util  # noqa: PLC0415
     if importlib.util.find_spec("libtorrent") is None:
         return CheckResult("Video", "Torrents", WARN, "libtorrent is missing", "SW-624")

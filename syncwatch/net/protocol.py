@@ -80,12 +80,12 @@ YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}", "dQw4w9WgXcQ")
 # "ip:port" or "[ipv6]:port" where someone in the room can be reached (checked again before use)
 ADDRESS = Pattern(r"(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]{2,45}\]):\d{1,5}", "192.0.2.10:6881")
 TMDB_IMAGE = Pattern(r"/[A-Za-z0-9_-]{1,80}\.(jpg|jpeg|png|webp)", "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg")
-REACTIONS = ("😂", "😮", "😍", "😱", "😢", "👏", "🔥", "🍿")   # the only emoji a reaction can be (0.8)
+REACTIONS = ("😂", "😮", "😍", "😱", "😢", "👏", "🔥", "🍿")   # the only emoji a reaction can be (0.9)
 CHAT_TEXT = 300                                                  # characters in one chat message
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
-              "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
-              "magnet": (str, False, 3000)}      # since 0.6: streamed from this torrent (checked again on use)
+              "yt": (YOUTUBE_ID, False, None),   # since 0.9: a YouTube video instead of a file
+              "magnet": (str, False, 3000)}      # since 0.9: streamed from this torrent (checked again on use)
 QUEUE_ITEM: Spec = {"k": (int, True, (1, 1 << 31)), "yt": (YOUTUBE_ID, True, None), "title": (str, True, 120),
                     "dur": (int, False, (0, MAX_POSITION_MS)), "by": (str, False, 32)}
 VOTE_CHOICE: Spec = {"k": (int, True, (1, 1 << 31)), "title": (str, True, 120), "year": (int, False, (0, 2200)),
@@ -93,7 +93,7 @@ VOTE_CHOICE: Spec = {"k": (int, True, (1, 1 << 31)), "title": (str, True, 120), 
                      "by": (str, False, 32), "voters": (ListOf(str, 64, 32), False, None),
                      "have": (ListOf(str, 64, 32), False, None)}
 QUEUE_RULES: Spec = {"add": (("everyone", "host"), True, None), "control": (("host", "everyone"), True, None),
-                     "vote": (bool, False, None)}           # vote to skip (since 0.5)
+                     "vote": (bool, False, None)}           # vote to skip (since 0.9)
 SKIP_VOTES: Spec = {"k": (int, True, (1, 1 << 31)), "n": (int, True, (0, MAX_PEOPLE)),
                     "need": (int, True, (1, MAX_PEOPLE + 1))}
 RULES: Spec = {"host_only": (bool, True, None), "cd_pp": (float, False, (0, 3600)),
@@ -143,7 +143,7 @@ ROOM: Dict[str, Spec] = {
               "film": (FILM, False, None), "rules": (RULES, True, None)},
     "status": {"pos": POS, "playing": (bool, True, None), "at": CLOCK, "separate": (bool, False, None),
                "ready": (bool, False, None), "film": (FILM, False, None),
-               "stall": (bool, False, None)},   # true: my video stopped to load more (since 0.5)
+               "stall": (bool, False, None)},   # true: my video stopped to load more (since 0.9)
     "req": {"action": (("play", "pause", "seek", "syncup"), True, None),
             "pos": (int, False, (0, MAX_POSITION_MS))},
     "cmd": {"action": (("play", "pause", "seek"), True, None), "pos": POS, "playing": (bool, True, None),
@@ -153,36 +153,36 @@ ROOM: Dict[str, Spec] = {
     "sync_prepare": {"id": (int, True, (0, 1 << 31)), "pos": POS, "by": (str, False, 32),
                      "by_id": (B64(8), False, None),
                      "jump": (bool, False, None),    # true: after a jump (0.4.1); missing: Sync up
-                     "next": (bool, False, None),    # true: the next video of the queue starts (0.5)
-                     "wait": (str, False, 64)},      # who's video is loading: everyone waits for them (0.5)
+                     "next": (bool, False, None),    # true: the next video of the queue starts (0.9)
+                     "wait": (str, False, 64)},      # who's video is loading: everyone waits for them (0.9)
     "sync_ready": {"id": (int, True, (0, 1 << 31))},
     "sync_go": {"id": (int, True, (0, 1 << 31)), "start": CLOCK},
     "sync_abort": {"id": (int, True, (0, 1 << 31))},
-    # the YouTube queue (0.5): the host's app sends all of it after every change; members ask
+    # the YouTube queue (0.9): the host's app sends all of it after every change; members ask
     "queue": {"no": SEQ, "items": (ListOf(QUEUE_ITEM, 50), True, None), "now": (QUEUE_ITEM, False, None),
               "rules": (QUEUE_RULES, True, None), "skip": (SKIP_VOTES, False, None)},
-    # sharing a film with the room (0.6): someone asks, the one who has it shares it as a private
+    # sharing a film with the room (0.9): someone asks, the one who has it shares it as a private
     # torrent and says where to connect; addresses only ever travel inside the encrypted room
     "share_req": {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
                   "addrs": (ListOf(ADDRESS, 8), False, None)},
     "share": {"magnet": (str, True, 3000), "name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "addrs": (ListOf(ADDRESS, 8), True, None)},
     "share_peer": {"addrs": (ListOf(ADDRESS, 8), True, None)},
-    # the ready check (0.5): the host asks, sends who it still waits for after every answer; closed when done
+    # the ready check (0.9): the host asks, sends who it still waits for after every answer; closed when done
     "rcheck": {"id": (int, True, (1, 1 << 31)), "open": (bool, True, None),
                "waiting": (ListOf({"n": (str, True, 32)}, MAX_PEOPLE), False, None)},
     "rready": {"id": (int, True, (1, 1 << 31))},
     "qreq": {"op": (("add", "remove", "skip", "play", "move", "voteskip"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
-    # the film vote (0.7): the host's app sends all of it after every change; members ask
+    # the film vote (0.9): the host's app sends all of it after every change; members ask
     "vote": {"no": SEQ, "open": (bool, True, None), "choices": (ListOf(VOTE_CHOICE, 12), True, None),
              "winner": (int, False, (0, 1 << 31))},
     "vreq": {"op": (("start", "suggest", "withdraw", "cast", "have"), True, None),
              "k": (int, False, (0, 1 << 31)), "title": (str, False, 120), "year": (int, False, (0, 2200)),
              "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
              "keys": (ListOf(int, 12, (1, 1 << 31)), False, None)},
-    # chat and reactions (0.8): to everyone in the room, shown when they come, kept nowhere
+    # chat and reactions (0.9): to everyone in the room, shown when they come, kept nowhere
     "chat": {"text": (str, True, CHAT_TEXT)},
     "react": {"e": (REACTIONS, True, None)},
 }

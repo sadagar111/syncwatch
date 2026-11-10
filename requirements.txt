@@ -9,10 +9,10 @@ cryptography>=42
 mpv>=1.0.7
 # The built-in converter (from 0.4.2): PyAV, with its own FFmpeg.
 av>=14
-# YouTube (from 0.5): yt-dlp finds the video streams; yt-dlp-ejs and Deno solve YouTube's JavaScript
+# YouTube (from 0.9): yt-dlp finds the video streams; yt-dlp-ejs and Deno solve YouTube's JavaScript
 # puzzles (yt-dlp needs a JavaScript program for YouTube since late 2025). The "deno" package only
 # holds deno.exe.
 yt-dlp[default]>=2026.10.26
 deno>=2.9.8
-# Streaming torrents (from 0.6): libtorrent, in a process of its own (syncwatch/torrent/engine.py).
+# Streaming torrents (from 0.9): libtorrent, in a process of its own (syncwatch/torrent/engine.py).
 libtorrent>=2.0.9

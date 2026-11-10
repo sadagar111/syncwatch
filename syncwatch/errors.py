@@ -452,7 +452,7 @@ CATALOG: Dict[str, Problem] = {
         "The film started downloading, but the player couldn't play it.",
         ["Wait a little and open it again: more of it may be needed first.",
          "Try another torrent (another release of the film)."]),
-    # ---- 63x: what should we watch? (TMDB, the film vote; 0.7) ----------------
+    # ---- 63x: what should we watch? (TMDB, the film vote; 0.9) ----------------
     "SW-631": Problem(
         "Add a TMDB key for recommendations",
         "Recommendations, posters and trailers come from TMDB (The Movie Database). It's free, but needs a key.",

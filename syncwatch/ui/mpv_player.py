@@ -3,7 +3,7 @@
 It has the same interface as the Qt player (player.py), so the sync controller and the
 window don't care which one plays. Why mpv: it plays practically every film (including
 the AC3 / DTS sound Qt's player sometimes couldn't), it's a mature player, and
-v0.5.0's YouTube streaming builds on it. It comes inside the zip (see mpvlib.py).
+SyncWatch's YouTube streaming (from 0.9.0) builds on it. It comes inside the zip (see mpvlib.py).
 
 How the picture gets into the window (Settings > Playback > "How mpv draws the picture"):
 

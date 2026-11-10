@@ -209,7 +209,7 @@ def run_script(errors_seen):
               "Sync up shown in a room": window.controls.sync_up.isVisible()}
     print("ROOM CHECKS:", checks)
     FAILED.extend(name for name, ok in checks.items() if not ok)
-    # chat and reactions (0.8), in the room just opened
+    # chat and reactions (0.9), in the room just opened
     from PySide6.QtTest import QTest
     from PySide6.QtCore import Qt
     activity = window.sidebar.activity

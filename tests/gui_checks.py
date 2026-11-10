@@ -71,7 +71,7 @@ def check_youtube(out: Path) -> bool:
 
 
 def check_discover(out: Path) -> bool:
-    """What should we watch? (0.7): ideas from the library, posters, details, the trailer, the film
+    """What should we watch? (0.9): ideas from the library, posters, details, the trailer, the film
     vote in a room, playing the winner (TMDB replaced by tests/fake_tmdb.py, a relay on this PC)."""
     result = subprocess.run([sys.executable, str(HERE / "discover_harness.py"), str(out / "discover")], env=ENV,
                             capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
@@ -233,7 +233,7 @@ def _room_extras(out: Path) -> bool:
 
 
 def _torrent_offer(out: Path) -> bool:
-    """(0.6) The host streams a torrent: Marek (ask first, the default) is asked in the sidebar and
+    """(0.9) The host streams a torrent: Marek (ask first, the default) is asked in the sidebar and
     streams it only after his click; Kuba (Settings > Torrents: don't) is neither asked nor streams."""
     seen = {}
     for role in ("marek", "kuba"):
@@ -258,7 +258,7 @@ def _torrent_offer(out: Path) -> bool:
 
 
 def _ready_check(out: Path) -> bool:
-    """(0.5) The host's ready check through the People panel's buttons: both members asked, it starts
+    """(0.9) The host's ready check through the People panel's buttons: both members asked, it starts
     for everyone (Sync up's countdown) once both clicked I'm ready."""
     seen = {}
     for role in ("host", "marek", "kuba"):

@@ -134,7 +134,7 @@ class IdleScreen(QWidget):
         torrent_row.addWidget(self.torrent_file_button)
         torrent_row.addStretch(1)
         youtube_layout.addLayout(torrent_row)
-        ideas_card = QFrame()                      # what should we watch? (0.7)
+        ideas_card = QFrame()                      # what should we watch? (0.9)
         ideas_card.setObjectName("Card")
         ideas_title = QLabel("What should we watch?")
         ideas_title.setObjectName("LibraryTitle")
@@ -286,7 +286,7 @@ class MainWindow(QMainWindow):
         queue_panel.moveRequested.connect(self.controller.queue_move)
         queue_panel.skipClicked.connect(self.controller.queue_vote_skip)   # (a plain skip when I may)
         queue_panel.addClicked.connect(lambda: self.ask_youtube_link(queue=True))
-        self.discover = Discover(self)                     # what should we watch? the film vote (0.7)
+        self.discover = Discover(self)                     # what should we watch? the film vote (0.9)
         votes, vote_panel = self.controller.votes, self.sidebar.vote
         votes.have_check = self.discover.have_keys
         vote_panel.voteRequested.connect(votes.cast)
@@ -298,7 +298,7 @@ class MainWindow(QMainWindow):
         vote_panel.whereClicked.connect(self.discover.where_winner)
         self.idle.ideas_button.clicked.connect(lambda: self.discover.open())
         self.idle.vote_button.clicked.connect(self.start_film_vote)
-        self.sidebar.activity.chatSubmitted.connect(self._send_chat)           # chat and reactions (0.8)
+        self.sidebar.activity.chatSubmitted.connect(self._send_chat)           # chat and reactions (0.9)
         self.sidebar.activity.chat_box.leave.connect(lambda: (self.sidebar.activity.chat_box.clearFocus(),
                                                               self.setFocus()))
         self.controls.reactionChosen.connect(lambda emoji: self.controller.chat.react(emoji))
@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.controls)
 
         self.sidebar = Sidebar(self.settings.get("room.last_code"))
-        self.sidebar.vote = VotePanel()                    # the film vote, under "Up next" (0.7)
+        self.sidebar.vote = VotePanel()                    # the film vote, under "Up next" (0.9)
         self.sidebar.vote.hide()
         self.sidebar.layout().insertWidget(self.sidebar.layout().indexOf(self.sidebar.queue) + 1, self.sidebar.vote)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -446,7 +446,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "discover"):
             self.discover.vote_changed()
 
-    # the film vote (0.7): the controller tells, the Discover part shows
+    # the film vote (0.9): the controller tells, the Discover part shows
     def vote_changed(self) -> None:
         if hasattr(self, "discover"):
             self.discover.vote_changed()
@@ -471,7 +471,7 @@ class MainWindow(QMainWindow):
             return
         self.open_youtube(youtube_links.VideoRef(video_id))
 
-    # chat and reactions (0.8): the controller's RoomChat tells, these show
+    # chat and reactions (0.9): the controller's RoomChat tells, these show
     def chat_message(self, name: str, text: str, mine: bool) -> None:
         self.sidebar.activity.add(f"💬 {'You' if mine else name}: {text}", "you" if mine else "friend")
         over = self.settings.get("chat.over_video")
@@ -955,7 +955,7 @@ class MainWindow(QMainWindow):
         title = problem.title if problem else code
         self.activity(f"Couldn't open the host's YouTube video {video_id}: {title} ({code})", "warn")
 
-    # ---------------------------------------------------------------- torrents (0.6)
+    # ---------------------------------------------------------------- torrents (0.9)
     def open_torrent(self, source: str) -> None:
         """A magnet link or a .torrent file: stream it (the part being watched first)."""
         self.torrents.open(source)
@@ -1506,7 +1506,7 @@ class MainWindow(QMainWindow):
         paste.setContext(Qt.ShortcutContext.WindowShortcut)
         paste.activated.connect(self._paste_link)
         self._shortcuts.append(paste)
-        for number in range(1, 9):        # reactions (0.8); text fields keep their digits
+        for number in range(1, 9):        # reactions (0.9); text fields keep their digits
             react = QShortcut(QKeySequence(str(number)), self)
             react.setContext(Qt.ShortcutContext.WindowShortcut)
             react.activated.connect(lambda n=number: self._react_key(n))

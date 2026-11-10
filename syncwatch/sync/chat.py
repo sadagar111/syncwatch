@@ -1,4 +1,4 @@
-"""Room chat and emoji reactions (0.8): short messages and a few emoji for everyone in the room.
+"""Room chat and emoji reactions (0.9): short messages and a few emoji for everyone in the room.
 
 Nothing is kept: a message is shown when it comes (in the sidebar, and over the video while the
 sidebar is hidden) and is gone with the room. Messages travel like everything else in a room

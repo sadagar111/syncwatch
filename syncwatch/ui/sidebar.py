@@ -313,7 +313,7 @@ class PeoplePanel(Panel):
         menu.exec(point)
 
 
-# ============================================================================ the YouTube queue (0.5)
+# ============================================================================ the YouTube queue (0.9)
 @dataclass
 class QueueEntry:
     key: int
@@ -534,7 +534,7 @@ class ActivityPanel(Panel):
 
 
 class ShareBanner(QFrame):
-    """(0.6) "Alex is watching Dune.mkv (4.2 GB), you don't have it: [Get it from Alex]"."""
+    """(0.9) "Alex is watching Dune.mkv (4.2 GB), you don't have it: [Get it from Alex]"."""
     clicked = Signal()
 
     def __init__(self, parent=None):

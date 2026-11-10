@@ -237,7 +237,7 @@ SCHEMA: List[Setting] = [
     _s("sync.compensate_latency", "bool", True, "Compensate for network delay", WT, advanced=True),
     _s("room.last_code", "str", "", "Last room code", WT, hidden=True, max_len=600),
 
-    # ---- YouTube (from 0.5) -----------------------------------------------------------
+    # ---- YouTube (from 0.9) -----------------------------------------------------------
     _s("youtube.quality", "choice", "1080", "Quality", YT,
        "The highest picture quality SyncWatch asks YouTube for. Lower it if videos stutter or your "
        "internet is slow. Qt's player (advanced, Playback) only gets up to 720p.",
@@ -281,7 +281,7 @@ SCHEMA: List[Setting] = [
        "yt-dlp needs a JavaScript program to read YouTube's pages: Deno, which comes with SyncWatch. "
        "Only set this to use another deno.exe. Empty means the one inside SyncWatch.", advanced=True),
 
-    # ---- Torrents (from 0.6) ----------------------------------------------------------
+    # ---- Torrents (from 0.9) ----------------------------------------------------------
     _s("torrents.folder", "path", "", "Download folder", TR,
        "Where streamed films are saved. Empty means a 'Torrents' folder inside your library folder."),
     _s("torrents.after", "choice", "keep", "When you close a streamed film", TR,
@@ -312,7 +312,7 @@ SCHEMA: List[Setting] = [
     _s("torrents.dht", "bool", True, "Find others without trackers (DHT)", TR,
        "Needed for most magnet links.", advanced=True),
     _s("torrents.connections", "int", 200, "Connections at most", TR, advanced=True, minimum=10, maximum=2000),
-    # ---- Discover (0.7): what should we watch? --------------------------------------
+    # ---- Discover (0.9): what should we watch? --------------------------------------
     _s("discover.tmdb_key", "secret", "", "TMDB key", DC,
        "For recommendations, posters and trailers (free): sign up at themoviedb.org, open Settings > API, "
        "ask for a key for personal use and copy the \"API Read Access Token\" here. It's only sent to TMDB. "

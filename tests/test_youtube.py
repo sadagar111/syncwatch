@@ -82,7 +82,7 @@ class LinkTests(unittest.TestCase):
 
 
 class PlaylistTests(unittest.TestCase):
-    """Playlists into the queue (0.5): links, what yt-dlp lists, the checked answer."""
+    """Playlists into the queue (0.9): links, what yt-dlp lists, the checked answer."""
 
     def test_playlist_links(self):
         cases = {

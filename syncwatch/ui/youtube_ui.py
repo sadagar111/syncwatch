@@ -358,7 +358,7 @@ class LinkBox(QWidget):
     Emits submitted(VideoRef) (watch now) or queued(VideoRef)."""
     submitted = Signal(object)
     queued = Signal(object)
-    magnetSubmitted = Signal(str)     # a magnet link (from 0.6: torrents)
+    magnetSubmitted = Signal(str)     # a magnet link (from 0.9: torrents)
     playlistSubmitted = Signal(object, bool)      # (PlaylistRef, play: False = only into the queue)
 
     def __init__(self, button_text: str = "▶  Watch", parent=None):

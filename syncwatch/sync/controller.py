@@ -196,12 +196,12 @@ class Controller(RoomListener):
         self._align_on_next_state = False
         self._profile_due: Optional[float] = None
         self._warned_films: Set[bytes] = set()
-        # The YouTube queue (0.5): mine when I host or am alone, else a copy of the host's
+        # The YouTube queue (0.9): mine when I host or am alone, else a copy of the host's
         self.queue = Queue()
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
-        self.votes = FilmVoteRoom(self)     # the film vote (0.7)
-        self.chat = RoomChat(self)          # chat and reactions (0.8)
+        self.votes = FilmVoteRoom(self)     # the film vote (0.9)
+        self.chat = RoomChat(self)          # chat and reactions (0.9)
         self._skip_votes: Dict[bytes, str] = {}    # the host: who voted to skip the video that plays now
         self._skip_key = 0                          # (its queue key)
         self._voted_key = 0                         # a member: the video I voted to skip
@@ -493,7 +493,7 @@ class Controller(RoomListener):
         self._pending_seek_at = self.clock() + debounce
         self._send_jump_by = None
 
-    # ---------------------------------------------------------------- the ready check (0.5)
+    # ---------------------------------------------------------------- the ready check (0.9)
     def ready_check(self) -> None:
         """The host: ask everyone following whether they're ready. When all are, Sync up starts the film
         for everyone with the countdown. Again while it's open: cancel it."""
@@ -943,7 +943,7 @@ class Controller(RoomListener):
             self._align_on_next_state = False
             self.sync_me()
 
-    # ================================================================ the YouTube queue (0.5)
+    # ================================================================ the YouTube queue (0.9)
     def ui_queue_changed(self) -> None:
         changed = getattr(self.ui, "queue_changed", None)
         if changed is not None:
@@ -1212,7 +1212,7 @@ class Controller(RoomListener):
                 self.ui.activity(f"{item.by or 'Someone'} added {item.title} to the queue", "friend")
         self.ui_queue_changed()
 
-    # ================================================================ sharing a film (0.6)
+    # ================================================================ sharing a film (0.9)
     def can_ask_for_film(self) -> Optional[Dict]:
         """The host's film, if I could ask for it: they play a file (not YouTube or a torrent) that
         I don't have (not the same name and size, and not a file of the same length)."""
