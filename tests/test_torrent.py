@@ -95,15 +95,9 @@ class Seeder:
     """A libtorrent session in this process that shares one file on 127.0.0.1."""
 
     def __init__(self, folder: Path, torrent: Path, upload_kbps: int = 0, port: int = 0):
-        settings = {"listen_interfaces": f"127.0.0.1:{port}", "enable_dht": False, "enable_lsd": False,
-                    "enable_upnp": False, "enable_natpmp": False, "upload_rate_limit": upload_kbps * 1024}
-        if upload_kbps:
-            # A limited upload over uTP runs far below its limit (libtorrent's limiter and uTP's congestion control
-            # work against each other: the first MB took 6 s instead of 0.7 s here, and on Windows it sometimes
-            # didn't come at all in 30 s). Over TCP the limit is what it says. The helper tries uTP first, gets no
-            # answer and switches to TCP by itself, about 9 s later.
-            settings.update(enable_incoming_utp=False, enable_outgoing_utp=False)
-        self.session = lt.session(settings)
+        self.session = lt.session({"listen_interfaces": f"127.0.0.1:{port}", "enable_dht": False, "enable_lsd": False,
+                                   "enable_upnp": False, "enable_natpmp": False,
+                                   "upload_rate_limit": upload_kbps * 1024})
         if upload_kbps:   # peers on this PC normally aren't limited: put everyone in the global class
             classes = lt.ip_filter()
             classes.add_rule("0.0.0.0", "255.255.255.255", 1 << lt.session.global_peer_class_id)
