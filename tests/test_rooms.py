@@ -386,6 +386,7 @@ class FilmVoteTests(RoomTestCase):
             self.marek.c.votes.suggest(f"Marek's film {n}")
         self.assertTrue(self.pump(until=lambda: len(self.titles(self.alex)) == 3))
         self.assertTrue(self.pump(until=lambda: any("enough films" in t for t in self.marek.ui.activities())))
+        self.assertTrue(self.pump(until=lambda: len(self.titles(self.kuba)) == 3))   # his copy comes later, through the relay
         first = self.choice(self.kuba, "Marek's film 0").key
         self.kuba.c.votes.withdraw(first)                                     # not his
         self.assertTrue(self.pump(until=lambda: any("take it out" in t for t in self.kuba.ui.activities())))
