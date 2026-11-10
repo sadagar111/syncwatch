@@ -140,7 +140,7 @@ def run_script(errors_seen):
         window.controller.toggle()
         spin(1.0)
         shot("03_playing")
-        # pictures over the seek bar (0.9): made in the background, shown while hovering
+        # pictures over the seek bar (0.5): made in the background, shown while hovering
         made = spin_until(30, lambda: window.previews.file is not None)
         from PySide6.QtTest import QTest
         seek = window.controls.seek
@@ -209,7 +209,7 @@ def run_script(errors_seen):
               "Sync up shown in a room": window.controls.sync_up.isVisible()}
     print("ROOM CHECKS:", checks)
     FAILED.extend(name for name, ok in checks.items() if not ok)
-    # chat and reactions (0.8), in the room just opened
+    # chat and reactions (0.5), in the room just opened
     from PySide6.QtTest import QTest
     from PySide6.QtCore import Qt
     activity = window.sidebar.activity

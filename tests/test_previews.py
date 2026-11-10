@@ -1,4 +1,4 @@
-"""Pictures over the seek bar (0.9): which moments, making them in their own process, reading them."""
+"""Pictures over the seek bar (0.5): which moments, making them in their own process, reading them."""
 import json
 import shutil
 import subprocess

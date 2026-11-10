@@ -336,7 +336,7 @@ class YouTubeTests(RoomTestCase):
 
 
 class FilmVoteTests(RoomTestCase):
-    """The film vote (0.7): anyone suggests and votes, the host's app holds it and closes it."""
+    """The film vote (0.5): anyone suggests and votes, the host's app holds it and closes it."""
 
     def setUp(self):
         super().setUp()
@@ -439,7 +439,7 @@ class FilmVoteTests(RoomTestCase):
 
 
 class ChatTests(RoomTestCase):
-    """Chat and reactions (0.8): to everyone in the room, in order, floods dropped."""
+    """Chat and reactions (0.5): to everyone in the room, in order, floods dropped."""
 
     def setUp(self):
         super().setUp()

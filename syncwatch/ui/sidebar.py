@@ -496,7 +496,7 @@ class ChatBox(QLineEdit):
 
 
 class ActivityPanel(Panel):
-    """What happens in the room, and (in a room, 0.8) the chat: a box under the list."""
+    """What happens in the room, and (in a room, 0.5) the chat: a box under the list."""
     COLOURS = {"you": "#9BE8B4", "friend": "#9CC9FF", "warn": "#FFC46B", "error": "#FF8A9B", "info": None}
     chatSubmitted = Signal(str)
 
@@ -534,7 +534,7 @@ class ActivityPanel(Panel):
 
 
 class ShareBanner(QFrame):
-    """(0.6) "Alex is watching Dune.mkv (4.2 GB), you don't have it: [Get it from Alex]"."""
+    """(0.5) "Alex is watching Dune.mkv (4.2 GB), you don't have it: [Get it from Alex]"."""
     clicked = Signal()
 
     def __init__(self, parent=None):

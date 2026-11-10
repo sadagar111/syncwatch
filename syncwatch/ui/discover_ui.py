@@ -1,4 +1,4 @@
-"""What should we watch? The Discover window and the film vote panel (0.7).
+"""What should we watch? The Discover window and the film vote panel (0.5).
 
 The window shows films as posters: "For you" (recommendations from the films in your library and
 the ones you watched), "Trending" (this week on TMDB), "Your films" (the library, matched to TMDB)
@@ -863,7 +863,7 @@ class Discover(QObject):
         if won is not None and not c.is_host and hasattr(self.window, "torrents") \
                 and self.have_film(won.title, won.year, won.tmdb) is None:
             host = next((peer.name for peer in c.peers.values() if peer.is_host), "")
-            if host and host in won.have:     # the host has it: room downloads (0.6) bring it here
+            if host and host in won.have:     # the host has it: room downloads (0.5) bring it here
                 panel.status.setText(f"{panel.status.text()} When {host} plays it, you can get it straight from "
                                      f"{host}: it plays while it downloads.")
         if self.dialog is not None:

@@ -32,7 +32,7 @@ class SeekBar(QWidget):
         self.show_markers = True
         self._hover_x: Optional[float] = None
         self._drag_ms: Optional[int] = None
-        self.previews = None              # pictures of the film while hovering (0.9): ui/previews_ui.py
+        self.previews = None              # pictures of the film while hovering (0.5): ui/previews_ui.py
         self._popup = None
 
     # ------------------------------------------------------------ data

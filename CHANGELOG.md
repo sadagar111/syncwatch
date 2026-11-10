@@ -32,11 +32,8 @@
 **Also**
 - Nothing to install: yt-dlp and Deno (for YouTube) and libtorrent (for torrents) come with SyncWatch, so this update is about 50 MB bigger (once).
 - The start screen scrolls on a short window instead of squeezing its cards, and Settings opens wide enough for its tabs.
-- The fix for the Windows crash (0.4.3) is in here too.
+- Fixes a crash on Windows: SyncWatch could close by itself now and then while a film was open. mpv's own little scripts (which SyncWatch doesn't use) clashed with SyncWatch's crash report; mpv now starts without them, and the crash report only notes the part of SyncWatch that crashed.
 - New problems with plain explanations: SW-601 to SW-611 (YouTube), SW-620 to SW-626 (torrents), SW-631 to SW-635 (TMDB).
-
-## 0.4.3 (a crash fix for Windows)
-- Fixes a crash on Windows: SyncWatch could close by itself now and then while a film was open. mpv's own little scripts (which SyncWatch doesn't use) clashed with SyncWatch's crash report; mpv now starts without them, and the crash report only notes the part of SyncWatch that crashed. Nothing else changes.
 
 ## 0.4.2 (new video player, and your film library)
 **A new video player: mpv**

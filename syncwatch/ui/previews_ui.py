@@ -1,4 +1,4 @@
-"""Pictures over the seek bar (0.9): made once per film in the background, kept in the cache.
+"""Pictures over the seek bar (0.5): made once per film in the background, kept in the cache.
 
 When a film from disk opens, its pictures are looked for in the profile's cache (by the film's
 name and size); if they aren't there, library/previews.py makes them in a process of its own (at a

@@ -1,4 +1,4 @@
-"""Room chat and reactions (0.8): cleaning text, the limits, what the room messages may hold."""
+"""Room chat and reactions (0.5): cleaning text, the limits, what the room messages may hold."""
 import sys
 import unittest
 from pathlib import Path

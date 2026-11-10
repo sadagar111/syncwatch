@@ -11,7 +11,7 @@ starting the next video at the end, Skip, and a video that can't be found being 
 2. Queue two more (one of them "deleted"), then let the video end: the next one starts by itself.
 3. Skip: the broken one can't be opened, so the one after it plays. Then a playlist link: its videos
    (read by yt-dlp from a page with them embedded) go into Up next.
-4. A torrent (from 0.6, if libtorrent is installed): a .torrent file of a short film, shared by a
+4. A torrent (from 0.5, if libtorrent is installed): a .torrent file of a short film, shared by a
    libtorrent session in this process on 127.0.0.1, streams and plays; closing it stops the helper.
 Screenshots go to the output folder. Exit code 0 only if every check passes.
 """

@@ -1,4 +1,4 @@
-# Testing 0.5.0: branch `try/0.5-release`
+# Testing 0.5.0: branch `v0.5.0-release` (the pull request into main)
 
 Everything from the week, as you kept it (all of it): YouTube (Up next, playlists, YouTube's subtitles, vote to
 skip), torrents, ideas and the film vote, chat and reactions, seek-bar pictures, Sunday's extras (ready check,
@@ -6,7 +6,7 @@ next episode, skip intro, night mode, sound delay, waiting for a loading video, 
 drops) and the Windows crash fix. The checklists below say which branch each part was built on; all of
 them are in this one.
 
-1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch try/0.5-release`, then start `SyncWatch.bat`
+1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch v0.5.0-release`, then start `SyncWatch.bat`
    as usual (it checks for the new parts: yt-dlp, Deno, libtorrent). Your profile and films stay as they are;
    to try it without touching your own settings, start it with `--profile test`.
 2. **One thing to set:** a free TMDB key for the Ideas window (D1 below). Everything else works out of the box.
@@ -18,12 +18,12 @@ them are in this one.
    check, waiting for a loading video, pausing when a connection drops.
 5. **When something breaks:** the Activity panel says what happened; the log folder is in Settings >
    Diagnostics. Tell me in the chat which step and what you saw.
-6. **When it's good:** tell me, and I open the pull request for 0.5.0. You merge it and run
+6. **When it's good:** merge the pull request on GitHub, then on your PC `git switch main`, `git pull` and
    `tools\release.bat publish` (or `publish --test` first, for friends who get test versions).
 
 ---
 
-# Test checklist for 0.9 (pictures over the seek bar), branch `try/0.9-previews`
+# Test checklist: pictures over the seek bar (built on branch `try/0.9-previews`)
 
 ## P1. Seek-bar pictures
 - [ ] Open a film from your library, wait ~half a minute, hover over the seek bar: a picture of that moment
@@ -33,7 +33,7 @@ them are in this one.
 
 ---
 
-# Test checklist for 0.8 (chat and reactions), branch `try/0.8-chat`
+# Test checklist: chat and reactions (built on branch `try/0.8-chat`)
 
 ## C1. Chat and reactions (two PCs, or two windows with `--profile`)
 - [ ] In a room, the sidebar says *Activity and chat* with a box at the bottom. **T** jumps into it, **Enter**
@@ -45,7 +45,7 @@ them are in this one.
 
 ---
 
-# Test checklist for 0.7 (what should we watch?), branch `try/0.7-discover`
+# Test checklist: what should we watch? (built on branch `try/0.7-discover`)
 
 It needs a free TMDB key: themoviedb.org → sign up → Settings → API → request a key (personal use,
 fill in anything sensible) → copy the **API Read Access Token**. TMDB was out of reach where this was
@@ -72,7 +72,7 @@ built, so everything was tested against a stand-in; this list is the test with t
 
 ---
 
-# Test checklist for 0.6 (torrents), branch `try/0.6-torrent`
+# Test checklist: torrents (built on branch `try/0.6-torrent`)
 
 Use a legal torrent, e.g. Big Buck Bunny or Sintel (Blender's open films) or a film from the
 Internet Archive's public-domain collection: their pages have a magnet link or a .torrent file.
@@ -96,7 +96,7 @@ Internet Archive's public-domain collection: their pages have a magnet link or a
 
 ---
 
-# Test checklist for 0.5 (YouTube together), branch `try/0.5-youtube`
+# Test checklist: YouTube together (built on branch `try/0.5-youtube`)
 
 Nothing here could be tried with the real YouTube from where it was built (YouTube is blocked
 there); GitHub's machines try it on every run (see the notes on the checks page). So this list

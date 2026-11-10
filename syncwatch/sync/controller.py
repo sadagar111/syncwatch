@@ -200,8 +200,8 @@ class Controller(RoomListener):
         self.queue = Queue()
         self.queue_rules: Dict[str, str] = {"add": "everyone", "control": "host"}   # the host's
         self._qreq_times: Dict[bytes, Deque[float]] = {}
-        self.votes = FilmVoteRoom(self)     # the film vote (0.7)
-        self.chat = RoomChat(self)          # chat and reactions (0.8)
+        self.votes = FilmVoteRoom(self)     # the film vote (0.5)
+        self.chat = RoomChat(self)          # chat and reactions (0.5)
         self._skip_votes: Dict[bytes, str] = {}    # the host: who voted to skip the video that plays now
         self._skip_key = 0                          # (its queue key)
         self._voted_key = 0                         # a member: the video I voted to skip
@@ -1212,7 +1212,7 @@ class Controller(RoomListener):
                 self.ui.activity(f"{item.by or 'Someone'} added {item.title} to the queue", "friend")
         self.ui_queue_changed()
 
-    # ================================================================ sharing a film (0.6)
+    # ================================================================ sharing a film (0.5)
     def can_ask_for_film(self) -> Optional[Dict]:
         """The host's film, if I could ask for it: they play a file (not YouTube or a torrent) that
         I don't have (not the same name and size, and not a file of the same length)."""

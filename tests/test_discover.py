@@ -1,4 +1,4 @@
-"""What should we watch? (0.7): film names, TMDB (against a stand-in on this PC), picks, the vote."""
+"""What should we watch? (0.5): film names, TMDB (against a stand-in on this PC), picks, the vote."""
 import json
 import os
 import random

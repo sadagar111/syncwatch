@@ -80,12 +80,12 @@ YOUTUBE_ID = Pattern(r"[A-Za-z0-9_-]{11}", "dQw4w9WgXcQ")
 # "ip:port" or "[ipv6]:port" where someone in the room can be reached (checked again before use)
 ADDRESS = Pattern(r"(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-fA-F:.]{2,45}\]):\d{1,5}", "192.0.2.10:6881")
 TMDB_IMAGE = Pattern(r"/[A-Za-z0-9_-]{1,80}\.(jpg|jpeg|png|webp)", "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg")
-REACTIONS = ("😂", "😮", "😍", "😱", "😢", "👏", "🔥", "🍿")   # the only emoji a reaction can be (0.8)
+REACTIONS = ("😂", "😮", "😍", "😱", "😢", "👏", "🔥", "🍿")   # the only emoji a reaction can be (0.5)
 CHAT_TEXT = 300                                                  # characters in one chat message
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
               "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
-              "magnet": (str, False, 3000)}      # since 0.6: streamed from this torrent (checked again on use)
+              "magnet": (str, False, 3000)}      # since 0.5: streamed from this torrent (checked again on use)
 QUEUE_ITEM: Spec = {"k": (int, True, (1, 1 << 31)), "yt": (YOUTUBE_ID, True, None), "title": (str, True, 120),
                     "dur": (int, False, (0, MAX_POSITION_MS)), "by": (str, False, 32)}
 VOTE_CHOICE: Spec = {"k": (int, True, (1, 1 << 31)), "title": (str, True, 120), "year": (int, False, (0, 2200)),
@@ -161,7 +161,7 @@ ROOM: Dict[str, Spec] = {
     # the YouTube queue (0.5): the host's app sends all of it after every change; members ask
     "queue": {"no": SEQ, "items": (ListOf(QUEUE_ITEM, 50), True, None), "now": (QUEUE_ITEM, False, None),
               "rules": (QUEUE_RULES, True, None), "skip": (SKIP_VOTES, False, None)},
-    # sharing a film with the room (0.6): someone asks, the one who has it shares it as a private
+    # sharing a film with the room (0.5): someone asks, the one who has it shares it as a private
     # torrent and says where to connect; addresses only ever travel inside the encrypted room
     "share_req": {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
                   "addrs": (ListOf(ADDRESS, 8), False, None)},
@@ -175,14 +175,14 @@ ROOM: Dict[str, Spec] = {
     "qreq": {"op": (("add", "remove", "skip", "play", "move", "voteskip"), True, None), "yt": (YOUTUBE_ID, False, None),
              "title": (str, False, 120), "dur": (int, False, (0, MAX_POSITION_MS)),
              "key": (int, False, (1, 1 << 31)), "to": (int, False, (0, 50))},
-    # the film vote (0.7): the host's app sends all of it after every change; members ask
+    # the film vote (0.5): the host's app sends all of it after every change; members ask
     "vote": {"no": SEQ, "open": (bool, True, None), "choices": (ListOf(VOTE_CHOICE, 12), True, None),
              "winner": (int, False, (0, 1 << 31))},
     "vreq": {"op": (("start", "suggest", "withdraw", "cast", "have"), True, None),
              "k": (int, False, (0, 1 << 31)), "title": (str, False, 120), "year": (int, False, (0, 2200)),
              "tmdb": (int, False, (0, 1 << 31)), "poster": (TMDB_IMAGE, False, None),
              "keys": (ListOf(int, 12, (1, 1 << 31)), False, None)},
-    # chat and reactions (0.8): to everyone in the room, shown when they come, kept nowhere
+    # chat and reactions (0.5): to everyone in the room, shown when they come, kept nowhere
     "chat": {"text": (str, True, CHAT_TEXT)},
     "react": {"e": (REACTIONS, True, None)},
 }
