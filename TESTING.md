@@ -1,25 +1,31 @@
-# Testing 0.5.0: branch `v0.5.0-release` (the pull request into main)
+# Testing 0.5.1: branch `v0.5.1-fixes` (the pull request into main)
 
-Everything from the week, as you kept it (all of it): YouTube (Up next, playlists, YouTube's subtitles, vote to
-skip), torrents, ideas and the film vote, chat and reactions, seek-bar pictures, Sunday's extras (ready check,
-next episode, skip intro, night mode, sound delay, waiting for a loading video, pausing when a connection
-drops) and the Windows crash fix. The checklists below say which branch each part was built on; all of
-them are in this one.
+1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch v0.5.1-fixes`, then start `SyncWatch.bat`
+   (to keep your own settings out of it: `--profile test`).
+2. **TMDB through the relay** needs the relay's key once (it's a Cloudflare secret, never in the repo):
+   Cloudflare > Workers & Pages > `syncwatch-relay` > Settings > Variables and Secrets > Add > type Secret,
+   name `TMDB_KEY`, your TMDB key as the value (relay/README.md). The relay code itself goes live when the pull
+   request is merged (GitHub/Cloudflare deploys `relay/` from main), so test W5 after merging.
+3. Then:
 
-1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch v0.5.0-release`, then start `SyncWatch.bat`
-   as usual (it checks for the new parts: yt-dlp, Deno, libtorrent). Your profile and films stay as they are;
-   to try it without touching your own settings, start it with `--profile test`.
-2. **One thing to set:** a free TMDB key for the Ideas window (D1 below). Everything else works out of the box.
-3. **Alone (about 30 minutes):** Y1 and Y4 (YouTube, a playlist, subtitles), T1 (a torrent; a public-domain film
-   from archive.org is a good one), D1 (Ideas), P1 (seek-bar pictures), and Sunday's: next episode, skip intro,
-   night mode, sound delay.
-4. **With a friend** (two PCs, or two windows on one PC with `--profile`): Y2–Y3 (YouTube together, the queue,
-   vote to skip), C1 (chat, reactions), D2 (film vote), T2 (*Get it from …*; best between two homes), the ready
-   check, waiting for a loading video, pausing when a connection drops.
-5. **When something breaks:** the Activity panel says what happened; the log folder is in Settings >
-   Diagnostics. Tell me in the chat which step and what you saw.
-6. **When it's good:** merge the pull request on GitHub, then on your PC `git switch main`, `git pull` and
-   `tools\release.bat publish` (or `publish --test` first, for friends who get test versions).
+## W. Links to films
+- [ ] **W1** Paste a direct film link (e.g. a Real-Debrid download link) in the start screen's box: SyncWatch asks
+      *How should SyncWatch open links to films?* Choose **Play it from the link**: it plays; jumping works.
+- [ ] **W2** Settings > Downloads > *When I open a web link* shows your choice. Set **Download it while it plays**,
+      paste a link: it plays, and the control bar shows `⬇ 45 % · 12 MB/s · 2 min left`. When it's done, the
+      Activity panel says it's in your library, and it is (Library window).
+- [ ] **W3** Start a download, open another film halfway, then the same link again: *Continuing the download of …*
+      and it finishes. (A new Real-Debrid link to the same file continues too.)
+- [ ] **W4** In a room, host pastes a link: a friend following you sees *Stream it too* in the sidebar; after the
+      click it plays in sync. With *When the host opens a web link: Don't*, they're not asked.
+      (Real-Debrid may allow a link in one place at a time: try it with a link you don't mind.)
+- [ ] **W5** After the merge and the `TMDB_KEY` secret: Settings > Discover > TMDB key empty, open **Ideas**:
+      recommendations, posters, details and trailers appear. Your own key back in: still works (straight to TMDB).
+- [ ] **W6** Odd links: a web page (not a film) says *That link opens a web page, not a film*; an expired link says
+      *That link doesn't work (anymore)*; an https link to a .torrent file opens in the torrent player;
+      Ctrl+L while something plays takes a magnet link.
+
+When it's good: merge the pull request, then `git switch main`, `git pull` and `tools\release.bat publish`.
 
 ---
 

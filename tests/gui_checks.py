@@ -205,6 +205,7 @@ def check_room(out: Path) -> bool:
     ok &= _room_extras(out)
     ok &= _torrent_offer(out)
     ok &= _ready_check(out)
+    ok &= _link_offer(out)
     return ok
 
 
@@ -234,7 +235,7 @@ def _room_extras(out: Path) -> bool:
 
 def _torrent_offer(out: Path) -> bool:
     """(0.5) The host streams a torrent: Marek (ask first, the default) is asked in the sidebar and
-    streams it only after his click; Kuba (Settings > Torrents: don't) is neither asked nor streams."""
+    streams it only after his click; Kuba (Settings > Downloads: don't) is neither asked nor streams."""
     seen = {}
     for role in ("marek", "kuba"):
         for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():
@@ -250,6 +251,31 @@ def _torrent_offer(out: Path) -> bool:
             ("after his click it streams", after.get("streaming") is True),
             ("Kuba (Settings: don't) isn't asked and streams nothing", kuba.get("banner") == ""
              and kuba.get("streaming") is False)):
+        ok &= passed
+        print(f"room: {name} {'OK' if passed else 'FAIL'}")
+    if not ok:
+        print(f"room: what they saw: {seen}")
+    return ok
+
+
+def _link_offer(out: Path) -> bool:
+    """(0.5.1) The host plays a film from a web link: Marek (ask first, the default) is asked in the sidebar
+    and plays the same link only after his click; Kuba (Settings > Downloads: don't) isn't asked."""
+    seen = {}
+    for role in ("marek", "kuba"):
+        for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():
+            if ':link_state' in line and ':seen"' in line:
+                entry = json.loads(line)
+                seen[entry["event"]] = entry
+    marek, after, kuba = (seen.get(k, {}) for k in ("marek:link_state:seen", "marek:link_state2:seen",
+                                                     "kuba:link_state:seen"))
+    ok = True
+    for name, passed in (
+            ("Marek is asked before the host's web link plays for him", marek.get("banner") == "Stream it too"
+             and "web link" in marek.get("text", "") and marek.get("playing_link") is False),
+            ("after his click he plays the same link", after.get("playing_link") is True),
+            ("Kuba (Settings: don't) isn't asked and plays nothing from it", kuba.get("banner") == ""
+             and kuba.get("playing_link") is False)):
         ok &= passed
         print(f"room: {name} {'OK' if passed else 'FAIL'}")
     if not ok:

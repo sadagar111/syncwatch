@@ -288,6 +288,24 @@ class YouTubeTests(RoomTestCase):
         self.pump(2.5)
         self.assertEqual(len([e for e in self.kuba.ui.events if e[0] == "follow_torrent"]), count)
 
+    def test_members_follow_the_hosts_web_link(self):
+        """0.5.1: the host plays a film from a web link: members are told (the window asks them first)."""
+        link = "https://abc.download.real-debrid.com/d/XYZ123/Film.mkv"
+        followed = lambda person: [e[1:] for e in person.ui.events if e[0] == "follow_link"]
+        self.alex.c.set_film("Film.mkv", 4_000_000, 0, link=link)
+        self.assertTrue(self.pump(until=lambda: followed(self.marek)))
+        self.assertEqual(followed(self.marek)[0], (link, "Film.mkv", 4_000_000))
+        self.assertEqual(self.marek.peer(self.alex).film.get("link"), link)
+        self.assertIsNone(self.marek.c.can_ask_for_film())          # (it's the link, not a file to get from Alex)
+        self.kuba.c.set_film("Film.mkv", 4_000_000, 7_200_000)     # he has the same film: nothing to stream
+        count = len(followed(self.kuba))
+        self.pump(2.5)
+        self.assertEqual(len(followed(self.kuba)), count)
+        self.marek.c.set_film("Film.mkv", 4_000_000, 0, link=link)  # Marek plays it from the link now
+        self.assertTrue(self.pump(until=lambda: self.alex.peer(self.marek) is not None
+                                  and self.alex.peer(self.marek).match == "same"))
+        self.assertEqual(self.alex.ui.films_followed(), [])         # (the host doesn't follow anyone)
+
     def test_sharing_a_film_with_someone_who_doesnt_have_it(self):
         events = lambda person, kind: [e[1] for e in person.ui.events if e[0] == kind]
         self.alex.c.set_film("Dune.mkv", 4_200_000_000, 9_000_000)

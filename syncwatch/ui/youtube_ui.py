@@ -21,6 +21,7 @@ from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from .. import errors
+from ..library import weblinks as web_links
 from ..torrent import links as torrent_links
 from ..youtube import links, resolve, streams
 
@@ -355,16 +356,18 @@ class TitleLookup(QObject):
 
 class LinkBox(QWidget):
     """A field for a YouTube link, a Watch button and (optional) an Add to queue button.
-    Emits submitted(VideoRef) (watch now) or queued(VideoRef)."""
+    Emits submitted(VideoRef) (watch now) or queued(VideoRef). A magnet link or a web link (a film or a
+    .torrent at an http(s) address) emits magnetSubmitted / webSubmitted with the text."""
     submitted = Signal(object)
     queued = Signal(object)
     magnetSubmitted = Signal(str)     # a magnet link (from 0.5: torrents)
+    webSubmitted = Signal(str)        # a web link (from 0.5.1)
     playlistSubmitted = Signal(object, bool)      # (PlaylistRef, play: False = only into the queue)
 
     def __init__(self, button_text: str = "▶  Watch", parent=None):
         super().__init__(parent)
         self.field = QLineEdit()
-        self.field.setPlaceholderText("Paste a YouTube link or a magnet link…")
+        self.field.setPlaceholderText("Paste a YouTube, magnet or web link…")
         self.field.setClearButtonEnabled(True)
         self.field.returnPressed.connect(self._submit)
         self.field.textChanged.connect(self._changed)
@@ -392,10 +395,11 @@ class LinkBox(QWidget):
     def _changed(self, text: str) -> None:
         ref = links.parse(text) or links.parse_playlist(text)
         magnet = torrent_links.is_magnet(text)
-        self.button.setEnabled(ref is not None or magnet)
+        web = ref is None and not magnet and web_links.parse(text) is not None
+        self.button.setEnabled(ref is not None or magnet or web)
         self.queue_button.setEnabled(ref is not None)
-        bad = bool(text.strip()) and ref is None and not magnet
-        self.note.setText("That isn't a YouTube video or magnet link." if bad else "")
+        bad = bool(text.strip()) and ref is None and not magnet and not web
+        self.note.setText("That isn't a YouTube, magnet or web link." if bad else "")
         self.note.setVisible(bad)
 
     def _submit(self) -> None:
@@ -411,6 +415,9 @@ class LinkBox(QWidget):
             if play and torrent_links.is_magnet(text):     # a magnet link (0.5: torrents)
                 self.field.clear()
                 self.magnetSubmitted.emit(text)
+            elif play and web_links.parse(text) is not None:   # a web link (0.5.1)
+                self.field.clear()
+                self.webSubmitted.emit(text)
             return
         self.field.clear()
         if playlist is not None:
@@ -424,12 +431,15 @@ class LinkDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Open a YouTube video")
+        self.setWindowTitle("Open a link")
         self.box = LinkBox()
         self.box.submitted.connect(lambda ref: self._chosen(ref, "watch"))
         self.box.queued.connect(lambda ref: self._chosen(ref, "queue"))
         self.box.playlistSubmitted.connect(lambda ref, play: self._chosen(ref, "playlist" if play else "playlist-queue"))
+        self.box.magnetSubmitted.connect(lambda text: self._chosen_text(text, "magnet"))
+        self.box.webSubmitted.connect(lambda text: self._chosen_text(text, "web"))
         self.ref: Optional[links.VideoRef] = None
+        self.text = ""           # a magnet or web link (mode "magnet" / "web")
         self.mode = "watch"
         hint = QLabel("In a room, everyone who follows you opens the same video.")
         hint.setObjectName("Hint")
@@ -441,4 +451,8 @@ class LinkDialog(QDialog):
 
     def _chosen(self, ref: links.VideoRef, mode: str) -> None:
         self.ref, self.mode = ref, mode
+        self.accept()
+
+    def _chosen_text(self, text: str, mode: str) -> None:
+        self.text, self.mode = text, mode
         self.accept()

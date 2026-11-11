@@ -43,6 +43,8 @@ from .sidebar import QueueEntry
 from ..library import films as library_films
 from ..units import human_size
 from .torrent_ui import Torrents
+from .web_ui import WebLinks
+from ..library import weblinks as web_links
 from .youtube_ui import LinkBox, LinkDialog, TitleLookup, YouTube
 from ..torrent import links as torrent_links
 from .discover_ui import Discover, VotePanel
@@ -265,6 +267,7 @@ class MainWindow(QMainWindow):
         self.idle.youtube_box.submitted.connect(self.open_youtube)
         self.idle.youtube_box.queued.connect(self.queue_youtube)
         self.idle.youtube_box.magnetSubmitted.connect(self.open_torrent)
+        self.idle.youtube_box.webSubmitted.connect(self.open_web_link)
         self.idle.torrent_file_button.clicked.connect(self.pick_torrent_file)
         self.torrents = Torrents(self.settings, lambda: self.movies_dir() / "Torrents", self,
                                  cache=self.ctx.profile.cache_dir / "shared-films", library=self.movies_dir)
@@ -277,6 +280,17 @@ class MainWindow(QMainWindow):
         self.torrents.ready.connect(lambda source: self.play_stream(source, 0))
         self.torrents.statusText.connect(self.controls.set_source_text)
         self.torrents.message.connect(self.activity)
+        # films from web links (0.5.1): played from the link, saved beside it if wanted
+        self.weblinks = WebLinks(self.torrents.folder, self.movies_dir,
+                                 lambda: bool(self.settings.get("torrents.into_library")), self)
+        self.weblinks.ready.connect(self._web_ready)
+        self.weblinks.torrentReady.connect(self.open_torrent)
+        self.weblinks.failed.connect(self._web_failed)
+        self.weblinks.statusText.connect(self.controls.set_source_text)
+        self.weblinks.message.connect(self.activity)
+        self._link_offer: Optional[tuple] = None    # (link, name, size): the host's web link, mine to stream too?
+        self._link_follow_tried: dict = {}          # link -> when following the host's link was last started
+        self._following_link = ""                   # the host's link I'm opening (its problems: activity feed)
         self.idle.youtube_box.playlistSubmitted.connect(self.open_playlist)
         self.titles = TitleLookup(self)
         self.titles.found.connect(lambda video, title: self.controller.queue_info(video, title, 0))
@@ -683,6 +697,8 @@ class MainWindow(QMainWindow):
 
     def open_film(self, path: Path) -> None:
         self._save_resume(force=True)
+        if self.weblinks.url:
+            self.weblinks.stop()            # (a download stops; what's saved stays, to continue later)
         if self.torrents.active and not (self.torrents.playing and path.name == self.torrents.playing.title):
             self.torrents.stop()
         if self.player.load(path):
@@ -773,7 +789,13 @@ class MainWindow(QMainWindow):
             self.idle.youtube_box.field.setFocus()
             return
         dialog = LinkDialog(self)
-        if dialog.exec() and dialog.ref is not None:
+        if not dialog.exec():
+            return
+        if dialog.mode == "magnet":
+            self.open_torrent(dialog.text)
+        elif dialog.mode == "web":
+            self.open_web_link(dialog.text)
+        elif dialog.ref is not None:
             if dialog.mode.startswith("playlist"):
                 self.open_playlist(dialog.ref, play=dialog.mode == "playlist" and not queue)
             elif dialog.mode == "queue" or queue:
@@ -872,7 +894,7 @@ class MainWindow(QMainWindow):
     def follow_torrent(self, magnet: str, name: str, size: int) -> None:
         """The controller: the host streams a torrent I don't have open. A film of that name and size
         in my library is opened instead (no download needed). Otherwise the sidebar asks first
-        (streaming a torrent also uploads it to others), unless Settings > Torrents says otherwise."""
+        (streaming a torrent also uploads it to others), unless Settings > Downloads says otherwise."""
         choice = self.settings.get("torrents.follow_host")
         if choice == "no" or not torrent_links.is_magnet(magnet):
             return
@@ -919,9 +941,12 @@ class MainWindow(QMainWindow):
         self._save_resume(force=True)
         if stream.kind != "torrent" and self.torrents.active:
             self.torrents.stop()            # something else plays now
+        if stream.kind != "web" and self.weblinks.url:
+            self.weblinks.stop()
         if not self.player.load_stream(stream):
             return
-        self._film_key = film_key(stream.title, stream.size) if stream.kind == "torrent" else f"yt:{stream.id}"
+        self._film_key = (film_key(stream.title, stream.size) if stream.kind in ("torrent", "web")
+                          else f"yt:{stream.id}")
         self.previews.clear()
         self._start_at_ms = max(0, int(start_s)) * 1000
         self.setWindowTitle(f"SyncWatch: {stream.label}")
@@ -929,6 +954,10 @@ class MainWindow(QMainWindow):
         if stream.kind == "torrent":
             self.subtitles.film_closed()
             self.controller.set_film(stream.title, stream.size, 0, magnet=self.torrents.magnet())
+        elif stream.kind == "web":
+            self.subtitles.film_closed()
+            shared = stream.url if web_links.room_ok(stream.url) else ""   # (others may only open https links)
+            self.controller.set_film(stream.title, stream.size, 0, link=shared)
         else:
             self.subtitles.stream_opened(self._film_key, stream.id, stream.captions)
             self.controller.set_film(stream.label, 0, stream.duration_ms, yt=stream.id)
@@ -960,10 +989,125 @@ class MainWindow(QMainWindow):
         """A magnet link or a .torrent file: stream it (the part being watched first)."""
         self.torrents.open(source)
 
+    # ---------------------------------------------------------------- web links (0.5.1)
+    def open_web_link(self, text: str) -> None:
+        """A film (or a .torrent) at a web address. The film plays from the link; the first time,
+        SyncWatch asks whether it should also be saved (Settings > Downloads > When I open a web link)."""
+        link = web_links.parse(text)
+        if link is None:
+            return
+        if link.torrent:
+            self.activity(f"Getting the .torrent file from {link.host}…", "you")
+            self.weblinks.fetch_torrent(link)
+            return
+        mode = self.settings.get("links.open")
+        if mode not in ("stream", "download"):
+            mode = self.ask_link_mode()
+            if not mode:
+                return
+        self._following_link = ""
+        self._follow_align = False
+        self.weblinks.open(link, download=mode == "download")
+        self.activity(f"Opening the film from {link.host}…", "you")
+
+    def ask_link_mode(self) -> str:
+        """The first web link: should links play only, or be saved too? The answer is kept."""
+        box = QMessageBox(self)
+        box.setWindowTitle("Links to films")
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setText("How should SyncWatch open links to films?")
+        box.setInformativeText(
+            "Play it from the link: it streams, nothing is saved.\n\n"
+            "Download it while it plays: it plays from the link while SyncWatch saves it into your library "
+            "(the control bar shows how long that takes), so friends can get it from you later.\n\n"
+            "SyncWatch remembers your choice. To change it: Settings > Downloads > When I open a web link.")
+        stream = box.addButton("Play it from the link", QMessageBox.ButtonRole.AcceptRole)
+        download = box.addButton("Download it while it plays", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(stream)
+        box.exec()
+        clicked = box.clickedButton()
+        mode = "stream" if clicked is stream else "download" if clicked is download else ""
+        if mode:
+            self.settings.set("links.open", mode)
+        return mode
+
+    def _web_ready(self, source) -> None:
+        if source.url == self.weblinks.url:          # (not if something else was opened meanwhile)
+            self.play_stream(source, 0)
+
+    def _web_failed(self, code: str, detail: str) -> None:
+        if self._following_link:                     # the host's link: only into the activity feed
+            self._following_link = ""
+            problem = errors.CATALOG.get(code)
+            self.activity(f"Couldn't open the host's web link: {problem.title if problem else code} ({code})",
+                          "warn")
+            return
+        self.problem(code, detail)
+
+    def follow_link(self, link: str, name: str, size: int) -> None:
+        """The controller: the host plays a film from a web link I don't have open. My own copy (same name
+        and size) opens instead; otherwise the sidebar asks first (Settings > Downloads > When the host
+        opens a web link), then it plays from the same link."""
+        choice = self.settings.get("links.follow_host")
+        if choice == "no" or not web_links.room_ok(link) or self.weblinks.url == link:
+            return
+        if time.monotonic() - self._link_follow_tried.get(link, -1e9) < 60:
+            return   # tried a moment ago: not again on every heartbeat
+        self._link_follow_tried[link] = time.monotonic()
+        known = library_films.list_films(self.movies_dir()) + library_films.list_films(self.torrents.folder())
+        local = next((film.path for film in known if size and film.path.name == name and film.size == size), None)
+        if local is not None:
+            self._follow_align = True
+            self.activity(f"The host plays {name}: you have it in your library, opening that", "friend")
+            self.open_film(local)
+            return
+        if choice == "ask":
+            if self._link_offer is None or self._link_offer[0] != link:
+                self._link_offer = (link, name, int(size))
+                self.activity(f"The host plays {name or 'a film'} from a web link. Stream it too? (sidebar)",
+                              "friend")
+            self._refresh_share_banner()
+            return
+        self._stream_hosts_link(link, name)
+
+    def _stream_hosts_link(self, link: str, name: str, clicked: bool = False) -> None:
+        self._link_offer = None
+        parsed = web_links.parse(link)
+        if parsed is None or not web_links.room_ok(link):
+            return
+        self._follow_align = True
+        self._following_link = link
+        if not clicked:
+            self.activity(f"The host plays {name or 'a film'} from a web link: streaming it too", "friend")
+        self.weblinks.open(parsed, download=False)
+
+    def _link_offer_still_open(self) -> bool:
+        """The host still plays the link offered in the sidebar, and I don't (yet)."""
+        offer, c = self._link_offer, self.controller
+        host = c.host_peer
+        if offer is None or host is None or c.is_host or not c.attached or not host.film:
+            return False
+        return host.film.get("link") == offer[0] and self.weblinks.url != offer[0]
+
+    def _offer_link(self) -> bool:
+        """The sidebar asks whether to stream the host's web link too (Settings > Downloads: ask)."""
+        if not self._link_offer_still_open():
+            self._link_offer = None
+            return False
+        link, name, size = self._link_offer
+        host = self.controller.host_peer
+        about = f"{name} ({human_size(size)})" if size else (name or "a film")
+        where = web_links.parse(link).host
+        self.sidebar.share_banner.offer(
+            f"{host.name} plays {about} from a web link ({where}). Stream it too? It plays straight from the "
+            "same link on your PC.", "Stream it too")
+        return True
+
     # sharing a film with the room
     def _refresh_share_banner(self) -> None:
         self._my_copy = None
-        if self._offer_torrent():
+        if self._offer_torrent() or self._offer_link():
             return
         film = self.controller.can_ask_for_film()
         host = self.controller.host_peer
@@ -984,7 +1128,7 @@ class MainWindow(QMainWindow):
             f"straight from {host.name}? It plays while it downloads.", f"Get it from {host.name}")
 
     def _offer_torrent(self) -> bool:
-        """The sidebar asks whether to stream the host's torrent too (Settings > Torrents: ask)."""
+        """The sidebar asks whether to stream the host's torrent too (Settings > Downloads: ask)."""
         if not self._torrent_offer_still_open():
             self._torrent_offer = None
             return False
@@ -997,6 +1141,11 @@ class MainWindow(QMainWindow):
         return True
 
     def _share_banner_clicked(self) -> None:
+        if self._link_offer_still_open():
+            link, name, _ = self._link_offer
+            self.sidebar.share_banner.offer("", "")
+            self._stream_hosts_link(link, name, clicked=True)
+            return
         if self._torrent_offer_still_open():
             magnet, name, _ = self._torrent_offer
             self.sidebar.share_banner.offer("", "")
@@ -1020,7 +1169,7 @@ class MainWindow(QMainWindow):
             return
         answer = self.settings.get("torrents.share")
         if answer == "no":
-            self.activity(f"{who} asked for {path.name} (sharing is off: Settings > Torrents)", "info")
+            self.activity(f"{who} asked for {path.name} (sharing is off: Settings > Downloads)", "info")
             return
         if answer == "ask":
             reply = QMessageBox.question(
@@ -1066,7 +1215,7 @@ class MainWindow(QMainWindow):
             self.open_torrent(path)
 
     def _paste_link(self) -> None:
-        """Ctrl+V outside a text field: a YouTube link from the clipboard opens."""
+        """Ctrl+V outside a text field: a YouTube, magnet or web link from the clipboard opens."""
         text = QApplication.clipboard().text()
         magnet = torrent_links.find_magnet(text)
         if magnet is not None:
@@ -1080,12 +1229,15 @@ class MainWindow(QMainWindow):
         ref = youtube_links.find(text)
         if ref is not None:
             self._open_or_queue(ref)
+        elif web_links.parse(text) is not None:          # a link to a film (or a .torrent) on the web (0.5.1)
+            self.open_web_link(text)
 
     def close_film(self) -> None:
         """Close the open film (e.g. before it's removed from the library): back to the start screen."""
         self._save_resume(force=True)
         self.player.unload()
         self.torrents.stop()
+        self.weblinks.stop()
         self.previews.clear()
         self.subtitles.film_closed()
         self._film_key = ""
@@ -1121,6 +1273,11 @@ class MainWindow(QMainWindow):
                 self.controller.align_on_next_state()
             self.controller.queue_playing_elsewhere()
             self.activity(f"Opened {stream.title} ({fmt_time(duration)}), streaming from the torrent", "you")
+        elif stream is not None and stream.kind == "web":
+            shared = stream.url if web_links.room_ok(stream.url) else ""   # (others may only open https links)
+            self.controller.set_film(stream.title, stream.size, duration, link=shared)
+            self.controller.queue_playing_elsewhere()
+            self.activity(f"Opened {stream.title} ({fmt_time(duration)}), playing from {stream.host}", "you")
         elif stream is not None:
             self.controller.set_film(stream.label, 0, duration or stream.duration_ms, yt=stream.id)
             self.controller.queue_info(stream.id, stream.label, duration or stream.duration_ms)
@@ -1697,6 +1854,9 @@ class MainWindow(QMainWindow):
                 if ref is not None:
                     self._open_or_queue(ref)
                     return
+                if web_links.parse(url.toString()) is not None:     # a film (or a .torrent) on the web (0.5.1)
+                    self.open_web_link(url.toString())
+                    return
                 continue
             path = Path(url.toLocalFile())
             if path.suffix.lower() in VIDEO_EXTENSIONS:
@@ -1748,6 +1908,7 @@ class MainWindow(QMainWindow):
         self.subtitles.stop()
         self.youtube.stop()
         self.torrents.stop()
+        self.weblinks.stop()
         self.discover.shutdown()
         self.previews.stop()
         self.library.shutdown()

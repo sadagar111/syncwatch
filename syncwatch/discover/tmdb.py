@@ -1,9 +1,10 @@
 """The Movie Database (TMDB): finding films, their details, recommendations and what's trending.
 
 TMDB is free for personal, non-commercial use with a key: themoviedb.org > Settings > API (the
-long "API Read Access Token" or the short "API Key", both work). The key comes from SyncWatch's
-settings (Settings > Discover) and is only ever sent to api.themoviedb.org: it's never logged,
-never put into error reports and never part of the cache.
+long "API Read Access Token" or the short "API Key", both work). Without a key of one's own,
+SyncWatch's relay asks TMDB with its key (since 0.5.1: relay/src/tmdb.js, only these questions).
+A key in SyncWatch's settings (Settings > Discover) is used instead and only ever sent to
+api.themoviedb.org: it's never logged, never put into error reports and never part of the cache.
 
 Everything TMDB answers is checked (types, lengths, ranges, what an image path may look like) and
 only the checked parts are kept, in a small cache on disk, so the same film isn't asked twice and
@@ -66,8 +67,9 @@ _IMAGE_STARTS = (b"\xff\xd8\xff", b"\x89PNG\r\n\x1a\n", b"RIFF")
 
 
 class TmdbError(Exception):
-    """kind: nokey (none set), key (TMDB didn't accept it), network (no answer), busy (TMDB is
-    overloaded or limiting), missing (no such film), odd (an answer that didn't make sense)."""
+    """kind: nokey (none set), key (TMDB didn't accept it), relay (the relay can't ask TMDB: it has
+    no key, TMDB refused it, or it's an older relay), network (no answer), busy (TMDB or the relay
+    is overloaded or limiting), missing (no such film), odd (an answer that didn't make sense)."""
 
     def __init__(self, kind: str, detail: str = ""):
         super().__init__(f"{kind}: {detail}" if detail else kind)
@@ -352,16 +354,30 @@ def _open(request: urllib.request.Request, timeout: float):
     return urllib.request.urlopen(request, timeout=timeout)
 
 
+def _relay_said(exc: urllib.error.HTTPError) -> str:
+    """The relay's {"error": "..."} word in a refusal ("" if it said nothing SyncWatch knows)."""
+    try:
+        said = json.loads(exc.read(2048).decode("utf-8")).get("error", "")
+    except (OSError, ValueError, AttributeError, http.client.HTTPException):
+        return ""
+    return said if said in ("nokey", "key", "missing", "busy", "question", "parameter", "network", "tmdb") else ""
+
+
 class Client:
     """Asks TMDB (one question at a time; meant for one background thread)."""
 
     def __init__(self, key: str, folder: Optional[Path], language: str = "en-US", region: str = "",
-                 api: str = "", images: str = "", opener: Opener = _open):
+                 api: str = "", images: str = "", opener: Opener = _open, relay: str = ""):
+        """relay: SyncWatch's relay (https://...), asked instead of TMDB when there's no key of one's own."""
         self.key = (key or "").strip()
         self.key_type = key_kind(self.key)
+        self.relay = relay.strip().rstrip("/") if relay and not self.key else ""
+        if self.relay:
+            self.key_type = "relay"
         self.language = language if _LANGUAGE.match(language or "") else "en-US"
         self.region = region if _REGION.match(region or "") else ""
-        self.api, self.images = (api or API).rstrip("/"), images or IMAGES   # (tests point these elsewhere)
+        self.api = self.relay + "/v1/tmdb" if self.relay else (api or API).rstrip("/")   # (tests point these
+        self.images = images or IMAGES                                                   # elsewhere)
         self.posters = folder / "posters" if folder is not None else None
         self.cache = Cache(folder)
         self._open = opener
@@ -461,7 +477,16 @@ class Client:
             with self._open(urllib.request.Request(url, headers=headers), TIMEOUT_S) as answer:
                 data = answer.read(limit + 1)
         except urllib.error.HTTPError as exc:   # (its text has the code and reason, never the address)
+            said = _relay_said(exc) if self.relay and auth else ""
             exc.close()
+            if self.relay and auth:
+                if said == "missing":
+                    kind = "missing"
+                elif exc.code == 429 or said in ("busy", "network", "tmdb") or (exc.code >= 500 and not said):
+                    kind = "busy"
+                else:       # no key there, TMDB refused it, an older relay, or not a relay at all
+                    kind = "relay"
+                raise TmdbError(kind, f"HTTP {exc.code} {said}".strip()) from None
             kind = {401: "key", 403: "key", 404: "missing", 429: "busy"}.get(exc.code)
             raise TmdbError(kind or ("busy" if exc.code >= 500 else "odd"), f"HTTP {exc.code}") from None
         except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:

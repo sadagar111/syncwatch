@@ -137,6 +137,9 @@ class RecorderUI:
     def follow_torrent(self, magnet, name="", size=0):
         self._add(("follow_torrent", magnet))
 
+    def follow_link(self, link, name="", size=0):
+        self._add(("follow_link", link, name, size))
+
     def followed(self):
         return [e[1] for e in self.events if e[0] == "follow"]
 

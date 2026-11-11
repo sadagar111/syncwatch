@@ -85,7 +85,8 @@ CHAT_TEXT = 300                                                  # characters in
 FILM: Spec = {"name": (str, True, 255), "size": (int, True, (0, 1 << 50)),
               "dur": (int, False, (0, MAX_POSITION_MS)),
               "yt": (YOUTUBE_ID, False, None),   # since 0.5: a YouTube video instead of a file
-              "magnet": (str, False, 3000)}      # since 0.5: streamed from this torrent (checked again on use)
+              "magnet": (str, False, 3000),      # since 0.5: streamed from this torrent (checked again on use)
+              "link": (str, False, 2000)}        # since 0.5.1: played from this web link (checked again on use)
 QUEUE_ITEM: Spec = {"k": (int, True, (1, 1 << 31)), "yt": (YOUTUBE_ID, True, None), "title": (str, True, 120),
                     "dur": (int, False, (0, MAX_POSITION_MS)), "by": (str, False, 32)}
 VOTE_CHOICE: Spec = {"k": (int, True, (1, 1 << 31)), "title": (str, True, 120), "year": (int, False, (0, 2200)),

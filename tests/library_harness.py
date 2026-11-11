@@ -7,6 +7,9 @@ Usage:  QT_QPA_PLATFORM=offscreen python tests/library_harness.py <output dir>
 3. Add a film with AC3 sound while the player is told it can't play AC3: the converter
    offers itself, converts the sound to AAC (picture untouched), and the copy opens.
 4. Convert the sound of a library film by hand, then remove it (Recycle Bin / deleted).
+5-6. A show: the next episode opens at the end; Skip intro.
+7. A web link (0.5.1): asked once how links open ("Download it while it plays"): it plays from the
+   link while it's saved, then it's in the library; a link to a web page says it's no film.
 Screenshots of each step go to the output folder. Exit code 0 only if every check passes.
 """
 import json
@@ -24,6 +27,8 @@ sys.path.insert(0, str(ROOT))
 OUT = Path(sys.argv[1])
 OUT.mkdir(parents=True, exist_ok=True)
 FILM = ROOT / "tests" / "media" / "demo.mkv"
+os.environ["no_proxy"] = os.environ["NO_PROXY"] = "127.0.0.1,localhost"     # (step 7's web server is local)
+ERRORS_SEEN = []
 
 data_dir = Path(tempfile.mkdtemp(prefix="sw-lib-"))
 library_dir = data_dir / "library"
@@ -204,10 +209,48 @@ def run_script():
     CHECKS["it jumps past the intro"] = spin(5, lambda: window.player.position() >= 3900)
     CHECKS["and goes away"] = spin(3, lambda: not window.controls.skip_intro.isVisible())
 
+    # 7. A web link (0.5.1): the first time SyncWatch asks how links open; "Download it while it plays":
+    # it plays straight from the link while it's saved, then it's in the library
+    web_dir = data_dir / "web"
+    web_dir.mkdir()
+    web_film = web_dir / "Web.Film.2024.mkv"
+    make_film(web_film, seconds=8)
+    sys.path.insert(0, str(ROOT / "tests"))
+    import film_server
+    server = film_server.start(web_dir)
+    window.close_film()
+    box = window.idle.youtube_box
+    box.field.setText(f"{server}/d/AbC123/Web.Film.2024.mkv")
+    CHECKS["web link: Watch can be clicked"] = box.button.isEnabled() and not box.note.isVisible()
+    questions = []
+    answer_boxes("Download it while it plays", questions)
+    box.button.click()
+    CHECKS["web link: asked how links open"] = any("How should SyncWatch open links" in q for q in questions)
+    CHECKS["web link: the choice is kept"] = window.settings.get("links.open") == "download"
+    CHECKS["web link: plays from the link"] = spin(25, lambda: getattr(window.player.stream, "kind", "") == "web"
+                                                    and window.player.is_ready())
+    CHECKS["web link: not taken for a YouTube video"] = spin(5, lambda: (window.controller.film or {}).get("name")
+                                                              == "Web.Film.2024.mkv"
+                                                              and "yt" not in window.controller.film
+                                                              and window.controller.queue.now is None)
+    shot(window, "07_web_link")
+    saved = library_dir / "Web.Film.2024.mkv"
+    CHECKS["web link: saved into the library"] = spin(30, lambda: saved.is_file())
+    CHECKS["web link: saved completely"] = saved.is_file() and saved.read_bytes() == web_film.read_bytes()
+    CHECKS["web link: nothing half-done left"] = not list((library_dir / "Torrents").glob("*.sw-download*"))
+    feed = window.sidebar.activity.list
+    CHECKS["web link: said so"] = any("in your library now" in feed.item(i).text() for i in range(feed.count()))
+    # a link to a web page: no question this time (kept), and it says it's no film
+    questions.clear()
+    box.field.setText(f"{server}/films/about.html")
+    box.button.click()
+    CHECKS["web page: no film (SW-643)"] = spin(10, lambda: "SW-643" in ERRORS_SEEN)
+    CHECKS["web page: not asked again"] = not questions
+
 
 def scripted_exec(self):
     from syncwatch import errors
-    seen = []
+    seen = ERRORS_SEEN
     errors.set_handler(lambda report: seen.append(report.code))
     try:
         run_script()

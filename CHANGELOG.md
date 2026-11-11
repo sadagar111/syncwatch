@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 (links to films, and Ideas without a key)
+- **Links to films:** paste a link to a film file (https://..., for example from Real-Debrid) where you paste YouTube links, press Ctrl+V, or drag it onto SyncWatch. The first time, SyncWatch asks how such links should open: **Play it from the link** (it streams, nothing is saved) or **Download it while it plays** (it plays from the link while SyncWatch saves it into your library; the control bar shows how far it is and the time left, and a stopped download continues where it was). SyncWatch remembers your answer: Settings > Downloads > When I open a web link. A link to a .torrent file opens like a torrent.
+- In a room, friends following the host are asked before they play the host's link too (*Stream it too*): it plays straight from the same link on their PC. Some services (Real-Debrid, for example) may allow a link in only one place at a time. Settings > Downloads > When the host opens a web link.
+- **Ideas without a key of your own:** recommendations, posters and trailers now work for everyone: SyncWatch asks TMDB through its relay, with one key. A key of your own (Settings > Discover) is still used if you add one.
+- Settings > Torrents is now Settings > Downloads (it has the options for links too).
+- Ctrl+L while something plays now also opens magnet links (and links to films).
+
 ## 0.5.0 (YouTube, torrents, what to watch, chat, and more)
 **Watch YouTube together**
 - Paste a YouTube link on the start screen (or Ctrl+L, or Ctrl+V anywhere, or drag it from your browser onto SyncWatch). In a room, everyone following the host opens it too and lines up; play, pause, jumps, Sync up and Sync me work as with films.

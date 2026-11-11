@@ -10,7 +10,9 @@ Discover window and its background thread, posters, the cache, the vote panel, p
    posters arrive, a film's details (where to watch in NL, the trailer); Trending; Your films; a search.
 2. The trailer button plays the trailer (alone: here, through the YouTube part; not resolved here).
 3. Host a room, suggest two films, vote, close the vote: the winner is in the library: Play it.
-4. Without a key, "Your films" still lists the library; the key never shows up in the logs.
+4. Without a key of my own (0.5.1), the relay on this PC asks the stand-in TMDB with its key: a search works.
+5. Without a key anywhere, the window says how to get one and "Your films" still lists the library;
+   the key never shows up in the logs.
 Screenshots go to the output folder. Exit code 0 only if every check passes.
 """
 import faulthandler
@@ -165,13 +167,25 @@ def run_script():
     CHECKS["the winner plays"] = spin(20, lambda: window.player.is_ready() and window.controller.film is not None
                                       and window.controller.film.get("name") == MATRIX)
 
-    # 4. no key
+    # 4. no key of my own (0.5.1): the relay asks TMDB with its key
+    relay.tmdb_key, relay.tmdb_base = KEY, server.api
     window.settings.set("discover.tmdb_key", "")
     window.discover.open("mine")
+    dialog.search.setText("interstellar")
+    dialog._search()
+    CHECKS["no own key: search through the relay"] = spin(20, lambda: titles(dialog, "search") == ["Interstellar"])
+    CHECKS["no own key: no key note"] = "themoviedb.org" not in dialog.note.text()
+    shot(dialog, "06_through_the_relay")
+
+    # 5. the relay has no key either: how to get one, and my films are still there
+    relay.tmdb_key = ""
+    dialog.search.setText("inception")
+    dialog._search()
+    CHECKS["no key anywhere: how to get one"] = spin(20, lambda: "themoviedb.org" in dialog.note.text())
+    window.discover.open("mine")
     spin(0.5)
-    CHECKS["no key: how to get one"] = "themoviedb.org" in dialog.note.text()
-    CHECKS["no key: your films still listed"] = titles(dialog, "mine") == ["Inception", "The Matrix"]
-    shot(dialog, "06_no_key")
+    CHECKS["no key anywhere: your films still listed"] = titles(dialog, "mine") == ["Inception", "The Matrix"]
+    shot(dialog, "07_no_key")
     window.discover.shutdown()
 
 

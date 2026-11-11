@@ -25,7 +25,7 @@ log = logging.getLogger("syncwatch.settings")
 
 FILE_VERSION = 1
 
-SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Torrents", "Discover", "Interface",
+SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Downloads", "Discover", "Interface",
             "Keyboard", "Updates", "Diagnostics"]
 
 
@@ -281,9 +281,10 @@ SCHEMA: List[Setting] = [
        "yt-dlp needs a JavaScript program to read YouTube's pages: Deno, which comes with SyncWatch. "
        "Only set this to use another deno.exe. Empty means the one inside SyncWatch.", advanced=True),
 
-    # ---- Torrents (from 0.5) ----------------------------------------------------------
+    # ---- Downloads: torrents (from 0.5) and web links (from 0.5.1) -----------------------
     _s("torrents.folder", "path", "", "Download folder", TR,
-       "Where streamed films are saved. Empty means a 'Torrents' folder inside your library folder."),
+       "Where streamed and downloaded films are saved. Empty means a 'Torrents' folder inside your library "
+       "folder."),
     _s("torrents.after", "choice", "keep", "When you close a streamed film", TR,
        "Keep it: it stays in the download folder (and others can keep getting it from you while it's "
        "open). Delete it: streaming only, nothing stays on your drive.",
@@ -299,12 +300,21 @@ SCHEMA: List[Setting] = [
        "it downloads; your PC sends it, nothing goes through the relay).",
        choices=[("ask", "Ask me each time"), ("yes", "Share it"), ("no", "Don't share")]),
     _s("torrents.into_library", "bool", True, "Move finished films into my library", TR,
-       "A streamed film that downloaded completely moves from the download folder into your library "
-       "when you close it (if you keep films)."),
+       "A streamed torrent that downloaded completely moves from the download folder into your library "
+       "when you close it (if you keep films); a film downloaded from a web link as soon as it's complete."),
     _s("torrents.follow_host", "choice", "ask", "When the host streams a torrent", TR,
        "In a room, when the host streams a torrent you don't have (unless you're watching on your own). "
        "Streaming it means your PC downloads it and shares the parts it has with others, like any torrent "
        "app, so you're asked first.",
+       choices=[("ask", "Ask me first"), ("yes", "Stream it too"), ("no", "Don't")]),
+    _s("links.open", "choice", "ask", "When I open a web link", TR,
+       "A link to a film on the web (https://..., e.g. from Real-Debrid). Play it from the link: it streams, "
+       "nothing is saved. Download it while it plays: it plays from the link while SyncWatch saves it into "
+       "the download folder (and into your library once it's complete), so friends can get it from you later.",
+       choices=[("ask", "Ask me"), ("stream", "Play it from the link"), ("download", "Download it while it plays")]),
+    _s("links.follow_host", "choice", "ask", "When the host opens a web link", TR,
+       "In a room, when the host plays a film from a web link you don't have: you stream it from the same "
+       "link. Some services (Real-Debrid, for example) may allow a link in only one place at a time.",
        choices=[("ask", "Ask me first"), ("yes", "Stream it too"), ("no", "Don't")]),
     _s("torrents.start_mb", "int", 8, "Start playing after", TR,
        "How much of the film is fetched before it starts playing.", advanced=True, minimum=1, maximum=500,
@@ -313,10 +323,11 @@ SCHEMA: List[Setting] = [
        "Needed for most magnet links.", advanced=True),
     _s("torrents.connections", "int", 200, "Connections at most", TR, advanced=True, minimum=10, maximum=2000),
     # ---- Discover (0.5): what should we watch? --------------------------------------
-    _s("discover.tmdb_key", "secret", "", "TMDB key", DC,
-       "For recommendations, posters and trailers (free): sign up at themoviedb.org, open Settings > API, "
-       "ask for a key for personal use and copy the \"API Read Access Token\" here. It's only sent to TMDB. "
-       "Without it, Discover shows your own films and the film vote still works.", max_len=1500),
+    _s("discover.tmdb_key", "secret", "", "TMDB key (optional)", DC,
+       "Recommendations, posters and trailers come from TMDB. Without a key of your own, SyncWatch asks TMDB "
+       "through its relay, with one key for everyone. With your own (free: sign up at themoviedb.org, open "
+       "Settings > API, ask for a key for personal use and copy the \"API Read Access Token\" here), "
+       "SyncWatch asks TMDB directly; the key is only sent to TMDB.", max_len=1500),
     _s("discover.tell_have", "bool", True, "Tell the room which suggested films I have", DC,
        "During a film vote, so everyone sees which film is ready to play. Only for the suggested films."),
     _s("discover.use_history", "bool", True, "Use the films I watched for recommendations", DC,
