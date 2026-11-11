@@ -10,6 +10,7 @@ tests/gui_checks.py can compare the apps' positions at the same moments.
 """
 import json
 import os
+import shutil
 import sys
 import tempfile
 import time
@@ -35,12 +36,23 @@ profile.mkdir(parents=True)
     # (the torrent offer at the end) Marek is asked first (the default) and then streams with nothing
     # reaching the internet; Kuba has said no in Settings
     **({"torrents.dht": False, "torrents.incoming": False} if ROLE == "marek" else {}),
-    **({"torrents.follow_host": "no"} if ROLE == "kuba" else {})}}), encoding="utf-8")
+    **({"torrents.follow_host": "no"} if ROLE == "kuba" else {}),
+    # (the web link at the very end, 0.5.1) the host plays links straight away; Marek is asked first (the
+    # default); Kuba has said no in Settings
+    **({"links.open": "stream"} if ROLE == "host" else {}),
+    **({"links.follow_host": "no"} if ROLE == "kuba" else {})}}), encoding="utf-8")
 
 from PySide6.QtGui import QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from syncwatch import app as app_module  # noqa: E402
+from syncwatch.library import weblinks  # noqa: E402
+
+# The web link comes from a film server on this PC (started by the host below). Rooms only share https
+# links to hosts on the internet; here, in these test apps only, that one counts too.
+_room_ok = weblinks.room_ok
+weblinks.room_ok = lambda url: url.startswith("http://127.0.0.1:") or _room_ok(url)
+LINK_NAME = "Link.Test.Film.mkv"
 
 
 def window():
@@ -67,17 +79,19 @@ SCRIPTS = {
     "host": [(1, "host"), (8, "play"), (12, "shot_playing"), (14, "pause"), (17, "seek5"), (19, "play2"),
              (20.5, "jump_playing"), (34, "syncup"), (44, "skipspam"), (45, "vote_suggest"), (49.5, "vote_close"),
              (51, "shot_vote"), (51.5, "seek5"), (52.5, "ready_ask"), (61, "ready_seen"), (62, "torrent_film"),
-             (68.5, "end")],
+             (69, "link_film"), (80.5, "end")],
     "marek": [(3, "join"), (12, "shot_playing"), (24, "drift"), (29, "report_gap"), (30, "syncme"),
               (40, "friend_pause"), (42, "friend_play"), (43, "friend_pause_cooldown"), (45.5, "chat"),
               (47, "vote_cast"), (51, "shot_vote"), (54.5, "ready_seen"), (55, "ready_yes"), (61, "ready_seen"),
-              (65.5, "offer_state"), (66, "offer_accept"), (68, "offer_state2"), (68.5, "end")],
+              (65.5, "offer_state"), (66, "offer_accept"), (68, "offer_state2"), (74, "link_state"),
+              (74.5, "link_accept"), (79.5, "link_state2"), (80.5, "end")],
     "kuba": [(3.5, "join"), (12, "shot_playing"), (46, "react"), (47.5, "vote_cast"), (51, "shot_vote"),
-             (54.5, "ready_seen"), (56, "ready_yes"), (61, "ready_seen"), (65.5, "offer_state"), (68.5, "end")],
+             (54.5, "ready_seen"), (56, "ready_yes"), (61, "ready_seen"), (65.5, "offer_state"),
+             (74, "link_state"), (80.5, "end")],
 }
 # (after the measured stretches: chat, a reaction and a film vote, through the windows' own buttons and boxes;
 # back to 0:05 and the host's ready check, answered with the members' own buttons; then the host streams a
-# torrent, which nobody has, so nothing downloads)
+# torrent, which nobody has, so nothing downloads; then the host plays a film from a web link (0.5.1))
 OFFER_HASH = "5a" * 20
 OFFER_MAGNET = f"magnet:?xt=urn:btih:{OFFER_HASH}&dn=Torrent%20Test%20Film.mkv"
 
@@ -203,6 +217,21 @@ def scripted_exec(self):
                 if action == "offer_state2":
                     w.torrents.stop()
             elif action == "offer_accept":
+                w.sidebar.share_banner.button.click()
+            elif action == "link_film":
+                import film_server
+                folder = data_dir / "web"
+                folder.mkdir(exist_ok=True)
+                shutil.copy(FILM, folder / LINK_NAME)
+                w.open_web_link(f"{film_server.start(folder)}/d/AbC/{LINK_NAME}")
+            elif action in ("link_state", "link_state2"):
+                banner = w.sidebar.share_banner
+                out.write(json.dumps({"event": f"{ROLE}:{action}:seen", "t": time.time(),
+                                      "banner": "" if banner.isHidden() else banner.button.text(),
+                                      "text": "" if banner.isHidden() else banner.text.text()[:200],
+                                      "playing_link": w.weblinks.url.endswith(LINK_NAME)
+                                      and getattr(w.player.stream, "kind", "") == "web"}) + "\n")
+            elif action == "link_accept":
                 w.sidebar.share_banner.button.click()
             elif action in ("ready_ask", "ready_yes"):
                 w.sidebar.people.ready_button.click()

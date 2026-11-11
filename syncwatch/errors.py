@@ -427,7 +427,7 @@ CATALOG: Dict[str, Problem] = {
         "Nobody seems to share this torrent",
         "SyncWatch couldn't get the torrent's description from anyone, so it can't start.",
         ["Try again later, or another torrent.",
-         "Settings > Torrents (advanced): *Find others without trackers* should be on."], WARNING),
+         "Settings > Downloads (advanced): *Find others without trackers* should be on."], WARNING),
     "SW-622": Problem(
         "This torrent has no video",
         "None of the files in the torrent is a film SyncWatch can play.",
@@ -435,7 +435,7 @@ CATALOG: Dict[str, Problem] = {
     "SW-623": Problem(
         "Not enough space to stream this film",
         "The download folder's drive doesn't have room for the film.",
-        ["Free up some space, or choose another download folder: Settings > Torrents."]),
+        ["Free up some space, or choose another download folder: Settings > Downloads."]),
     "SW-624": Problem(
         "The torrent part is missing",
         "This copy of SyncWatch can't stream torrents, because libtorrent isn't there.",
@@ -477,6 +477,13 @@ CATALOG: Dict[str, Problem] = {
         "Part of TMDB's answer didn't make sense, so it was left out.",
         ["Try again later. If it keeps happening, send the log to whoever gave you SyncWatch."], INFO, popup=False),
 
+    "SW-636": Problem(
+        "The relay can't ask TMDB right now",
+        "Without a TMDB key of your own, SyncWatch asks TMDB through its relay, but the relay has no TMDB key "
+        "yet, or TMDB didn't accept it.",
+        ["Add your own key (free): sign up at themoviedb.org, open Settings > API, ask for a key for personal "
+         "use and copy the \"API Read Access Token\" into Settings > Discover > TMDB key.",
+         "Or tell whoever runs your SyncWatch relay: it needs its TMDB key (relay/README.md)."], INFO, popup=False),
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(
         "Couldn't check for updates",
@@ -561,6 +568,47 @@ CATALOG: Dict[str, Problem] = {
         "A picture received from a friend wasn't a valid small image, so it wasn't shown.",
         [], INFO, popup=False),
 
+    # ---- 64x: films from web links (since 0.5.1) ------------------------------
+    "SW-640": Problem(
+        "That link doesn't work (anymore)",
+        "The server says there's nothing at that address. Links from services like Real-Debrid stop working "
+        "after a while, and some only work for the account (or the place) they were made for.",
+        ["Get a new link for the film and paste that one.",
+         "Check that you copied the whole link."]),
+    "SW-641": Problem(
+        "That link asks for a login",
+        "The server wants a name and password before it gives the film, and SyncWatch can't log in for you.",
+        ["Copy a link that works without logging in, for example the download link a service like "
+         "Real-Debrid gives you."]),
+    "SW-642": Problem(
+        "Couldn't play the film from the link",
+        "The link answered, but the player couldn't play what came back.",
+        ["Open the link in a browser: if it downloads a film file, try once more in SyncWatch.",
+         "It may be an archive (.zip, .rar) or a format SyncWatch can't play: get a link to the film itself.",
+         "The link may have stopped working meanwhile: get a new one."]),
+    "SW-643": Problem(
+        "That link opens a web page, not a film",
+        "SyncWatch needs the address of the film file itself.",
+        ["On the page, find the download button and copy its link (right-click > Copy link address)."]),
+    "SW-644": Problem(
+        "The download stopped",
+        "SyncWatch couldn't finish saving the film (the connection or the server kept stopping it). The film "
+        "still plays from the link, and what's saved so far is kept.",
+        ["Open the same link (or a new link to the same file) with Download it while it plays: it "
+         "continues where it stopped."], WARNING, popup=False),
+    "SW-645": Problem(
+        "Couldn't reach the link's server",
+        "There was no answer from the server the link points to.",
+        ["Check your internet connection.", "Try again in a minute: the server may be busy."]),
+    "SW-646": Problem(
+        "Not enough space for the download",
+        "The drive with the download folder is too full for this film.",
+        ["Free up some space, or choose a download folder on another drive: Settings > Downloads > Download "
+         "folder.", "Or play it from the link without saving it (Settings > Downloads > When I open a web link)."]),
+    "SW-647": Problem(
+        "That link didn't give a .torrent file",
+        "The address ends in .torrent, but what came back isn't a torrent file.",
+        ["Copy the torrent's magnet link instead, or download the .torrent file and open it with SyncWatch."]),
     # ---- 9xx: unexpected ----------------------------------------------------
     "SW-901": Problem(
         "Something went wrong inside SyncWatch",

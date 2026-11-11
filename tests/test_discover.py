@@ -234,6 +234,44 @@ class TmdbTests(unittest.TestCase):
         self.assertEqual(caught.exception.kind, "network")
         self.assertNotIn(KEY, str(caught.exception))
 
+    # ---- no key of one's own: the relay asks TMDB with its key (0.5.1) -------------------------
+    def relay(self, key=KEY, limits=None):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        from local_relay import LocalRelay
+        relay = LocalRelay(tmdb_key=key, tmdb_base=self.server.api, tmdb_limits=limits).start()
+        self.addCleanup(relay.stop)
+        return relay
+
+    def test_without_a_key_the_relay_asks_tmdb(self):
+        relay = self.relay()
+        client = tmdb.Client("", self.folder, region="NL", images=self.server.images, relay=relay.url)
+        self.assertEqual(client.key_type, "relay")
+        self.assertEqual([m.id for m in client.search("matrix", 1999)], [603])     # the relay added its key
+        self.assertEqual(client.details(603).movie.title, "The Matrix")
+        self.assertTrue(client.trending())
+        self.assertTrue(client.poster("/matrix.jpg").startswith(b"\x89PNG"))       # posters: straight from TMDB
+
+    def test_my_own_key_goes_straight_to_tmdb(self):
+        client = tmdb.Client(KEY, self.folder, api=self.server.api, images=self.server.images,
+                             relay="http://127.0.0.1:9")                          # (no relay there: not asked)
+        self.assertEqual((client.key_type, client.relay), ("key", ""))
+        self.assertEqual([m.id for m in client.search("matrix", 1999)], [603])
+
+    def test_when_the_relay_cant_ask_tmdb(self):
+        older = self.relay()
+        older.tmdb_key = ""                                                       # no key on the relay
+        for relay in (older.url, self.server.api.rsplit("/3", 1)[0]):             # ... or no such question there
+            client = tmdb.Client("", self.folder / relay[-5:], images=self.server.images, relay=relay)
+            with self.subTest(relay=relay), self.assertRaises(TmdbError) as caught:
+                client.search("matrix")
+            self.assertEqual(caught.exception.kind, "relay")
+        busy = self.relay(limits=(60, 1))
+        client = tmdb.Client("", self.folder / "busy", images=self.server.images, relay=busy.url)
+        client.search("matrix")
+        with self.assertRaises(TmdbError) as caught:
+            client.search("inception")
+        self.assertEqual(caught.exception.kind, "busy")
+
     def test_posters(self):
         client = self.client()
         data = client.poster("/matrix.jpg")

@@ -10,6 +10,8 @@
 //                          Each binary message goes to everyone else on the channel.
 //   POST /v1/ch/<32 hex>   Deliver the request body to everyone on the channel now
 //                          (how friends' apps leave invitations in your mailbox).
+//   GET  /v1/tmdb/...      A few TMDB questions for the Ideas window, asked with the relay's
+//                          own TMDB key (since 0.5.1; see tmdb.js and tmdb.json).
 //
 // Limits, the same as tools/local_relay.py (tests/test_relay.py checks both):
 // messages up to 64 KiB, binary only, 32 connections per channel,
@@ -20,6 +22,10 @@
 // so an idle room costs nothing while people are connected.
 
 import { DurableObject } from "cloudflare:workers";
+import { take } from "./bucket.js";
+import { tmdb } from "./tmdb.js";
+
+export { TmdbLimit } from "./tmdb.js";
 
 const MAX_MESSAGE = 64 * 1024;
 const MAX_CONNECTIONS = 32;
@@ -38,6 +44,9 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/v1/health") {
       return Response.json({ ok: true, service: "syncwatch-relay", version: 1 });
+    }
+    if (url.pathname.startsWith("/v1/tmdb/")) {
+      return tmdb(request, env, url);
     }
     const match = CHANNEL_PATH.exec(url.pathname);
     if (!match) {
@@ -83,18 +92,6 @@ async function readBody(request) {
     offset += chunk.byteLength;
   }
   return body;
-}
-
-// Token bucket: `rate` per second on average, at most `burst` at once.
-function take(bucket, rate, burst) {
-  const now = Date.now();
-  bucket.tokens = Math.min(burst, bucket.tokens + ((now - bucket.at) / 1000) * rate);
-  bucket.at = now;
-  if (bucket.tokens < 1) {
-    return false;
-  }
-  bucket.tokens -= 1;
-  return true;
 }
 
 export class Channel extends DurableObject {

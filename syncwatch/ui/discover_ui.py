@@ -44,8 +44,14 @@ GRID = QSize(142, 238)
 KEY_HELP = ("Recommendations, posters and trailers come from TMDB (The Movie Database). It's free: "
             "sign up at themoviedb.org, open Settings > API, ask for a key (personal use), then copy the "
             "\"API Read Access Token\" into Settings > Discover > TMDB key.")
+def relay_help() -> str:
+    problem = errors.problem("SW-636")
+    return f"{problem.title}. {problem.explanation} {problem.tips[0]}"
+
+
 PROBLEMS = {"nokey": "SW-631", "key": "SW-632", "network": "SW-633", "busy": "SW-634", "odd": "SW-635",
-            "missing": "SW-635"}
+            "missing": "SW-635", "relay": "SW-636"}
+RELAY_RETRY_S = 600          # after the relay said it can't ask TMDB, try it again this much later
 
 
 @dataclass
@@ -85,11 +91,13 @@ class TmdbWorker(QObject):
     def ask(self, tag: str, job: Callable[..., Any], poster: bool = False) -> None:
         self._jobs.put((1 if poster else 0, next(self._count), self._generation, tag, job))
 
-    def configure(self, key: str, folder: Path, language: str, region: str) -> None:
-        """Settings for the client (asked for in the GUI thread); drops what's waiting."""
+    def configure(self, key: str, folder: Path, language: str, region: str, relay: str = "") -> None:
+        """Settings for the client (asked for in the GUI thread); drops what's waiting.
+        relay: SyncWatch's relay, which asks TMDB when there's no key of one's own (since 0.5.1)."""
         with self._lock:
             self._generation += 1
             self._params = (key, folder, language, region)
+            self._relay = relay
             self._client = None
 
     def stop(self) -> None:
@@ -104,7 +112,7 @@ class TmdbWorker(QObject):
                 if generation != self._generation:
                     continue          # asked before the settings changed
                 if self._client is None:
-                    self._client = tmdb.Client(*self._params)
+                    self._client = tmdb.Client(*self._params, relay=getattr(self, "_relay", ""))
                 client = self._client
             try:
                 result = job(client, lambda done, total, t=tag: self.progress.emit(t, done, total))
@@ -618,6 +626,7 @@ class Discover(QObject):
         self.settings = window.settings
         self.folder = window.ctx.profile.cache_dir / "tmdb"
         self.worker = TmdbWorker(self)
+        self._relay_refused = -1e9                         # when the relay last said it can't ask TMDB
         self._configure()
         self.worker.finished.connect(self._finished, Qt.ConnectionType.QueuedConnection)
         self.worker.failed.connect(self._failed, Qt.ConnectionType.QueuedConnection)
@@ -644,9 +653,21 @@ class Discover(QObject):
             region = parts[1] if len(parts) > 1 else ""
         return region if len(region) == 2 and region.isalpha() else ""
 
+    def relay(self) -> str:
+        """The relay that asks TMDB for me: only without a key of my own, and not for a while after
+        it said it can't (it has no key yet, or it's an older relay)."""
+        if self.key() or time.monotonic() - self._relay_refused < RELAY_RETRY_S:
+            return ""
+        from ..room.context import relay_address
+        return relay_address(self.settings)
+
+    def can_ask(self) -> bool:
+        """TMDB can be asked: with my own key, or through the relay."""
+        return bool(tmdb.key_kind(self.key())) or bool(self.relay())
+
     def _configure(self) -> None:
         self.worker.configure(self.key(), self.folder, str(self.settings.get("discover.language") or "en-US"),
-                              self.region())
+                              self.region(), self.relay())
 
     def _settings_changed(self) -> None:
         self._configure()
@@ -733,10 +754,10 @@ class Discover(QObject):
         if self.dialog is None:
             return
         self._note_for_key()
-        if tab == "mine" or not tmdb.key_kind(self.key()):
+        if tab == "mine" or not self.can_ask():
             self._fill_mine()
         marker = "you" if tab in ("you", "mine") else tab
-        if not tmdb.key_kind(self.key()) or time.monotonic() - self._loaded.get(marker, -1e9) < 600:
+        if not self.can_ask() or time.monotonic() - self._loaded.get(marker, -1e9) < 600:
             return
         self._loaded[marker] = time.monotonic()
         if marker == "you":
@@ -752,7 +773,7 @@ class Discover(QObject):
             self.worker.ask("trending", lambda client, report: client.trending())
 
     def search(self, text: str) -> None:
-        if not tmdb.key_kind(self.key()):
+        if not self.can_ask():
             self._note_for_key()
             return
         self.dialog.set_note(f"Looking for \"{text}\"…")
@@ -762,7 +783,7 @@ class Discover(QObject):
         if path in self._posters:
             if self.dialog is not None:
                 self.dialog.poster_arrived(path, self._posters[path])
-        elif path not in self._asked_posters and tmdb.key_kind(self.key()):
+        elif path not in self._asked_posters and self.can_ask():
             self._asked_posters.add(path)
             self.worker.ask(f"poster:{path}", lambda client, report: client.poster(path), poster=True)
 
@@ -770,20 +791,21 @@ class Discover(QObject):
         return self._posters.get(path)
 
     def want_details(self, movie_id: int) -> None:
-        if movie_id not in self._asked_details and tmdb.key_kind(self.key()):
+        if movie_id not in self._asked_details and self.can_ask():
             self._asked_details.add(movie_id)
             self.worker.ask(f"details:{movie_id}", lambda client, report: client.details(movie_id))
 
     def _note_for_key(self) -> None:
         if self.dialog is None:
             return
-        kind = tmdb.key_kind(self.key())
-        if not kind:
-            self.dialog.set_note(KEY_HELP if not self.key() else
-                                 "The TMDB key in Settings > Discover doesn't look right: copy the \"API Read "
+        if self.can_ask():
+            if self.dialog.note.text() in (KEY_HELP, relay_help()):
+                self.dialog.set_note("")
+        elif not self.key():
+            self.dialog.set_note(relay_help() if self._relay_refused > 0 else KEY_HELP)
+        else:
+            self.dialog.set_note("The TMDB key in Settings > Discover doesn't look right: copy the \"API Read "
                                  "Access Token\" (long) or the \"API Key\" (32 letters and digits) again.")
-        elif self.dialog.note.text() in (KEY_HELP,):
-            self.dialog.set_note("")
 
     def _fill_mine(self) -> None:
         cards = []
@@ -835,9 +857,13 @@ class Discover(QObject):
         if name == "details":
             self._asked_details.discard(int(tag.partition(":")[2] or 0))
         self._loaded.pop("you" if name == "you" else name, None)
+        if kind == "relay":                    # the relay can't ask TMDB: don't ask it again for a while
+            self._relay_refused = time.monotonic()
+            self._configure()
         if self.dialog is not None:
             problem = errors.problem(PROBLEMS.get(kind, "SW-635"))
-            self.dialog.set_note(f"{problem.title}. {problem.explanation}" if kind != "nokey" else KEY_HELP)
+            note = {"nokey": KEY_HELP, "relay": relay_help()}.get(kind, f"{problem.title}. {problem.explanation}")
+            self.dialog.set_note(note)
 
     def _progress(self, tag: str, done: int, total: int) -> None:
         if self.dialog is not None and tag == "you" and total:

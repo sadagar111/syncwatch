@@ -50,8 +50,12 @@ jobs:
         working-directory: relay
         env:
           WRANGLER_SEND_METRICS: "false"
+        # The TMDB values are for the tests only: a made-up key, and a stand-in TMDB that
+        # tests/test_relay.py starts on port 8789 (the real key is a Cloudflare secret).
         run: |
-          npx wrangler dev --port 8787 --ip 127.0.0.1 > ../wrangler.log 2>&1 &
+          npx wrangler dev --port 8787 --ip 127.0.0.1 \
+            --var TMDB_KEY:0123456789abcdef0123456789abcdef --var TMDB_BASE:http://127.0.0.1:8789/3 \
+            --var TMDB_PER_MINUTE:60 --var TMDB_BURST:5 > ../wrangler.log 2>&1 &
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8787/v1/health; then echo; echo "relay is up"; exit 0; fi
             sleep 1

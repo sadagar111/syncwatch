@@ -251,14 +251,18 @@ class Controller(RoomListener):
                 self.session.rename()
             self._send_profile()
 
-    def set_film(self, name: str, size: int, duration_ms: int, yt: str = "", magnet: str = "") -> None:
+    def set_film(self, name: str, size: int, duration_ms: int, yt: str = "", magnet: str = "",
+                 link: str = "") -> None:
         """What I have open. yt: a YouTube video's ID (then name is its title and size 0).
-        magnet: the torrent it streams from (so others in the room can stream it too)."""
+        magnet: the torrent it streams from (so others in the room can stream it too).
+        link: the web link it plays from (0.5.1; only one the others may open: https, a public host)."""
         film = {"name": name[:255], "size": int(size), "dur": max(0, int(duration_ms))}
         if yt:
             film["yt"] = yt
         if magnet and len(magnet) <= 3000:
             film["magnet"] = magnet
+        if link and len(link) <= 2000:
+            film["link"] = link
         if film == self.film:
             return
         self.film = film
@@ -1220,7 +1224,8 @@ class Controller(RoomListener):
         if self.is_host or host is None or not self.attached or not host.film:
             return None
         film = host.film
-        if film.get("yt") or film.get("magnet") or not film.get("size") or host.match in ("same", "similar"):
+        if film.get("yt") or film.get("magnet") or film.get("link") or not film.get("size") \
+                or host.match in ("same", "similar"):
             return None
         return film
 
@@ -1276,26 +1281,32 @@ class Controller(RoomListener):
             handler(peer.name, list(body["addrs"]))
 
     def _follow_host_video(self, film: Dict) -> None:
-        """The host plays a YouTube video, or streams a torrent, that I don't have open: the window
-        opens the same (if I follow the room). A film I have under the same name and size counts."""
+        """The host plays a YouTube video, streams a torrent or plays a web link, that I don't have open:
+        the window opens the same (if I follow the room). A film I have under the same name and size counts."""
         if self.is_host or not self.attached:
             return
-        video, magnet = film.get("yt"), film.get("magnet")
+        video, magnet, link = film.get("yt"), film.get("magnet"), film.get("link")
         mine = self.film or {}
+        same_file = (mine.get("name"), mine.get("size")) == (film.get("name"), film.get("size"))
         if video and mine.get("yt") != video:
             follow = getattr(self.ui, "follow_youtube", None)
             if follow is not None:
                 follow(video, film.get("name", ""))
-        elif magnet and not video and (mine.get("name"), mine.get("size")) != (film.get("name"), film.get("size")):
+        elif magnet and not video and not same_file:
             follow = getattr(self.ui, "follow_torrent", None)
             if follow is not None:
                 follow(magnet, film.get("name", ""), int(film.get("size", 0)))
-        elif not video and not magnet:
+        elif link and not video and not magnet and mine.get("link") != link and not same_file:
+            follow = getattr(self.ui, "follow_link", None)
+            if follow is not None:
+                follow(link, film.get("name", ""), int(film.get("size", 0)))
+        elif not video and not magnet and not link:
             self._follow_host_film(film)        # perhaps the next episode of what we watch (the window decides)
 
     def _follow_host_film(self, film: Dict) -> None:
         name = film.get("name") or ""
-        if not name or film.get("magnet") or name == (self.film or {}).get("name") or name == self._film_followed:
+        if not name or film.get("magnet") or film.get("link") or name == (self.film or {}).get("name") \
+                or name == self._film_followed:
             return
         self._film_followed = name          # (once per film of the host's)
         follow = getattr(self.ui, "follow_film", None)
@@ -1827,6 +1838,9 @@ class Controller(RoomListener):
         wanted = (host.film or {}).get("yt") if host is not None else None
         if wanted and (self.film or {}).get("yt") != wanted:
             return   # still opening the host's (new) video: not ready yet
+        link = (host.film or {}).get("link") if host is not None else None
+        if link and (self.film or {}).get("link") != link and (self.film or {}).get("name") != host.film.get("name"):
+            return   # still opening the host's web link
         if self.p.is_ready() and abs(self.p.position() - client["pos"]) < READY_TOLERANCE_MS:
             client["sent"] = True
             self.session.send_room("sync_ready", id=client["id"])
@@ -1860,6 +1874,8 @@ class Controller(RoomListener):
             if mine.get("yt") or theirs.get("yt"):
                 # YouTube: the same video or not; a member who follows opens the host's by itself
                 state = "same" if mine.get("yt") == theirs.get("yt") else "elsewhere"
+            elif mine.get("link") and mine.get("link") == theirs.get("link"):
+                state = "same"                  # the same web link (0.5.1)
             elif mine["size"] == theirs["size"] and mine["name"] == theirs["name"]:
                 state = "same"
             elif mine.get("dur") and theirs.get("dur") and abs(mine["dur"] - theirs["dur"]) <= MATCH_TOLERANCE_MS:

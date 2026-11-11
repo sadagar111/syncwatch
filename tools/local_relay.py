@@ -11,6 +11,9 @@ What a relay does, here and on Cloudflare:
   member sends goes to all *other* members of that channel. Nothing is stored.
 * ``POST /v1/ch/<32 hex>``    delivers one message (the request body) to everyone
   currently on that channel. Used for friends' mailboxes.
+* ``GET  /v1/tmdb/...``       (since 0.5.1) a few TMDB questions for the Ideas window, asked
+  with the relay's own TMDB key (SYNCWATCH_RELAY_TMDB_KEY here; on Cloudflare the TMDB_KEY
+  secret). Which questions and parameters: relay/src/tmdb.json, the same file the real relay uses.
 
 Limits (the same numbers as relay/src/index.js, checked by tests/test_relay.py):
 messages up to 64 KiB, binary only, 32 connections per channel, 20 messages
@@ -21,14 +24,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import socket
 import ssl
 import sys
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -42,7 +49,21 @@ POST_RATE_PER_S, POST_BURST = 5.0, 20.0
 CHANNEL = re.compile(r"^/v1/ch/([0-9a-f]{32})$")
 REASONS = {200: "OK", 202: "Accepted", 400: "Bad Request", 404: "Not Found", 405: "Method Not Allowed",
            411: "Length Required", 413: "Payload Too Large", 426: "Upgrade Required", 429: "Too Many Requests",
-           503: "Service Unavailable"}
+           502: "Bad Gateway", 503: "Service Unavailable"}
+
+# TMDB questions (since 0.5.1): the same rules as the real relay (relay/src/tmdb.js reads the same file).
+TMDB_API = "https://api.themoviedb.org/3"
+TMDB_RULES = json.loads((Path(__file__).resolve().parent.parent / "relay" / "src" / "tmdb.json").read_text("utf-8"))
+
+
+def _js_pattern(rule: str) -> "re.Pattern[str]":
+    # JavaScript's "$" doesn't match before a final newline; Python's does unless it's "\Z".
+    return re.compile(rule[:-1] + r"\Z" if rule.endswith("$") else rule)
+
+
+TMDB_ROUTES = [(_js_pattern(route["path"]), route) for route in TMDB_RULES["routes"]]
+TMDB_PARAMS = {name: _js_pattern(rule) for name, rule in TMDB_RULES["params"].items()}
+V3_KEY = re.compile(r"[0-9a-fA-F]{32}")
 
 
 class Bucket:
@@ -90,8 +111,18 @@ def _lingering_close(sock: socket.socket, seconds: float = 2.0, limit: int = 4 *
 
 class LocalRelay:
     def __init__(self, host: str = "127.0.0.1", port: int = 0, certfile: Optional[str] = None,
-                 keyfile: Optional[str] = None, quiet: bool = True):
+                 keyfile: Optional[str] = None, quiet: bool = True, tmdb_key: Optional[str] = None,
+                 tmdb_base: str = "", tmdb_limits: Optional[Tuple[float, float]] = None):
+        """tmdb_key: the relay's TMDB key (default: SYNCWATCH_RELAY_TMDB_KEY; none = TMDB questions get
+        "nokey"). tmdb_base: where TMDB is (tests: a stand-in). tmdb_limits: (per minute, burst) per address."""
         self.host = host
+        self.tmdb_key = (os.environ.get("SYNCWATCH_RELAY_TMDB_KEY", "") if tmdb_key is None else tmdb_key).strip()
+        self.tmdb_base = (tmdb_base or os.environ.get("SYNCWATCH_RELAY_TMDB_BASE", "") or TMDB_API).rstrip("/")
+        limits = TMDB_RULES["limits"]
+        per_minute, burst = tmdb_limits or (limits["per_address_per_minute"], limits["per_address_burst"])
+        self._tmdb_rate, self._tmdb_burst = per_minute / 60.0, float(burst)
+        self._tmdb_all = Bucket(limits["all_per_minute"] / 60.0, float(limits["all_burst"]))
+        self._tmdb_buckets: Dict[str, Bucket] = {}
         self._requested_port = port
         self.quiet = quiet
         self._tls: Optional[ssl.SSLContext] = None
@@ -189,6 +220,8 @@ class LocalRelay:
             if path == "/v1/health":
                 return self._respond(sock, 200, json.dumps({"ok": True, "service": "syncwatch-relay",
                                                             "version": 1}), "application/json")
+            if path.startswith("/v1/tmdb/"):
+                return self._tmdb(sock, method, parts[1], sock.getpeername()[0])
             match = CHANNEL.match(path)
             if not match:
                 return self._respond(sock, 404, "not found")
@@ -226,11 +259,69 @@ class LocalRelay:
             except OSError:
                 pass
 
-    def _respond(self, sock: socket.socket, status: int, body: str, kind: str = "text/plain") -> None:
-        data = body.encode("utf-8")
-        sock.sendall((f"HTTP/1.1 {status} {REASONS.get(status, '')}\r\nContent-Type: {kind}\r\n"
+    def _respond(self, sock: socket.socket, status: int, body, kind: str = "text/plain", extra: str = "") -> None:
+        data = body.encode("utf-8") if isinstance(body, str) else bytes(body)
+        sock.sendall((f"HTTP/1.1 {status} {REASONS.get(status, '')}\r\nContent-Type: {kind}\r\n{extra}"
                       f"Content-Length: {len(data)}\r\nConnection: close\r\n\r\n").encode("ascii") + data)
         _lingering_close(sock)
+
+    # ------------------------------------------------------------------ TMDB (since 0.5.1)
+    def _tmdb_answer(self, sock: socket.socket, status: int, body: Dict, extra: str = "") -> None:
+        self._respond(sock, status, json.dumps(body, separators=(",", ":")), "application/json", extra)
+
+    def _tmdb(self, sock: socket.socket, method: str, target: str, address: str) -> None:
+        """Like tmdb() in relay/src/tmdb.js: only the allowed questions and parameters, with the relay's key."""
+        if method != "GET":
+            return self._tmdb_answer(sock, 405, {"error": "method"})
+        path, _, query = target.partition("?")
+        question = path[len("/v1/tmdb"):]
+        route = next((route for pattern, route in TMDB_ROUTES if pattern.search(question)), None)
+        if route is None:
+            return self._tmdb_answer(sock, 404, {"error": "question"})
+        params: Dict[str, str] = {}
+        for name, value in urllib.parse.parse_qsl(query, keep_blank_values=True):
+            rule = TMDB_PARAMS.get(name)
+            if rule is None or name in params or not rule.search(value):
+                return self._tmdb_answer(sock, 400, {"error": "parameter", "name": name[:40]})
+            params[name] = value
+        for name in route["required"]:
+            if name not in params:
+                return self._tmdb_answer(sock, 400, {"error": "parameter", "name": name})
+        if not self.tmdb_key:
+            return self._tmdb_answer(sock, 503, {"error": "nokey"})
+        with self._lock:
+            bucket = self._tmdb_buckets.get(address)
+            if bucket is None:
+                if len(self._tmdb_buckets) >= 20000:
+                    self._tmdb_buckets.clear()
+                bucket = self._tmdb_buckets[address] = Bucket(self._tmdb_rate, self._tmdb_burst)
+            allowed = bucket.take() and self._tmdb_all.take()
+        if not allowed:
+            return self._tmdb_answer(sock, 429, {"error": "busy"}, "Retry-After: 60\r\n")
+        headers = {"Accept": "application/json", "User-Agent": "SyncWatch relay"}
+        if V3_KEY.fullmatch(self.tmdb_key):
+            params["api_key"] = self.tmdb_key
+        else:
+            headers["Authorization"] = "Bearer " + self.tmdb_key
+        request = urllib.request.Request(f"{self.tmdb_base}{question}?{urllib.parse.urlencode(params)}",
+                                         headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=15) as answer:
+                body = answer.read(TMDB_RULES["max_answer_bytes"] + 1)
+        except urllib.error.HTTPError as exc:
+            exc.close()
+            if exc.code in (401, 403):
+                return self._tmdb_answer(sock, 502, {"error": "key"})
+            if exc.code == 404:
+                return self._tmdb_answer(sock, 404, {"error": "missing"})
+            if exc.code == 429:
+                return self._tmdb_answer(sock, 429, {"error": "busy"}, "Retry-After: 60\r\n")
+            return self._tmdb_answer(sock, 502, {"error": "tmdb", "status": exc.code})
+        except (urllib.error.URLError, OSError, ValueError):
+            return self._tmdb_answer(sock, 502, {"error": "network"})
+        if len(body) > TMDB_RULES["max_answer_bytes"]:
+            return self._tmdb_answer(sock, 502, {"error": "big"})
+        self._respond(sock, 200, body, "application/json; charset=utf-8")
 
     def _post(self, sock: socket.socket, channel: str, headers: Dict[str, str], rest: bytes) -> None:
         try:

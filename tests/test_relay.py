@@ -19,6 +19,7 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -31,6 +32,52 @@ from syncwatch.net.websocket import (ConnectionClosed, HandshakeError, ProtocolE
 from tools.local_relay import BURST, MAX_CONNECTIONS, MAX_MESSAGE, LocalRelay  # noqa: E402
 
 EXTERNAL = os.environ.get("SYNCWATCH_TEST_RELAY", "").rstrip("/")
+# TMDB through the relay (since 0.5.1): the real relay gets these as --var in .github/workflows/relay.yml.
+TMDB_TEST_KEY = "0123456789abcdef0123456789abcdef"
+TMDB_TEST_PORT = 8789          # where the stand-in TMDB listens when the real relay code is tested
+TMDB_TEST_LIMITS = (60, 5)     # questions per minute and at once, per address
+
+
+class FakeTmdb:
+    """A stand-in for api.themoviedb.org/3 that remembers what it was asked."""
+
+    def __init__(self, port: int = 0):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        fake = self
+        self.asked = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                path, _, query = self.path.partition("?")
+                params = dict(urllib.parse.parse_qsl(query))
+                fake.asked.append((path, params, self.headers.get("Authorization")))
+                status, body = 200, {"results": [{"id": 603, "title": "The Matrix"}], "path": path}
+                if params.get("query") == "refused-key":
+                    status, body = 401, {"status_message": "Invalid API key"}
+                elif params.get("query") == "broken" or path == "/3/movie/500500":
+                    status, body = 500, {}
+                elif path == "/3/movie/404404":
+                    status, body = 404, {"status_message": "not found"}
+                data = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+    def start(self) -> "FakeTmdb":
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        return self
+
+    def stop(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
 
 
 def channel_id(n: int = 0) -> str:
@@ -42,11 +89,13 @@ class RelayConformance(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        cls.tmdb = FakeTmdb(TMDB_TEST_PORT if EXTERNAL else 0).start()
         if EXTERNAL:
             cls.local = None
             cls.base = EXTERNAL
         else:
-            cls.local = LocalRelay().start()
+            cls.local = LocalRelay(tmdb_key=TMDB_TEST_KEY, tmdb_base=cls.tmdb.url + "/3",
+                                   tmdb_limits=TMDB_TEST_LIMITS).start()
             cls.base = cls.local.url
         cls.ws_base = cls.base.replace("https://", "wss://").replace("http://", "ws://")
 
@@ -54,6 +103,7 @@ class RelayConformance(unittest.TestCase):
     def tearDownClass(cls):
         if cls.local is not None:
             cls.local.stop()
+        cls.tmdb.stop()
 
     def setUp(self):
         self.sockets = []
@@ -86,6 +136,74 @@ class RelayConformance(unittest.TestCase):
                 return response.status, response.read()
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()
+
+    # ------------------------------------------------------------ TMDB questions (since 0.5.1)
+    def tmdb_get(self, question: str):
+        """(status, JSON) for /v1/tmdb<question>, waiting out the per-address limit if an earlier test used it."""
+        for _ in range(8):
+            status, body = self.http("GET", "/v1/tmdb" + question)
+            if status != 429:
+                break
+            time.sleep(1.2)
+        return status, json.loads(body)
+
+    def test_tmdb_asks_tmdb_with_the_relays_key(self):
+        before = len(self.tmdb.asked)
+        status, data = self.tmdb_get("/search/movie?query=The%20Matrix&include_adult=false&year=1999&language=en-US")
+        self.assertEqual((status, data["results"][0]["id"]), (200, 603))
+        path, params, auth = self.tmdb.asked[-1]
+        self.assertEqual((path, params["query"], params["year"], params["api_key"]),
+                         ("/3/search/movie", "The Matrix", "1999", TMDB_TEST_KEY))
+        self.assertIsNone(auth)
+        for question in ("/movie/603?append_to_response=videos,recommendations,watch/providers&language=sk-SK",
+                         "/trending/movie/week?language=en-US", "/trending/movie/day"):
+            status, data = self.tmdb_get(question)
+            self.assertEqual(status, 200, question)
+            self.assertNotIn(TMDB_TEST_KEY, json.dumps(data))
+        self.assertEqual(len(self.tmdb.asked) - before, 4)
+
+    def test_tmdb_refuses_anything_else(self):
+        before = len(self.tmdb.asked)
+        for question, status, error in (
+                ("/movie/603/credits", 404, "question"), ("/search/tv?query=x", 404, "question"),
+                ("/movie/0", 404, "question"), ("/discover/movie", 404, "question"),
+                ("/search/movie?query=x&api_key=mine", 400, "parameter"),
+                ("/search/movie?query=x&query=y", 400, "parameter"),
+                ("/search/movie?language=en-US", 400, "parameter"),
+                ("/search/movie?query=abc%0A", 400, "parameter"),          # a newline at the end
+                ("/search/movie?query=" + "x" * 201, 400, "parameter"),
+                ("/movie/603?append_to_response=credits", 400, "parameter"),
+                ("/trending/movie/week?language=english", 400, "parameter")):
+            got, body = self.http("GET", "/v1/tmdb" + question)
+            self.assertEqual((got, json.loads(body)["error"]), (status, error), question)
+        got, body = self.http("POST", "/v1/tmdb/trending/movie/week", b"x")
+        self.assertEqual((got, json.loads(body)["error"]), (405, "method"))
+        self.assertEqual(len(self.tmdb.asked), before)     # none of them reached TMDB
+
+    def test_tmdb_answers_say_what_went_wrong(self):
+        for question, status, error in (("/search/movie?query=refused-key", 502, "key"),
+                                        ("/movie/404404", 404, "missing"), ("/movie/500500", 502, "tmdb")):
+            got, data = self.tmdb_get(question)
+            self.assertEqual((got, data["error"]), (status, error), question)
+
+    def test_tmdb_limits_each_address(self):
+        time.sleep(TMDB_TEST_LIMITS[1] * 60 / TMDB_TEST_LIMITS[0])     # earlier tests' questions: the bucket refills
+        answers = [self.http("GET", "/v1/tmdb/trending/movie/week") for _ in range(TMDB_TEST_LIMITS[1] + 4)]
+        statuses = [status for status, _ in answers]
+        self.assertEqual(statuses[:TMDB_TEST_LIMITS[1]], [200] * TMDB_TEST_LIMITS[1])
+        self.assertIn(429, statuses[TMDB_TEST_LIMITS[1]:])
+        self.assertEqual(json.loads(answers[statuses.index(429)][1])["error"], "busy")
+
+    @unittest.skipIf(EXTERNAL, "the real relay in the test is started with a key")
+    def test_tmdb_without_a_key_says_so(self):
+        relay = LocalRelay(tmdb_key="", tmdb_base=self.tmdb.url + "/3").start()
+        try:
+            request = urllib.request.Request(relay.url + "/v1/tmdb/trending/movie/week")
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(request, timeout=10)
+            self.assertEqual((caught.exception.code, json.loads(caught.exception.read())["error"]), (503, "nokey"))
+        finally:
+            relay.stop()
 
     def test_health(self):
         status, body = self.http("GET", "/v1/health")

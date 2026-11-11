@@ -7,10 +7,19 @@
   // Reachable at https://syncwatch-relay.<your-subdomain>.workers.dev
   "workers_dev": true,
   // One "Channel" object per room or mailbox (Durable Objects; the free plan needs the SQLite kind).
+  // TmdbLimit (since 0.5.1): how many TMDB questions each address may still ask (src/tmdb.js).
   "durable_objects": {
-    "bindings": [{ "name": "CHANNELS", "class_name": "Channel" }]
+    "bindings": [
+      { "name": "CHANNELS", "class_name": "Channel" },
+      { "name": "TMDB_LIMITS", "class_name": "TmdbLimit" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Channel"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Channel"] },
+    { "tag": "v2", "new_sqlite_classes": ["TmdbLimit"] }
+  ],
+  // The TMDB key is a secret, never in here: Cloudflare > Workers > syncwatch-relay > Settings >
+  // Variables and Secrets > Add > Secret, name TMDB_KEY (or: npx wrangler secret put TMDB_KEY).
   // Nothing is logged: no request logs, no message contents (they're encrypted anyway).
   "observability": { "enabled": false }
 }
