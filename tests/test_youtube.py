@@ -153,9 +153,10 @@ class ClassifyTests(unittest.TestCase):
 
 def fake_youtube_video():
     """What yt-dlp's YouTube extractor returns, much shortened: separate picture and sound streams."""
-    def fmt(format_id, ext, vcodec, acodec, height=None, fps=None, tbr=None, abr=None, expire="2000000000"):
+    def fmt(format_id, ext, vcodec, acodec, height=None, fps=None, tbr=None, abr=None, expire="2000000000",
+            client="TVHTML5"):
         entry = {"format_id": format_id, "url": f"https://rr1.googlevideo.example/videoplayback?itag={format_id}"
-                 f"&expire={expire}", "ext": ext, "vcodec": vcodec, "acodec": acodec, "protocol": "https",
+                 f"&expire={expire}&c={client}", "ext": ext, "vcodec": vcodec, "acodec": acodec, "protocol": "https",
                  "http_headers": {"User-Agent": "Mozilla/5.0 test", "Accept": "*/*", "Cookie": "never-passed-on"}}
         if height:
             entry.update(height=height, width=height * 16 // 9, fps=fps or 30)
@@ -172,7 +173,7 @@ def fake_youtube_video():
         fmt("399", "mp4", "av01.0.08M.08", "none", 1080, tbr=2000),
         fmt("271", "webm", "vp9", "none", 1440, tbr=9000),
         fmt("140", "m4a", "none", "mp4a.40.2", abr=129),
-        fmt("251", "webm", "none", "opus", abr=135, expire="1900000000"),
+        fmt("251", "webm", "none", "opus", abr=135, expire="1900000000", client="WEB_EMBEDDED_PLAYER"),
     ]
     return {"id": ID, "title": "A test video", "channel": "Test channel", "duration": 212.0,
             "thumbnail": "https://i.ytimg.com/vi/x/hq.jpg", "formats": formats, "extractor": "youtube",
@@ -213,6 +214,50 @@ class ChoiceTests(unittest.TestCase):
         live = dict(fake_youtube_video(), live_status="is_live", is_live=True)
         with self.assertRaises(LookupError):
             resolve.summarize(live)
+
+    def test_which_app_each_stream_came_from(self):
+        """YouTube ties a stream address to the app that asked ("c=" in it): the player can ask
+        again as another app if YouTube refuses one."""
+        found = self.choose()
+        self.assertEqual((found["video"]["client"], found["audio"]["client"]), ("TVHTML5", "WEB_EMBEDDED_PLAYER"))
+        self.assertEqual(resolve._client("https://x.example/v?c=not ok"), "")
+        self.assertEqual(resolve._client("https://x.example/v"), "")
+
+
+class AskingTests(unittest.TestCase):
+    """Which YouTube apps yt-dlp asks as, over which IP version, and what it warns about."""
+
+    def test_clients_and_ip_version(self):
+        options = resolve.ydl_options(1080, "compatible", False, None, None, 10, ["tv", "-web_safari"], 4)
+        self.assertEqual(options["extractor_args"], {"youtube": {"player_client": ["tv", "-web_safari"]}})
+        self.assertEqual(options["source_address"], "0.0.0.0")
+        self.assertEqual(resolve.ydl_options(1080, "compatible", False, None, None, 10, (), 6)["source_address"], "::")
+        plain = resolve.ydl_options(1080, "compatible", False, None, None, 10)
+        self.assertNotIn("extractor_args", plain)          # yt-dlp's own choice
+        self.assertNotIn("source_address", plain)          # as Windows chooses
+        self.assertNotIn("logger", plain)
+
+    def test_only_client_names(self):
+        self.assertEqual(resolve.parse_clients(" tv, web_safari ,"), ["tv", "web_safari"])
+        self.assertEqual(resolve.parse_clients(""), [])
+        for bad in ("tv;calc", "TV", "web safari", "x" * 40, ",".join(["tv"] * 7), "-", "tv=1"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                resolve.parse_clients(bad)
+
+    def test_warnings_are_kept_without_addresses(self):
+        kept = []
+        collector = resolve.WarningCollector(kept)
+        collector.warning("\x1b[0;33mWARNING:\x1b[0m [youtube] x: formats skipped, see "
+                          "https://rr4.googlevideo.com/videoplayback?ip=2001:db8::7&sig=SECRET")
+        collector.warning("[youtube] x: formats skipped, see https://other.example/")   # the same, once
+        collector.debug("chatter")
+        collector.error("an error goes into the exception instead")
+        self.assertEqual(kept, ["[youtube] x: formats skipped, see <address>"])
+        for n in range(30):
+            collector.warning(f"warning {n}")
+        self.assertEqual(len(kept), resolve.MAX_WARNINGS)
+        self.assertEqual(len(resolve.clean_warning("x" * 1000)), 300)
+        self.assertEqual(resolve.clean_warning("a\r\nb\0c"), "a b c")
 
 
 class _Quiet:
@@ -294,6 +339,7 @@ class ResolverProcessTests(unittest.TestCase):
     def test_found(self):
         code, message = self.run_resolver(ID, "--test-url", f"{self.base}/clip.mkv", "--timeout", "10")
         self.assertEqual(code, 0, message)
+        self.assertIsInstance(message["ok"]["warnings"], list)
         stream = streams.from_json(message["ok"])
         self.assertEqual(stream.id, ID)
         self.assertEqual(stream.address(), f"{self.base}/clip.mkv")
@@ -322,6 +368,13 @@ class ResolverProcessTests(unittest.TestCase):
         code, message = self.run_resolver("https://evil.example/x")
         self.assertEqual(code, 2)
         self.assertIn("error", message)
+
+    def test_only_client_names(self):
+        code, message = self.run_resolver(ID, "--client", "tv;calc", "--test-url", f"{self.base}/clip.mkv")
+        self.assertEqual((code, message["error"]), (2, "other"))
+        code, message = self.run_resolver(ID, "--client", "tv", "--ip", "4", "--test-url", f"{self.base}/clip.mkv",
+                                          "--timeout", "10")
+        self.assertEqual(code, 0, message)        # (the generic extractor ignores YouTube's client choice)
 
     def test_flags_keep_user_libraries(self):
         self.assertNotIn("-I", resolve.command()[1:-1])

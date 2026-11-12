@@ -54,18 +54,6 @@ VIDEO_OUTPUTS = ("window", "opengl", "none")
 
 
 
-# mpv's own Lua scripts (console, menus, auto profiles...) aren't used: SyncWatch has its own controls.
-# Off, they can't run Lua at all: on Windows every Lua error, even one a script catches itself,
-# shows up as a "fatal exception" (0xE24C4A02, LuaJIT's way of unwinding), and Python's crash
-# logger then wrote out every thread while they ran, which could itself crash SyncWatch.
-LUA_SCRIPTS_OFF = (
-    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_positioning": "no",   # mpv 0.40+
-     "load_context_menu": "no", "load_auto_profiles": "no"},
-    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_auto_profiles": "no"},   # 0.39
-    {"load_osd_console": "no", "load_auto_profiles": "no"},                                         # 0.33-0.38
-    {},
-)
-
 class StartFailed(Exception):
     """mpv couldn't be started; the window falls back to the Qt player (SW-209)."""
 
@@ -232,13 +220,7 @@ class MpvPlayer(QObject):
         return self.widget
 
     def _lua_choices(self):
-        """Which LUA_SCRIPTS_OFF this libmpv knows (by its client API: 2.5 = mpv 0.40, 2.4 = 0.39), then older ones."""
-        try:
-            version = tuple(self.module._mpv_client_api_version())
-        except Exception:  # noqa: BLE001 - unknown: try them all
-            version = (9, 9)
-        start = 0 if version >= (2, 5) else 1 if version >= (2, 4) else 2
-        return LUA_SCRIPTS_OFF[start:]
+        return mpvlib.lua_scripts_off(self.module)
 
     def start(self) -> None:
         """Start mpv, after the video widget has its place in the window. Raises StartFailed."""

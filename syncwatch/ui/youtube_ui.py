@@ -7,7 +7,6 @@ next video of a queue that was looked up ahead, starts straight away.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
 import threading
@@ -24,6 +23,7 @@ from .. import errors
 from ..library import weblinks as web_links
 from ..torrent import links as torrent_links
 from ..youtube import links, resolve, streams
+from ..youtube.parts import find_js_runtime, ytdlp_installed  # noqa: F401 - (tests replace them here)
 
 log = logging.getLogger("syncwatch.youtube")
 
@@ -33,19 +33,6 @@ PROBLEMS = {"unavailable": "SW-602", "private": "SW-602", "signin": "SW-603", "b
 CACHE_SIZE = 50
 
 
-def find_js_runtime(setting: str) -> Optional[str]:
-    """Deno for yt-dlp: the one chosen in the settings, else the one inside SyncWatch's runtime."""
-    if setting:
-        return setting if Path(setting).is_file() else None
-    try:
-        from deno import find_deno_bin  # noqa: PLC0415 - the "deno" package only holds deno.exe
-        return find_deno_bin()
-    except (ImportError, FileNotFoundError):
-        return None
-
-
-def ytdlp_installed() -> bool:
-    return importlib.util.find_spec("yt_dlp") is not None
 
 
 class ResolveJob(QObject):
