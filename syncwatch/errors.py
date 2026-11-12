@@ -36,7 +36,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
-from . import __version__
+from . import __version__, privacy
 
 log = logging.getLogger("syncwatch.errors")
 
@@ -111,6 +111,14 @@ CATALOG: Dict[str, Problem] = {
         "The theme file has a mistake",
         "assets/theme.json couldn't be read, so the default colours are used.",
         ["Check the file for a missing comma or quote, or put back the original file."], WARNING),
+    "SW-113": Problem(
+        "SyncWatch's log file isn't kept as it should be",
+        "The log is SyncWatch's diary for finding problems. Windows didn't let SyncWatch start a new "
+        "log file (another program has the old one open), so the old one keeps growing, or "
+        "SyncWatch writes to a second file next to it. Nothing is lost, and watching isn't affected.",
+        ["If another program has syncwatch.log open (an editor, a second SyncWatch), close it.",
+         "Otherwise restarting the PC frees the file.",
+         "Settings > Diagnostics > Open log folder shows the files."], WARNING, popup=False),
 
     # ---- 2xx: video and sound ------------------------------------------------
     "SW-201": Problem(
@@ -705,6 +713,7 @@ def build(code: str, technical: str = "", exc: Optional[BaseException] = None, *
         code = UNKNOWN_CODE
     if exc is not None and not technical:
         technical = describe_exception(exc)
+    technical = privacy.clean(technical)     # it's shown, copied and pasted: no keys, no full addresses
     title = _fill(prob.title, params)
     explanation = _fill(prob.explanation, params)
     tips = [_fill(t, params) for t in prob.tips]
@@ -718,7 +727,7 @@ def build(code: str, technical: str = "", exc: Optional[BaseException] = None, *
     if exc is not None and exc.__traceback__ is not None:
         tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         lines.append("Traceback (most recent call last, shortened):")
-        lines.extend("  " + ln for ln in tb.strip().splitlines()[-14:])
+        lines.extend("  " + privacy.clean(ln) for ln in tb.strip().splitlines()[-14:])
     return Report(code, prob, title, explanation, tips, technical, "\n".join(lines), when)
 
 

@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import logging
 import platform
+from pathlib import Path
 from dataclasses import dataclass
 from typing import List
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 
 from .. import MIN_PYSIDE6, errors, paths
+from .. import log as log_module
 from ..net.addresses import local_addresses
 
 log = logging.getLogger("syncwatch.checks")
@@ -58,6 +60,8 @@ def app_checks(data_ok: bool, data_error: str, startup_problems: List[str]) -> L
         results.append(CheckResult("App files", "Settings folder", OK, "can save settings"))
     else:
         results.append(CheckResult("App files", "Settings folder", WARN, "can't save settings", "SW-105", data_error))
+    if data_ok:
+        results.append(log_check())
     for code in startup_problems:
         problem = errors.problem(code)
         results.append(CheckResult("App files", "Files", WARN, problem.title, code))
@@ -68,6 +72,22 @@ def app_checks(data_ok: bool, data_error: str, startup_problems: List[str]) -> L
     else:
         results.append(CheckResult("App files", "Design files", OK, "all present"))
     return results
+
+
+def log_check() -> CheckResult:
+    """Is the log file written as it should be? (On Windows it can stop: see log.py and SW-113.)"""
+    state, where, why = log_module.status()
+    name = Path(where).name if where else ""
+    if state == "ok":
+        return CheckResult("App files", "Log file", OK, f"writing {name}")
+    if state == "growing":
+        return CheckResult("App files", "Log file", WARN, f"{name} can't start a new file, so it keeps growing",
+                           "SW-113", why)
+    if state == "elsewhere":
+        return CheckResult("App files", "Log file", WARN, f"writing {name} instead of syncwatch.log", "SW-113", why)
+    if state == "lines lost":
+        return CheckResult("App files", "Log file", WARN, f"some lines couldn't be written to {name}", "SW-113", why)
+    return CheckResult("App files", "Log file", WARN, "no log file", "SW-113", why)
 
 
 def video_checks() -> List[CheckResult]:

@@ -19,7 +19,7 @@ from typing import Callable, Dict, Optional
 from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from .. import errors
+from .. import errors, privacy
 from ..library import weblinks as web_links
 from ..torrent import links as torrent_links
 from ..youtube import links, resolve, streams
@@ -93,6 +93,7 @@ class ResolveJob(QObject):
             message = json.loads(lines[-1]) if lines else {}
         except ValueError:
             message = {}
+        self._log_warnings(message)
         if "ok" in message:
             try:
                 self._finish("", "", self._parse_ok(message["ok"]))
@@ -106,6 +107,21 @@ class ResolveJob(QObject):
 
     def _parse_ok(self, raw):
         return streams.from_json(raw)
+
+    def _log_warnings(self, message) -> None:
+        """yt-dlp's warnings (resolve.py already took the addresses out; cleaned again here anyway):
+        they say why YouTube's formats were skipped, which explains many failures."""
+        if not isinstance(message, dict):
+            return
+        ok = message.get("ok") if isinstance(message.get("ok"), dict) else {}
+        found = message.get("warnings") or ok.get("warnings") or []
+        apps = [part.get("client") for part in (ok.get("video"), ok.get("audio")) if isinstance(part, dict)]
+        apps = [app for app in apps if isinstance(app, str) and resolve.CLIENT_CODE_RE.match(app)]
+        if apps:
+            log.info("YouTube video %s: streams from YouTube's %s client", self.video_id, " + ".join(dict.fromkeys(apps)))
+        for text in found[:resolve.MAX_WARNINGS] if isinstance(found, list) else []:
+            if isinstance(text, str) and text.strip():
+                log.warning("yt-dlp about %s: %s", self.video_id, privacy.clean(text)[:300])
 
 
 class PlaylistJob(ResolveJob):
