@@ -118,7 +118,7 @@ CATALOG: Dict[str, Problem] = {
         "SyncWatch writes to a second file next to it. Nothing is lost, and watching isn't affected.",
         ["If another program has syncwatch.log open (an editor, a second SyncWatch), close it.",
          "Otherwise restarting the PC frees the file.",
-         "Settings > Diagnostics > Open log folder shows the files."], WARNING, popup=False),
+         "Settings > Updates & help > Open log folder shows the files."], WARNING, popup=False),
 
     # ---- 2xx: video and sound ------------------------------------------------
     "SW-201": Problem(
@@ -194,7 +194,7 @@ CATALOG: Dict[str, Problem] = {
         "Not enough space for this film",
         "The drive with your library folder has {free} free, and this needs {needed}.",
         ["Free up some space and try again.",
-         "Or choose a library folder on a bigger drive: Settings > Playback > Library folder."]),
+         "Or choose a library folder on a bigger drive: Settings > Downloads & library > Library folder."]),
     "SW-221": Problem(
         "Couldn't copy the film into the library",
         "Copying stopped because of an error. Nothing was added, and the original file is untouched.",
@@ -258,7 +258,7 @@ CATALOG: Dict[str, Problem] = {
     "SW-401": Problem(
         "Rooms aren't set up yet",
         "This copy of SyncWatch doesn't know which relay server rooms go through.",
-        ["Update SyncWatch (Settings > Updates > Check now).",
+        ["Update SyncWatch (Settings > Updates & help > Check now).",
          "If you publish SyncWatch yourself: put the relay online and run tools\\release.bat "
          "set-relay (docs/GIT_GUIDE.md, lesson 5)."]),
     "SW-402": Problem(
@@ -283,8 +283,8 @@ CATALOG: Dict[str, Problem] = {
     "SW-405": Problem(
         "The relay server answered strangely",
         "The address for the relay server may be wrong, or the relay is a different version.",
-        ["Check Settings > Watching together > Relay server (advanced). Empty means the built-in one.",
-         "Update SyncWatch (Settings > Updates > Check now)."]),
+        ["Check Settings > Rooms & friends > Relay server (advanced). Empty means the built-in one.",
+         "Update SyncWatch (Settings > Updates & help > Check now)."]),
     "SW-406": Problem(
         "Slow down",
         "Too many messages were sent in a short time, so the relay server dropped some.",
@@ -306,7 +306,7 @@ CATALOG: Dict[str, Problem] = {
     "SW-410": Problem(
         "The room is full",
         "The room already has as many people as the host allows.",
-        ["The host can raise the limit in Settings > Watching together > Room size limit (advanced)."], INFO),
+        ["The host can raise the limit in Settings > Rooms & friends > Room size limit (advanced)."], INFO),
     "SW-411": Problem(
         "You were removed from the room",
         "The host removed you from the room.",
@@ -318,7 +318,7 @@ CATALOG: Dict[str, Problem] = {
     "SW-413": Problem(
         "You have different SyncWatch versions",
         "This room runs a different version of SyncWatch than yours, and they can't work together.",
-        ["Everyone needs the newest version: Settings > Updates > Check now."]),
+        ["Everyone needs the newest version: Settings > Updates & help > Check now."]),
     "SW-414": Problem(
         "Your SyncWatch identity was renewed",
         "The file with your keys was damaged, so SyncWatch made new ones. Friends will see you as a new "
@@ -332,7 +332,7 @@ CATALOG: Dict[str, Problem] = {
     "SW-416": Problem(
         "This room is for friends only",
         "The host only lets friends join.",
-        ["Ask the host to allow everyone to ask (Settings > Watching together), or to add you as a "
+        ["Ask the host to allow everyone to ask (Settings > Rooms & friends), or to add you as a "
          "friend the next time you're in a room together."], INFO),
     "SW-417": Problem(
         "The host is busy",
@@ -390,7 +390,7 @@ CATALOG: Dict[str, Problem] = {
         "YouTube changed something",
         "SyncWatch's YouTube part (yt-dlp) can't read YouTube's pages any more. YouTube changes them every "
         "few weeks, and then yt-dlp needs an update.",
-        ["Update SyncWatch (Settings > Updates > Check now).",
+        ["Update SyncWatch (Settings > Updates & help > Check now).",
          "If there's no update yet, tell whoever publishes SyncWatch: \"Copy details\" and send them."]),
     "SW-606": Problem(
         "Can't reach YouTube",
@@ -410,8 +410,9 @@ CATALOG: Dict[str, Problem] = {
          "Otherwise download the full SyncWatch zip again and unzip it over this folder."]),
     "SW-609": Problem(
         "Couldn't play the YouTube video",
-        "The video was found, but the player couldn't play its stream.",
-        ["Try again: YouTube's stream addresses sometimes fail once.",
+        "The video was found, but the player couldn't play its stream. If YouTube refused it (\"HTTP error "
+        "403\" in the details), SyncWatch already asked again in other ways.",
+        ["Try again in a while: YouTube sometimes refuses streams for some time, then allows them again.",
          "Try a lower quality (Settings > YouTube > Quality).",
          "Still nothing? Click \"Copy details\" and send them to whoever gave you SyncWatch."]),
 
@@ -435,7 +436,7 @@ CATALOG: Dict[str, Problem] = {
         "Nobody seems to share this torrent",
         "SyncWatch couldn't get the torrent's description from anyone, so it can't start.",
         ["Try again later, or another torrent.",
-         "Settings > Downloads (advanced): *Find others without trackers* should be on."], WARNING),
+         "Settings > Downloads & library (advanced): *Find others without trackers* should be on."], WARNING),
     "SW-622": Problem(
         "This torrent has no video",
         "None of the files in the torrent is a film SyncWatch can play.",
@@ -443,7 +444,7 @@ CATALOG: Dict[str, Problem] = {
     "SW-623": Problem(
         "Not enough space to stream this film",
         "The download folder's drive doesn't have room for the film.",
-        ["Free up some space, or choose another download folder: Settings > Downloads."]),
+        ["Free up some space, or choose another download folder: Settings > Downloads & library."]),
     "SW-624": Problem(
         "The torrent part is missing",
         "This copy of SyncWatch can't stream torrents, because libtorrent isn't there.",
@@ -465,10 +466,10 @@ CATALOG: Dict[str, Problem] = {
         "Add a TMDB key for recommendations",
         "Recommendations, posters and trailers come from TMDB (The Movie Database). It's free, but needs a key.",
         ["Sign up at themoviedb.org, open Settings > API and ask for a key (personal use).",
-         "Copy the \"API Read Access Token\" into SyncWatch: Settings > Discover > TMDB key."], INFO, popup=False),
+         "Copy the \"API Read Access Token\" into SyncWatch: Settings > Ideas > TMDB key."], INFO, popup=False),
     "SW-632": Problem(
         "TMDB didn't accept the key",
-        "The key in Settings > Discover isn't right, or TMDB withdrew it.",
+        "The key in Settings > Ideas isn't right, or TMDB withdrew it.",
         ["Copy it again from themoviedb.org > Settings > API: the long \"API Read Access Token\" or the "
          "\"API Key\" (32 letters and digits)."], WARNING, popup=False),
     "SW-633": Problem(
@@ -490,7 +491,7 @@ CATALOG: Dict[str, Problem] = {
         "Without a TMDB key of your own, SyncWatch asks TMDB through its relay, but the relay has no TMDB key "
         "yet, or TMDB didn't accept it.",
         ["Add your own key (free): sign up at themoviedb.org, open Settings > API, ask for a key for personal "
-         "use and copy the \"API Read Access Token\" into Settings > Discover > TMDB key.",
+         "use and copy the \"API Read Access Token\" into Settings > Ideas > TMDB key.",
          "Or tell whoever runs your SyncWatch relay: it needs its TMDB key (relay/README.md)."], INFO, popup=False),
     # ---- 7xx: updates -------------------------------------------------------
     "SW-701": Problem(
@@ -611,8 +612,9 @@ CATALOG: Dict[str, Problem] = {
     "SW-646": Problem(
         "Not enough space for the download",
         "The drive with the download folder is too full for this film.",
-        ["Free up some space, or choose a download folder on another drive: Settings > Downloads > Download "
-         "folder.", "Or play it from the link without saving it (Settings > Downloads > When I open a web link)."]),
+        ["Free up some space, or choose a download folder on another drive: Settings > Downloads & library > "
+         "Download folder.",
+         "Or play it from the link without saving it (Settings > Downloads & library > When I open a web link)."]),
     "SW-647": Problem(
         "That link didn't give a .torrent file",
         "The address ends in .torrent, but what came back isn't a torrent file.",

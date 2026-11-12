@@ -227,6 +227,25 @@ class ChoiceTests(unittest.TestCase):
 class AskingTests(unittest.TestCase):
     """Which YouTube apps yt-dlp asks as, over which IP version, and what it warns about."""
 
+    def test_the_next_way_after_a_refusal(self):
+        """YouTube refused the TV app's streams: yt-dlp's own choice without it, then Safari; two at most."""
+        tried = []
+        while True:
+            way = streams.next_way("TVHTML5", tried)
+            if way is None:
+                break
+            tried.append(way)
+        self.assertEqual(tried, ["default,-tv", "web_safari"])
+        self.assertEqual(streams.next_way("", []), "web_safari")                   # (unknown app)
+        self.assertEqual(streams.next_way("WEB_EMBEDDED_PLAYER", ["default,-web_embedded"]), "web_safari")
+        for way in tried:
+            self.assertEqual(resolve.parse_clients(way), way.split(","))         # resolve.py takes them
+        stream = streams.from_json(StreamTests().found(video={"url": "https://a.example/v?c=TVHTML5", "codec": "vp9",
+                                                              "client": "TVHTML5"}))
+        self.assertEqual(stream.client, "TVHTML5")
+        self.assertEqual(streams.from_json(StreamTests().found(video={"url": "https://a.example/v",
+                                                                      "client": "tv; rm"})).client, "")
+
     def test_clients_and_ip_version(self):
         options = resolve.ydl_options(1080, "compatible", False, None, None, 10, ["tv", "-web_safari"], 4)
         self.assertEqual(options["extractor_args"], {"youtube": {"player_client": ["tv", "-web_safari"]}})

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2 (a lobby, tidier settings, YouTube that keeps trying)
+- **Lobby:** SyncWatch now starts in a lobby: host a room, join one (paste the code), watch alone, or open the settings. Your friends are on the right, with Join next to anyone hosting. 🏠 at the top left brings you back (in a room it asks first).
+- **Settings, tidied up:** one page with sections (Profile, Playback, Subtitles, Rooms & friends, Sync, YouTube, Downloads & library, Ideas, Appearance, Keyboard shortcuts, Updates & help), a search box, and the advanced settings folded away at the end of each section.
+- ⚙ and your picture are now at the top right. Your picture opens your profile: name, picture and your friend ID.
+- 📂 (bottom left) now also opens links and .torrent files.
+- **YouTube:** when YouTube refuses a video's stream (it does that now and then), SyncWatch asks again another way by itself instead of showing an error.
+- The background is black.
+- **Fixed:** on Windows the log file could stop being written (once it was full while another program had it open). Logs and copied reports no longer contain whole links or stream addresses, only the website's name.
+
 ## 0.5.1 (links to films, and Ideas without a key)
 - **Links to films:** paste a link to a film file (https://..., for example from Real-Debrid) where you paste YouTube links, press Ctrl+V, or drag it onto SyncWatch. The first time, SyncWatch asks how such links should open: **Play it from the link** (it streams, nothing is saved) or **Download it while it plays** (it plays from the link while SyncWatch saves it into your library; the control bar shows how far it is and the time left, and a stopped download continues where it was). SyncWatch remembers your answer: Settings > Downloads > When I open a web link. A link to a .torrent file opens like a torrent.
 - In a room, friends following the host are asked before they play the host's link too (*Stream it too*): it plays straight from the same link on their PC. Some services (Real-Debrid, for example) may allow a link in only one place at a time. Settings > Downloads > When the host opens a web link.

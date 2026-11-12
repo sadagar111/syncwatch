@@ -45,9 +45,10 @@ FETCH_TIMEOUT_S = 12
 RESOLVE_TIMEOUT_S = 90
 MPV_TIMEOUT_S = 20
 
-# (what the table calls it, --client, --ip). The first one is what SyncWatch 0.5.1 does.
+# (what the table calls it, --client, --ip). The first one is how SyncWatch asks first (yt-dlp's own
+# choice); since 0.5.2 it asks again as other apps by itself if YouTube refuses those streams.
 WAYS: Tuple[Tuple[str, str, int], ...] = (
-    ("as SyncWatch 0.5.1 does", "", 0),
+    ("as SyncWatch asks first", "", 0),
     ("the same, IPv4 only", "", 4),
     ("the same, IPv6 only", "", 6),
     ("TV app (tv)", "tv", 0),
@@ -314,12 +315,13 @@ def verdict(rows: List[Tuple[str, ...]], v4: bool, v6: bool) -> List[str]:
     elif kinds == {"not found: bot"}:
         lines.append("Result: YouTube wants proof that this isn't a bot (it asks that of some networks and VPNs).")
     elif first and first[4] == "plays":
-        lines.append("Result: YouTube works on this PC right now, the way SyncWatch 0.5.1 asks.")
+        lines.append("Result: YouTube works on this PC right now, the way SyncWatch asks first.")
     else:
         playing = [row[0] for row in rows if row[4] == "plays"]
         fetched = [row[0] for row in rows if row[2] == "ok" and row[3] in ("ok", "(in the picture)")]
         if playing:
-            lines.append("Result: the way 0.5.1 asks doesn't work here, but these do: " + ", ".join(playing) + ".")
+            lines.append("Result: the way SyncWatch asks first doesn't work here, but these do: "
+                         + ", ".join(playing) + ".")
         elif fetched:
             lines.append("Result: mpv played none of them, but YouTube sent the streams to Python for: "
                          + ", ".join(fetched) + ".")

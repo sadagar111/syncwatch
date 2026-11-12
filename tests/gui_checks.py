@@ -235,7 +235,7 @@ def _room_extras(out: Path) -> bool:
 
 def _torrent_offer(out: Path) -> bool:
     """(0.5) The host streams a torrent: Marek (ask first, the default) is asked in the sidebar and
-    streams it only after his click; Kuba (Settings > Downloads: don't) is neither asked nor streams."""
+    streams it only after his click; Kuba (Settings > Downloads & library: don't) is neither asked nor streams."""
     seen = {}
     for role in ("marek", "kuba"):
         for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():
@@ -260,7 +260,7 @@ def _torrent_offer(out: Path) -> bool:
 
 def _link_offer(out: Path) -> bool:
     """(0.5.1) The host plays a film from a web link: Marek (ask first, the default) is asked in the sidebar
-    and plays the same link only after his click; Kuba (Settings > Downloads: don't) isn't asked."""
+    and plays the same link only after his click; Kuba (Settings > Downloads & library: don't) isn't asked."""
     seen = {}
     for role in ("marek", "kuba"):
         for line in (out / f"room-{role}.jsonl").read_text(encoding="utf-8").splitlines():

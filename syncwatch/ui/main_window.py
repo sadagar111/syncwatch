@@ -10,25 +10,26 @@ import logging
 import queue
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import (QActionGroup, QColor, QCursor, QGuiApplication, QIcon, QImage, QKeySequence,
                            QPainter, QShortcut)
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QPushButton, QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QApplication, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
+                               QMessageBox, QPushButton, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
+                               QVBoxLayout, QWidget)
 
 from .. import errors, log as log_module, paths
 from ..filmstate import film_key
 from ..library import chapters as chapter_rules, episodes
 from ..settings import RESTART_KEYS, SCHEMA
 from ..sync.controller import Controller, fmt_time
-from .controls import ControlBar
+from .controls import ControlBar, TopBar
 from .lobby import LobbyScreen
 from .dialogs import error_dialog
 from .dialogs.avatar_editor import choose_avatar
+from .dialogs.setup_dialog import SetupDialog
 from .dialogs.settings_dialog import (SettingsDialog, diagnostics_extras, profile_extras, rooms_extras,
                                       updates_extras)
 from .dialogs.subtitle_timing import SubtitleTimingDialog
@@ -259,6 +260,8 @@ class MainWindow(QMainWindow):
         self.library.attach(self.idle.library)
         self.youtube = YouTube(self.settings, self.ctx.profile.cache_dir, lambda: self.player.engine, self)
         self.youtube.opened.connect(self.play_stream)
+        self._refused_ways: Dict[str, List[str]] = {}   # video ID -> other ways YouTube was asked (0.5.2)
+        self.player.refused = self._youtube_refused
         self.subtitles.fetch_youtube = self.youtube.fetch_captions
         self.subtitles.failed.connect(self.problem)
         self.youtube.busy.connect(self._youtube_busy)
@@ -368,6 +371,8 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(8, 8, 4, 8)
         left_layout.setSpacing(6)
+        self.top_bar = TopBar()            # 🏠 at the top left (0.5.2)
+        left_layout.addWidget(self.top_bar)
         left_layout.addWidget(self.stack, 1)
         left_layout.addWidget(self.controls)
 
@@ -410,9 +415,10 @@ class MainWindow(QMainWindow):
         ui.volumeChanged.connect(lambda v: self.settings.set("playback.volume", v))
         ui.fullscreenClicked.connect(self.toggle_fullscreen)
         ui.sidebarClicked.connect(self.toggle_sidebar)
-        ui.settingsClicked.connect(self.open_settings)
+        self.sidebar.settingsClicked.connect(self.open_settings)      # ⚙ and your picture: top right (0.5.2)
+        self.sidebar.profileClicked.connect(self.open_profile)
         ui.openClicked.connect(self.open_library)
-        ui.lobbyClicked.connect(self.back_to_lobby)
+        self.top_bar.lobbyClicked.connect(self.back_to_lobby)
         self.lobby.hostClicked.connect(self._host)
         self.lobby.joinClicked.connect(self._join)
         self.lobby.aloneClicked.connect(self.watch_alone)
@@ -595,9 +601,9 @@ class MainWindow(QMainWindow):
         """Before leaving a room: the host with people in it is asked first (it ends for everyone)."""
         c = self.controller
         if c.is_host and c.peers:
-            return self._confirm("Close your room?", f"{len(c.peers)} {'person is' if len(c.peers) == 1 else 'people are'} "
-                                                     "watching with you. Closing the room ends it for everyone.",
-                                 "Close room")
+            people = f"{len(c.peers)} {'person is' if len(c.peers) == 1 else 'people are'}"
+            return self._confirm("Close your room?", f"{people} watching with you. Closing the room ends it for "
+                                                     "everyone.", "Close room")
         return True
 
     # ---------------------------------------------------------------- the lobby (0.5.2)
@@ -606,6 +612,8 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentWidget(page)
         in_lobby = page is self.lobby
         self.controls.setVisible(not in_lobby)
+        self.top_bar.setVisible(not in_lobby and not self.isFullScreen())
+        self.top_bar.set_title(self.windowTitle().partition("SyncWatch: ")[2] if page is self.video else "")
         self.sidebar.set_lobby(in_lobby)
         if in_lobby:
             self.lobby.set_name(self.settings.get("profile.name"))
@@ -653,7 +661,7 @@ class MainWindow(QMainWindow):
         knock = self.controller.session.waiting.get(key)
         if block and knock is not None and not self._confirm(
                 "Block this person?", f"{knock.name} ({knock.key.short_id}) won't be able to ask to join your "
-                                      "room again. You can unblock them in Settings > Watching together.", "Block"):
+                                      "room again. You can unblock them in Settings > Rooms & friends.", "Block"):
             return
         self.controller.deny(key, block)
 
@@ -674,8 +682,8 @@ class MainWindow(QMainWindow):
             c.kick(key)
         elif action == "block" and self._confirm("Remove and block?",
                                                  f"{member.name} ({member.key.short_id}) will be removed and can't "
-                                                 "ask to join again. You can unblock them in Settings > Watching "
-                                                 "together.", "Remove and block"):
+                                                 "ask to join again. You can unblock them in Settings > Rooms & "
+                                                 "friends.", "Remove and block"):
             c.kick(key, ban=True)
         elif action == "copy_id":
             QGuiApplication.clipboard().setText(member.key.short_id)
@@ -718,7 +726,17 @@ class MainWindow(QMainWindow):
 
     def _profile_changed(self) -> None:
         self.controller.set_profile(self.settings.get("profile.name"), self.avatar)
+        self.sidebar.set_profile_picture(self.avatar)
+        self.lobby.set_name(self.settings.get("profile.name"))
         self._refresh_soon()
+
+    def open_profile(self) -> None:
+        """Your picture at the top right (0.5.2): your name, picture and friend ID."""
+        dialog = SetupDialog(self.settings, self.avatar, first_time=False, parent=self,
+                             friend_id=self.controller.rooms.identity.public.short_id)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.avatar != self.avatar:
+            self.set_avatar(dialog.avatar)
+        self._profile_changed()
 
     def set_avatar(self, data: Optional[bytes]) -> None:
         self.avatar = data
@@ -772,6 +790,19 @@ class MainWindow(QMainWindow):
             self.controller.set_film(path.name, size, 0)
 
     # ---------------------------------------------------------------- YouTube
+    def _youtube_refused(self, stream, position_ms: int) -> bool:
+        """The player: YouTube refused this stream's addresses (HTTP 403). It does that now and then
+        to one of its apps (the TV app's, on Alex's PC in Nov 2026): ask again as another one, from
+        where it was. False: no other way left, the player reports SW-609."""
+        if getattr(stream, "kind", "") != "youtube":
+            return False
+        tried = self._refused_ways.setdefault(stream.id, [])
+        quiet = bool(self._following_id) and self._following_id == stream.id
+        if not self.youtube.ask_again(stream.id, position_ms // 1000, stream.client, tried, quiet=quiet):
+            return False
+        self.activity("YouTube refused that stream; SyncWatch asks again another way", "info")
+        return True
+
     def open_youtube(self, ref) -> None:
         """Watch: find the video (in the background), then play it. In a room where I follow the
         host, only the host decides what plays for everyone, so it goes into the queue instead."""
@@ -925,7 +956,7 @@ class MainWindow(QMainWindow):
 
     def follow_film(self, name: str, size: int) -> None:
         """The controller: the host opened another film. If it's another episode of the show I'm
-        watching and I have it next to mine, mine opens and lines up (Settings > Watching together)."""
+        watching and I have it next to mine, mine opens and lines up (Settings > Sync)."""
         current = self.player.path if getattr(self.player, "stream", None) is None else None
         wanted, mine = episodes.info(name), (episodes.info(current.name) if current is not None else None)
         if not self.settings.get("sync.follow_episodes") or wanted is None or mine is None \
@@ -952,7 +983,7 @@ class MainWindow(QMainWindow):
     def follow_torrent(self, magnet: str, name: str, size: int) -> None:
         """The controller: the host streams a torrent I don't have open. A film of that name and size
         in my library is opened instead (no download needed). Otherwise the sidebar asks first
-        (streaming a torrent also uploads it to others), unless Settings > Downloads says otherwise."""
+        (streaming a torrent also uploads it to others), unless Settings > Downloads & library says otherwise."""
         choice = self.settings.get("torrents.follow_host")
         if choice == "no" or not torrent_links.is_magnet(magnet):
             return
@@ -1050,7 +1081,7 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- web links (0.5.1)
     def open_web_link(self, text: str) -> None:
         """A film (or a .torrent) at a web address. The film plays from the link; the first time,
-        SyncWatch asks whether it should also be saved (Settings > Downloads > When I open a web link)."""
+        SyncWatch asks whether it should also be saved (Settings > Downloads & library > When I open a web link)."""
         link = web_links.parse(text)
         if link is None:
             return
@@ -1078,7 +1109,7 @@ class MainWindow(QMainWindow):
             "Play it from the link: it streams, nothing is saved.\n\n"
             "Download it while it plays: it plays from the link while SyncWatch saves it into your library "
             "(the control bar shows how long that takes), so friends can get it from you later.\n\n"
-            "SyncWatch remembers your choice. To change it: Settings > Downloads > When I open a web link.")
+            "SyncWatch remembers your choice. To change it: Settings > Downloads & library > When I open a web link.")
         stream = box.addButton("Play it from the link", QMessageBox.ButtonRole.AcceptRole)
         download = box.addButton("Download it while it plays", QMessageBox.ButtonRole.AcceptRole)
         box.addButton(QMessageBox.StandardButton.Cancel)
@@ -1105,7 +1136,7 @@ class MainWindow(QMainWindow):
 
     def follow_link(self, link: str, name: str, size: int) -> None:
         """The controller: the host plays a film from a web link I don't have open. My own copy (same name
-        and size) opens instead; otherwise the sidebar asks first (Settings > Downloads > When the host
+        and size) opens instead; otherwise the sidebar asks first (Settings > Downloads & library > When the host
         opens a web link), then it plays from the same link."""
         choice = self.settings.get("links.follow_host")
         if choice == "no" or not web_links.room_ok(link) or self.weblinks.url == link:
@@ -1149,7 +1180,7 @@ class MainWindow(QMainWindow):
         return host.film.get("link") == offer[0] and self.weblinks.url != offer[0]
 
     def _offer_link(self) -> bool:
-        """The sidebar asks whether to stream the host's web link too (Settings > Downloads: ask)."""
+        """The sidebar asks whether to stream the host's web link too (Settings > Downloads & library: ask)."""
         if not self._link_offer_still_open():
             self._link_offer = None
             return False
@@ -1186,7 +1217,7 @@ class MainWindow(QMainWindow):
             f"straight from {host.name}? It plays while it downloads.", f"Get it from {host.name}")
 
     def _offer_torrent(self) -> bool:
-        """The sidebar asks whether to stream the host's torrent too (Settings > Downloads: ask)."""
+        """The sidebar asks whether to stream the host's torrent too (Settings > Downloads & library: ask)."""
         if not self._torrent_offer_still_open():
             self._torrent_offer = None
             return False
@@ -1227,7 +1258,7 @@ class MainWindow(QMainWindow):
             return
         answer = self.settings.get("torrents.share")
         if answer == "no":
-            self.activity(f"{who} asked for {path.name} (sharing is off: Settings > Downloads)", "info")
+            self.activity(f"{who} asked for {path.name} (sharing is off: Settings > Downloads & library)", "info")
             return
         if answer == "ask":
             reply = QMessageBox.question(
@@ -1638,11 +1669,12 @@ class MainWindow(QMainWindow):
 
     # ================================================================ settings window
     def open_settings(self) -> None:
+        updates = updates_extras(self.updates, self)
+        diagnostics = diagnostics_extras(self.ctx.profile.logs_dir, self.copy_report, self.ctx.rerun_checks)
         extras = {
             "Profile": profile_extras(lambda: self.avatar, self._change_avatar, lambda: self.set_avatar(None)),
-            "Watching together": rooms_extras(self.controller),
-            "Updates": updates_extras(self.updates, self),
-            "Diagnostics": diagnostics_extras(self.ctx.profile.logs_dir, self.copy_report, self.ctx.rerun_checks),
+            "Rooms & friends": rooms_extras(self.controller),
+            "Updates & help": lambda column: (updates(column), diagnostics(column)),
         }
         before = {key: self.settings.get(key) for key in RESTART_KEYS}
         dialog = SettingsDialog(self.settings, extras, self)
@@ -1814,7 +1846,7 @@ class MainWindow(QMainWindow):
         if self.overlay.help_visible:
             self.overlay.show_help(None)
             return
-        lines = ["Keyboard shortcuts (change them in Settings > Keyboard)", ""]
+        lines = ["Keyboard shortcuts (change them in Settings > Keyboard shortcuts)", ""]
         for setting in SCHEMA:
             if setting.kind == "keys" and self.settings.get(setting.key):
                 lines.append(f"{self.settings.get(setting.key)}\t{setting.label}")
@@ -1837,11 +1869,13 @@ class MainWindow(QMainWindow):
                 winfix.set_border(int(self.winId()), False)
             self.showMaximized() if self._was_maximized else self.showNormal()
             self.controls.setVisible(True)
+            self.top_bar.setVisible(self.stack.currentWidget() is not self.lobby)
             self.sidebar.setVisible(self.settings.get("ui.sidebar"))
             self._show_cursor(True)
         else:
             self._was_maximized = self.isMaximized()
             self.showFullScreen()
+            self.top_bar.setVisible(False)
             if border_fix:
                 winfix.set_border(int(self.winId()), True)
             self.sidebar.setVisible(bool(self.settings.get("ui.sidebar_in_fullscreen")))

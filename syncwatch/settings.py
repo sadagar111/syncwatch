@@ -2,9 +2,9 @@
 
 To add a setting, add one ``Setting(...)`` line to ``SCHEMA``. The settings
 window builds itself from this table, so nothing else is needed for it to
-appear (basic ones always; ``advanced=True`` ones only when
-"Show advanced options" is ticked; ``hidden=True`` ones never: they're
-remembered values such as the window size).
+appear (in its section; ``advanced=True`` ones in the section's folded
+Advanced part; ``hidden=True`` ones never: they're remembered values such as
+the window size).
 
 The file is written atomically (to a temporary file that then replaces the
 old one), so a crash or power cut can't leave a half-written settings file.
@@ -25,8 +25,9 @@ log = logging.getLogger("syncwatch.settings")
 
 FILE_VERSION = 1
 
-SECTIONS = ["Profile", "Playback", "Subtitles", "Watching together", "YouTube", "Downloads", "Discover", "Interface",
-            "Keyboard", "Updates", "Diagnostics"]
+# The settings window's sections, top to bottom (0.5.2: one page with these; until then, tabs).
+SECTIONS = ["Profile", "Playback", "Subtitles", "Rooms & friends", "Sync", "YouTube", "Downloads & library", "Ideas",
+            "Appearance", "Keyboard shortcuts", "Updates & help"]
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ def _s(*args, **kwargs) -> Setting:
     return Setting(*args, **kwargs)
 
 
-P, PB, SB, WT, YT, TR, DC, UI, KB, UP, DG = SECTIONS
+P, PB, SB, RF, SY, YT, DL, ID, AP, KB, UH = SECTIONS
 
 SCHEMA: List[Setting] = [
     # ---- Profile ----------------------------------------------------------------------
@@ -60,9 +61,6 @@ SCHEMA: List[Setting] = [
        "Shown to friends when you watch together.", max_len=32),
 
     # ---- Playback ---------------------------------------------------------------------
-    _s("paths.movies_dir", "path", "", "Library folder", PB,
-       "Where your films are kept. Add film copies films here. Empty means the 'movies' folder "
-       "next to SyncWatch."),
     _s("playback.resume", "bool", True, "Continue where I stopped", PB,
        "When you open a film again, jump to where you were."),
     _s("playback.resume_min_s", "int", 15, "Only continue if I watched at least", PB,
@@ -150,92 +148,94 @@ SCHEMA: List[Setting] = [
        "drive this can make playback stutter for a minute; a limit avoids that. 0 = no limit.",
        advanced=True, minimum=0, maximum=5000, suffix=" MB/s"),
 
-    # ---- Watching together ------------------------------------------------------------
-    _s("room.policy", "choice", "ask", "When someone asks to join my room", WT,
+    # ---- Rooms & friends -------------------------------------------------------------
+    _s("room.policy", "choice", "ask", "When someone asks to join my room", RF,
        "Blocked people are always turned away.",
        choices=[("ask", "Ask me every time"), ("friends_direct", "Friends join directly, ask me about others"),
                 ("friends_only", "Only friends may ask"),
                 ("open", "Anyone with the code joins directly (not recommended)")]),
-    _s("chat.over_video", "choice", "hidden", "Chat messages over the video", WT,
+    _s("chat.over_video", "choice", "hidden", "Chat messages over the video", RF,
        "Friends' messages show for a few seconds at the top of the video: while the sidebar is hidden "
        "(fullscreen, or after Tab), always, or never. The sidebar always has them.",
        choices=[("hidden", "While the sidebar is hidden"), ("always", "Always"), ("never", "Never")]),
-    _s("chat.reactions", "bool", True, "Show reactions over the video", WT,
+    _s("chat.reactions", "bool", True, "Show reactions over the video", RF,
        "Friends' emoji (😂 🔥 🍿 …) float up over the video for a few seconds."),
-    _s("chat.number_keys", "bool", True, "Number keys 1–8 send reactions", WT,
+    _s("chat.number_keys", "bool", True, "Number keys 1–8 send reactions", RF,
        "1 😂  2 😮  3 😍  4 😱  5 😢  6 👏  7 🔥  8 🍿 (not while you type).", advanced=True),
-    _s("room.max_people", "int", 10, "Room size limit", WT,
+    _s("room.max_people", "int", 10, "Room size limit", RF,
        "How many people (you included) may be in your room.", advanced=True, minimum=2, maximum=20),
-    _s("room.rejoin", "bool", True, "Let people back in after a dropped connection", WT,
+    _s("room.rejoin", "bool", True, "Let people back in after a dropped connection", RF,
        "Someone who was in your room in the last 10 minutes gets back in without asking when their "
        "connection dropped or their SyncWatch restarted. People who left or were removed must ask again.",
        advanced=True),
-    _s("room.relay", "str", "", "Relay server", WT,
+    _s("room.relay", "str", "", "Relay server", RF,
        "The server rooms go through. Empty = the built-in one. Everyone in a room must use the same "
        "relay; room codes for another relay include its address.", advanced=True, max_len=200),
-    _s("friends.announce", "bool", True, "Tell friends when I'm hosting", WT,
+    _s("friends.announce", "bool", True, "Tell friends when I'm hosting", RF,
        "Friends then see your room in their Friends list and can ask to join with one click."),
-    _s("friends.show_rooms", "bool", True, "Show friends' rooms", WT,
+    _s("friends.show_rooms", "bool", True, "Show friends' rooms", RF,
        "Show in the Friends list when a friend is hosting."),
-    _s("sync.show_gap", "bool", True, "Show how far apart you are", WT,
+
+    # ---- Sync -------------------------------------------------------------------------
+    _s("sync.show_gap", "bool", True, "Show how far apart you are", SY,
        "Shows how many seconds your film is ahead of or behind the others."),
-    _s("sync.show_ping", "bool", True, "Show ping", WT,
+    _s("sync.show_ping", "bool", True, "Show ping", SY,
        "How long messages take to the host and back (through the relay). This isn't the same as the gap."),
-    _s("sync.gap_reference", "choice", "median", "Compare my position with", WT,
+    _s("sync.gap_reference", "choice", "median", "Compare my position with", SY,
        "Median: the middle person among the others, so one person stuck loading doesn't skew it. "
        "With two people all three options mean the same thing.", advanced=True,
        choices=[("median", "The others' median"), ("average", "The others' average"),
                 ("host", "The host")]),
-    _s("sync.gap_refresh_s", "int", 10, "Update the gap every", WT, advanced=True,
+    _s("sync.gap_refresh_s", "int", 10, "Update the gap every", SY, advanced=True,
        minimum=1, maximum=60, suffix=" s"),
-    _s("sync.gap_warn_s", "float", 1.0, "Highlight Sync up when apart by more than", WT,
+    _s("sync.gap_warn_s", "float", 1.0, "Highlight Sync up when apart by more than", SY,
        advanced=True, minimum=0.2, maximum=10.0, step=0.1, decimals=1, suffix=" s"),
-    _s("sync.jump_mode", "choice", "together", "When someone jumps while the film plays", WT,
+    _s("sync.jump_mode", "choice", "together", "When someone jumps while the film plays", SY,
        "Pause and start together: everyone waits at the new spot until every PC shows it, then all "
        "play at the same moment (the tightest; adds a short pause to every jump). Keep playing: "
        "everyone jumps straight away, and each PC jumps a little further ahead to make up for how "
        "long its own jumps take (it learns that by itself). In someone else's room, their choice counts.",
        choices=[("together", "Pause and start together"), ("ahead", "Keep playing")]),
-    _s("sync.jump_start_ms", "int", 300, "After a jump, start playing again", WT,
+    _s("sync.jump_start_ms", "int", 300, "After a jump, start playing again", SY,
        "How long after the last PC is ready everyone starts (so the start message reaches "
        "everyone in time). Only for \"Pause and start together\".", advanced=True,
        minimum=100, maximum=3000, suffix=" ms later"),
-    _s("sync.learned_jump_ms", "float", 0.0, "How long jumps take on this PC", WT, hidden=True,
+    _s("sync.learned_jump_ms", "float", 0.0, "How long jumps take on this PC", SY, hidden=True,
        minimum=0.0, maximum=3000.0),
-    _s("sync.learned_jump_ms_mpv", "float", 0.0, "How long jumps take on this PC with mpv", WT, hidden=True,
+    _s("sync.learned_jump_ms_mpv", "float", 0.0, "How long jumps take on this PC with mpv", SY, hidden=True,
        minimum=0.0, maximum=3000.0),
-    _s("sync.countdown_s", "int", 3, "Countdown before resuming after Sync up", WT,
+    _s("sync.countdown_s", "int", 3, "Countdown before resuming after Sync up", SY,
        "0 = resume immediately.", advanced=True, minimum=0, maximum=10, suffix=" s"),
-    _s("sync.wait_for_loading", "bool", True, "Wait for a friend whose video is loading", WT,
+    _s("sync.wait_for_loading", "bool", True, "Wait for a friend whose video is loading", SY,
        "When you host: if someone's video stops to load more (a slow connection, a torrent that's still "
        "coming), everyone pauses where you are until it can play, then all start together. Not again "
        "within 20 s, and not for a connection that keeps needing it."),
-    _s("sync.loading_wait_s", "int", 30, "Wait for a loading video at most", WT,
+    _s("sync.loading_wait_s", "int", 30, "Wait for a loading video at most", SY,
        "How long everyone waits for a friend's video to load before starting without them.",
        advanced=True, minimum=5, maximum=300, suffix=" s"),
-    _s("sync.follow_episodes", "bool", True, "Go on to the next episode with the host", WT,
+    _s("sync.follow_episodes", "bool", True, "Go on to the next episode with the host", SY,
        "In a room, when the host goes on to another episode of the show you're watching, your copy of it opens "
        "(if it's in the same folder as yours, or the next season's folder)."),
-    _s("sync.pause_on_drop", "bool", True, "Pause when someone's connection drops", WT,
+    _s("sync.pause_on_drop", "bool", True, "Pause when someone's connection drops", SY,
        "When you host: if a friend following the room goes silent while you watch (their internet or PC "
        "stopped answering for 6 s), everyone pauses; when they're back, everyone starts together."),
-    _s("sync.ready_timeout_s", "float", 5.0, "Wait for slow PCs at most", WT,
+    _s("sync.ready_timeout_s", "float", 5.0, "Wait for slow PCs at most", SY,
        "During Sync up (and after jumps, when everyone pauses and starts together), how long to "
        "wait for a friend whose film isn't ready yet before starting without them.", advanced=True, minimum=1.0, maximum=60.0, step=0.5, decimals=1,
        suffix=" s"),
-    _s("sync.cooldown_playpause_s", "float", 2.0, "Others' play/pause cooldown", WT,
+    _s("sync.cooldown_playpause_s", "float", 2.0, "Others' play/pause cooldown", SY,
        "When you host: how often each person may pause or play. You (the host) have no cooldown.",
        advanced=True, minimum=0.0, maximum=30.0, step=0.5, decimals=1, suffix=" s"),
-    _s("sync.cooldown_syncup_s", "float", 15.0, "Others' Sync up cooldown", WT,
+    _s("sync.cooldown_syncup_s", "float", 15.0, "Others' Sync up cooldown", SY,
        "When you host: how often each person may use Sync up.", advanced=True,
        minimum=0.0, maximum=300.0, step=1.0, decimals=0, suffix=" s"),
-    _s("sync.seek_debounce_ms", "int", 400, "Send skips after you stop pressing for", WT,
+    _s("sync.seek_debounce_ms", "int", 400, "Send skips after you stop pressing for", SY,
        "Pressing skip many times quickly sends one jump at the end instead of many.",
        advanced=True, minimum=0, maximum=3000, suffix=" ms"),
-    _s("sync.host_only", "bool", False, "Only I can control playback when I host", WT,
+    _s("sync.host_only", "bool", False, "Only I can control playback when I host", SY,
        "Everyone else's buttons then work just for themselves."),
-    _s("sync.compensate_latency", "bool", True, "Compensate for network delay", WT, advanced=True),
-    _s("room.last_code", "str", "", "Last room code", WT, hidden=True, max_len=600),
+    _s("sync.compensate_latency", "bool", True, "Compensate for network delay", SY, advanced=True),
+    _s("room.last_code", "str", "", "Last room code", RF, hidden=True, max_len=600),
 
     # ---- YouTube (from 0.5) -----------------------------------------------------------
     _s("youtube.quality", "choice", "1080", "Quality", YT,
@@ -281,139 +281,141 @@ SCHEMA: List[Setting] = [
        "yt-dlp needs a JavaScript program to read YouTube's pages: Deno, which comes with SyncWatch. "
        "Only set this to use another deno.exe. Empty means the one inside SyncWatch.", advanced=True),
 
-    # ---- Downloads: torrents (from 0.5) and web links (from 0.5.1) -----------------------
-    _s("torrents.folder", "path", "", "Download folder", TR,
+    # ---- Downloads & library: the library folder, torrents (0.5), web links (0.5.1) ------
+    _s("paths.movies_dir", "path", "", "Library folder", DL,
+       "Where your films are kept. Add film copies films here. Empty means the 'movies' folder "
+       "next to SyncWatch."),
+    _s("torrents.folder", "path", "", "Download folder", DL,
        "Where streamed and downloaded films are saved. Empty means a 'Torrents' folder inside your library "
        "folder."),
-    _s("torrents.after", "choice", "keep", "When you close a streamed film", TR,
+    _s("torrents.after", "choice", "keep", "When you close a streamed film", DL,
        "Keep it: it stays in the download folder (and others can keep getting it from you while it's "
        "open). Delete it: streaming only, nothing stays on your drive.",
        choices=[("keep", "Keep the film"), ("delete", "Delete it")]),
-    _s("torrents.upload_kbps", "int", 0, "Upload limit", TR,
+    _s("torrents.upload_kbps", "int", 0, "Upload limit", DL,
        "How fast others may download from you while you stream. 0 = no limit.", minimum=0, maximum=100_000,
        suffix=" KB/s"),
-    _s("torrents.incoming", "bool", True, "Let others connect to me", TR,
+    _s("torrents.incoming", "bool", True, "Let others connect to me", DL,
        "Faster, and needed to share films with friends in a room. Windows asks once whether SyncWatch may "
        "use the network. Off: SyncWatch only connects out."),
-    _s("torrents.share", "choice", "ask", "When someone in the room asks for my film", TR,
+    _s("torrents.share", "choice", "ask", "When someone in the room asks for my film", DL,
        "When you host, friends without the film can ask to get it straight from you (it plays for them while "
        "it downloads; your PC sends it, nothing goes through the relay).",
        choices=[("ask", "Ask me each time"), ("yes", "Share it"), ("no", "Don't share")]),
-    _s("torrents.into_library", "bool", True, "Move finished films into my library", TR,
+    _s("torrents.into_library", "bool", True, "Move finished films into my library", DL,
        "A streamed torrent that downloaded completely moves from the download folder into your library "
        "when you close it (if you keep films); a film downloaded from a web link as soon as it's complete."),
-    _s("torrents.follow_host", "choice", "ask", "When the host streams a torrent", TR,
+    _s("torrents.follow_host", "choice", "ask", "When the host streams a torrent", DL,
        "In a room, when the host streams a torrent you don't have (unless you're watching on your own). "
        "Streaming it means your PC downloads it and shares the parts it has with others, like any torrent "
        "app, so you're asked first.",
        choices=[("ask", "Ask me first"), ("yes", "Stream it too"), ("no", "Don't")]),
-    _s("links.open", "choice", "ask", "When I open a web link", TR,
+    _s("links.open", "choice", "ask", "When I open a web link", DL,
        "A link to a film on the web (https://..., e.g. from Real-Debrid). Play it from the link: it streams, "
        "nothing is saved. Download it while it plays: it plays from the link while SyncWatch saves it into "
        "the download folder (and into your library once it's complete), so friends can get it from you later.",
        choices=[("ask", "Ask me"), ("stream", "Play it from the link"), ("download", "Download it while it plays")]),
-    _s("links.follow_host", "choice", "ask", "When the host opens a web link", TR,
+    _s("links.follow_host", "choice", "ask", "When the host opens a web link", DL,
        "In a room, when the host plays a film from a web link you don't have: you stream it from the same "
        "link. Some services (Real-Debrid, for example) may allow a link in only one place at a time.",
        choices=[("ask", "Ask me first"), ("yes", "Stream it too"), ("no", "Don't")]),
-    _s("torrents.start_mb", "int", 8, "Start playing after", TR,
+    _s("torrents.start_mb", "int", 8, "Start playing after", DL,
        "How much of the film is fetched before it starts playing.", advanced=True, minimum=1, maximum=500,
        suffix=" MB"),
-    _s("torrents.dht", "bool", True, "Find others without trackers (DHT)", TR,
+    _s("torrents.dht", "bool", True, "Find others without trackers (DHT)", DL,
        "Needed for most magnet links.", advanced=True),
-    _s("torrents.connections", "int", 200, "Connections at most", TR, advanced=True, minimum=10, maximum=2000),
-    # ---- Discover (0.5): what should we watch? --------------------------------------
-    _s("discover.tmdb_key", "secret", "", "TMDB key (optional)", DC,
+    _s("torrents.connections", "int", 200, "Connections at most", DL, advanced=True, minimum=10, maximum=2000),
+    # ---- Ideas (0.5, "Discover" until 0.5.2): what should we watch? ----------------------
+    _s("discover.tmdb_key", "secret", "", "TMDB key (optional)", ID,
        "Recommendations, posters and trailers come from TMDB. Without a key of your own, SyncWatch asks TMDB "
        "through its relay, with one key for everyone. With your own (free: sign up at themoviedb.org, open "
        "Settings > API, ask for a key for personal use and copy the \"API Read Access Token\" here), "
        "SyncWatch asks TMDB directly; the key is only sent to TMDB.", max_len=1500),
-    _s("discover.tell_have", "bool", True, "Tell the room which suggested films I have", DC,
+    _s("discover.tell_have", "bool", True, "Tell the room which suggested films I have", ID,
        "During a film vote, so everyone sees which film is ready to play. Only for the suggested films."),
-    _s("discover.use_history", "bool", True, "Use the films I watched for recommendations", DC,
+    _s("discover.use_history", "bool", True, "Use the films I watched for recommendations", ID,
        "Besides the films in your library, the ones you opened from elsewhere.", advanced=True),
-    _s("discover.region", "str", "", "Country for where to watch", DC,
+    _s("discover.region", "str", "", "Country for where to watch", ID,
        "Two letters, e.g. NL, SK or CZ. Empty means the country Windows is set to.", advanced=True, max_len=2),
-    _s("discover.language", "str", "en-US", "Language for titles and descriptions", DC,
+    _s("discover.language", "str", "en-US", "Language for titles and descriptions", ID,
        "TMDB's language code, e.g. en-US, sk-SK or cs-CZ.", advanced=True, max_len=5),
 
-    # ---- Interface --------------------------------------------------------------------
-    _s("ui.show_advanced", "bool", False, "Show advanced options", UI, hidden=True),   # (before 0.5.2)
-    _s("ui.settings_help_inline", "bool", False, "Show explanations under the settings", UI,
+    # ---- Appearance ("Interface" until 0.5.2) -------------------------------------------
+    _s("ui.show_advanced", "bool", False, "Show advanced options", AP, hidden=True),   # (before 0.5.2)
+    _s("ui.settings_help_inline", "bool", False, "Show explanations under the settings", AP,
        "Writes each setting's explanation underneath it, instead of only when you point at the ⓘ."),
-    _s("ui.start_in_lobby", "bool", True, "Start with the lobby", UI,
+    _s("ui.start_in_lobby", "bool", True, "Start with the lobby", AP,
        "When SyncWatch starts: the lobby (host a room, join one, watch alone). Off: straight to your films, "
        "links and Ideas.", advanced=True),
-    _s("ui.sidebar", "bool", True, "Show the sidebar", UI),
-    _s("ui.panel_connection", "bool", True, "Show the room panel", UI),
-    _s("ui.panel_people", "bool", True, "Show the people panel", UI),
-    _s("ui.panel_friends", "bool", True, "Show the friends panel", UI),
-    _s("ui.panel_queue", "bool", True, "Show the YouTube queue (Up next)", UI,
+    _s("ui.sidebar", "bool", True, "Show the sidebar", AP),
+    _s("ui.panel_connection", "bool", True, "Show the room panel", AP),
+    _s("ui.panel_people", "bool", True, "Show the people panel", AP),
+    _s("ui.panel_friends", "bool", True, "Show the friends panel", AP),
+    _s("ui.panel_queue", "bool", True, "Show the YouTube queue (Up next)", AP,
        "Only appears once a YouTube video plays or something is queued."),
-    _s("ui.panel_activity", "bool", True, "Show the activity feed", UI),
-    _s("ui.markers", "bool", True, "Show friends on the seek bar", UI),
-    _s("ui.end_clock", "bool", True, "Show when the film ends", UI),
-    _s("ui.toasts", "bool", True, "Show short messages over the video", UI),
-    _s("ui.remaining", "bool", True, "Show time remaining", UI, advanced=True),
-    _s("ui.hover_time", "bool", True, "Show the time when hovering over the seek bar", UI,
+    _s("ui.panel_activity", "bool", True, "Show the activity feed", AP),
+    _s("ui.markers", "bool", True, "Show friends on the seek bar", AP),
+    _s("ui.end_clock", "bool", True, "Show when the film ends", AP),
+    _s("ui.toasts", "bool", True, "Show short messages over the video", AP),
+    _s("ui.remaining", "bool", True, "Show time remaining", AP, advanced=True),
+    _s("ui.hover_time", "bool", True, "Show the time when hovering over the seek bar", AP,
        advanced=True),
-    _s("ui.center_flash", "bool", True, "Flash the play/pause symbol", UI, advanced=True),
-    _s("ui.sidebar_in_fullscreen", "bool", False, "Keep the sidebar in fullscreen", UI, advanced=True),
-    _s("ui.hide_delay_ms", "int", 2500, "Hide controls in fullscreen after", UI, advanced=True,
+    _s("ui.center_flash", "bool", True, "Flash the play/pause symbol", AP, advanced=True),
+    _s("ui.sidebar_in_fullscreen", "bool", False, "Keep the sidebar in fullscreen", AP, advanced=True),
+    _s("ui.hide_delay_ms", "int", 2500, "Hide controls in fullscreen after", AP, advanced=True,
        minimum=500, maximum=15000, suffix=" ms"),
-    _s("ui.toast_s", "int", 5, "Show messages for", UI, advanced=True, minimum=1, maximum=30, suffix=" s"),
-    _s("ui.activity_max", "int", 200, "Activity feed length", UI, advanced=True,
+    _s("ui.toast_s", "int", 5, "Show messages for", AP, advanced=True, minimum=1, maximum=30, suffix=" s"),
+    _s("ui.activity_max", "int", 200, "Activity feed length", AP, advanced=True,
        minimum=20, maximum=2000, suffix=" entries"),
-    _s("ui.startup_checks", "choice", "problems", "Show the startup checks", UI, advanced=True,
-       choices=[("problems", "Only when there's a problem"), ("always", "Always"), ("never", "Never")]),
-    _s("ui.video_selftest", "bool", True, "Test video playback at startup", UI,
-       "Plays a tiny test video for about a second to make sure films will play.", advanced=True),
-    _s("ui.window_geometry", "str", "", "Window position", UI, hidden=True, max_len=4000),
-    _s("ui.splitter", "str", "", "Sidebar width", UI, hidden=True, max_len=4000),
+    _s("ui.window_geometry", "str", "", "Window position", AP, hidden=True, max_len=4000),
+    _s("ui.splitter", "str", "", "Sidebar width", AP, hidden=True, max_len=4000),
 
-    # ---- Keyboard ---------------------------------------------------------------------
-    _s("keys.play_pause", "keys", "Space", "Play / pause", KB, advanced=True),
-    _s("keys.back", "keys", "Left", "Skip back", KB, advanced=True),
-    _s("keys.forward", "keys", "Right", "Skip forward", KB, advanced=True),
-    _s("keys.back_big", "keys", "Shift+Left", "Big skip back", KB, advanced=True),
-    _s("keys.forward_big", "keys", "Shift+Right", "Big skip forward", KB, advanced=True),
-    _s("keys.volume_up", "keys", "Up", "Volume up", KB, advanced=True),
-    _s("keys.volume_down", "keys", "Down", "Volume down", KB, advanced=True),
-    _s("keys.mute", "keys", "M", "Mute", KB, advanced=True),
-    _s("keys.fullscreen", "keys", "F", "Fullscreen", KB, advanced=True),
-    _s("keys.sync_me", "keys", "S", "Sync me (jump only myself)", KB, advanced=True),
-    _s("keys.sync_up", "keys", "Ctrl+S", "Sync up (everyone)", KB, advanced=True),
-    _s("keys.ready", "keys", "R", "Ready check (host) / I'm ready", KB, advanced=True),
-    _s("keys.next_episode", "keys", "N", "Next episode", KB, advanced=True),
-    _s("keys.night_mode", "keys", "Alt+N", "Night mode on/off", KB, advanced=True),
-    _s("keys.skip_intro", "keys", "I", "Skip the intro", KB, advanced=True),
-    _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB, advanced=True),
-    _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB, advanced=True),
-    _s("keys.subs_later", "keys", "X", "Subtitles later", KB, advanced=True),
-    _s("keys.audio_earlier", "keys", "Alt+Z", "Sound earlier", KB, advanced=True),
-    _s("keys.audio_later", "keys", "Alt+X", "Sound later", KB, advanced=True),
-    _s("keys.sidebar", "keys", "Tab", "Show/hide sidebar", KB, advanced=True),
-    _s("keys.open", "keys", "Ctrl+O", "Library (your films)", KB, advanced=True),
-    _s("keys.youtube", "keys", "Ctrl+L", "Open a YouTube link", KB, advanced=True),
-    _s("keys.chat", "keys", "T", "Write in the room chat", KB, advanced=True),
-    _s("keys.settings", "keys", "Ctrl+,", "Settings", KB, advanced=True),
-    _s("keys.help", "keys", "F1", "Keyboard shortcuts", KB, advanced=True),
+    # ---- Keyboard shortcuts -----------------------------------------------------------
+    _s("keys.play_pause", "keys", "Space", "Play / pause", KB),
+    _s("keys.back", "keys", "Left", "Skip back", KB),
+    _s("keys.forward", "keys", "Right", "Skip forward", KB),
+    _s("keys.back_big", "keys", "Shift+Left", "Big skip back", KB),
+    _s("keys.forward_big", "keys", "Shift+Right", "Big skip forward", KB),
+    _s("keys.volume_up", "keys", "Up", "Volume up", KB),
+    _s("keys.volume_down", "keys", "Down", "Volume down", KB),
+    _s("keys.mute", "keys", "M", "Mute", KB),
+    _s("keys.fullscreen", "keys", "F", "Fullscreen", KB),
+    _s("keys.sync_me", "keys", "S", "Sync me (jump only myself)", KB),
+    _s("keys.sync_up", "keys", "Ctrl+S", "Sync up (everyone)", KB),
+    _s("keys.ready", "keys", "R", "Ready check (host) / I'm ready", KB),
+    _s("keys.next_episode", "keys", "N", "Next episode", KB),
+    _s("keys.night_mode", "keys", "Alt+N", "Night mode on/off", KB),
+    _s("keys.skip_intro", "keys", "I", "Skip the intro", KB),
+    _s("keys.subs_toggle", "keys", "C", "Subtitles on/off", KB),
+    _s("keys.subs_earlier", "keys", "Z", "Subtitles earlier", KB),
+    _s("keys.subs_later", "keys", "X", "Subtitles later", KB),
+    _s("keys.audio_earlier", "keys", "Alt+Z", "Sound earlier", KB),
+    _s("keys.audio_later", "keys", "Alt+X", "Sound later", KB),
+    _s("keys.sidebar", "keys", "Tab", "Show/hide sidebar", KB),
+    _s("keys.open", "keys", "Ctrl+O", "Library (your films)", KB),
+    _s("keys.youtube", "keys", "Ctrl+L", "Open a YouTube link", KB),
+    _s("keys.chat", "keys", "T", "Write in the room chat", KB),
+    _s("keys.settings", "keys", "Ctrl+,", "Settings", KB),
+    _s("keys.help", "keys", "F1", "Keyboard shortcuts", KB),
 
-    # ---- Updates ----------------------------------------------------------------------
-    _s("updates.auto_check", "bool", True, "Check for updates automatically", UP,
+    # ---- Updates & help: updates, the startup checks, the log -------------------------
+    _s("updates.auto_check", "bool", True, "Check for updates automatically", UH,
        "Looks for a new version when SyncWatch starts. Nothing is downloaded until you click Update."),
-    _s("updates.test_versions", "bool", False, "Get test versions", UP,
+    _s("updates.test_versions", "bool", False, "Get test versions", UH,
        "Test versions come out first to try new things, and may have more bugs. Leave this off "
        "unless you're helping to test.", advanced=True),
-    _s("updates.check_hours", "int", 6, "Check at most every", UP,
+    _s("updates.check_hours", "int", 6, "Check at most every", UH,
        "Avoids asking GitHub more often than needed.", advanced=True, minimum=1, maximum=168, suffix=" h"),
-    _s("updates.skip_version", "str", "", "Skipped version", UP, hidden=True, max_len=40),
-    _s("updates.last_check", "float", 0.0, "Last check", UP, hidden=True, minimum=0.0, maximum=4e9),
+    _s("updates.skip_version", "str", "", "Skipped version", UH, hidden=True, max_len=40),
+    _s("updates.last_check", "float", 0.0, "Last check", UH, hidden=True, minimum=0.0, maximum=4e9),
 
-    # ---- Diagnostics ------------------------------------------------------------------
-    _s("log.debug", "bool", False, "Detailed logging", DG,
+    _s("ui.startup_checks", "choice", "problems", "Show the startup checks", UH, advanced=True,
+       choices=[("problems", "Only when there's a problem"), ("always", "Always"), ("never", "Never")]),
+    _s("ui.video_selftest", "bool", True, "Test video playback at startup", UH,
+       "Plays a tiny test video for about a second to make sure films will play.", advanced=True),
+    _s("log.debug", "bool", False, "Detailed logging", UH,
        "Writes much more to the log file. Useful when hunting a problem.", advanced=True),
-    _s("log.keep", "int", 5, "Log files to keep", DG, advanced=True, minimum=1, maximum=50),
+    _s("log.keep", "int", 5, "Log files to keep", UH, advanced=True, minimum=1, maximum=50),
 ]
 
 BY_KEY: Dict[str, Setting] = {s.key: s for s in SCHEMA}

@@ -121,7 +121,7 @@ class CheckToolTests(unittest.TestCase):
             if client == "web_safari":
                 return {"error": "bot", "message": "Sign in to confirm you're not a bot. https://x.example/a",
                         "warnings": []}
-            if ip == 6 or (client == "" and ip == 0):           # 0.5.1's way: YouTube refuses the picture
+            if ip == 6 or (client == "" and ip == 0):           # the first way: YouTube refuses the picture
                 return answer(base, picture="refused")
             return answer(base, client="WEB" if client else "TVHTML5")
 
@@ -130,8 +130,8 @@ class CheckToolTests(unittest.TestCase):
             report = youtube_check.check(VIDEO, show=False)
         text = "\n".join(report)
         rows = {line.split("  ")[0]: line for line in report if line.startswith(("as SyncWatch", "the same", "TV", "Safari"))}
-        self.assertIn("refused (403)", rows["as SyncWatch 0.5.1 does"])
-        self.assertTrue(rows["as SyncWatch 0.5.1 does"].rstrip().endswith("refused (403)"))   # mpv: the same
+        self.assertIn("refused (403)", rows["as SyncWatch asks first"])
+        self.assertTrue(rows["as SyncWatch asks first"].rstrip().endswith("refused (403)"))   # mpv: the same
         self.assertTrue(rows["TV app (tv)"].rstrip().endswith("plays"), rows["TV app (tv)"])
         self.assertIn("240p vp9+opus · WEB", rows["TV app (tv)"])
         self.assertIn("not found: bot", rows["Safari (web_safari)"])
@@ -149,15 +149,15 @@ class CheckToolTests(unittest.TestCase):
     def test_what_the_result_says(self):
         def row(name, picture="ok", sound="ok", played="plays"):
             return (name, "720p vp9+opus · TVHTML5", picture, sound, played)
-        works = youtube_check.verdict([row("as SyncWatch 0.5.1 does")], True, True)
+        works = youtube_check.verdict([row("as SyncWatch asks first")], True, True)
         self.assertIn("works on this PC right now", works[0])
-        ipv6 = youtube_check.verdict([row("as SyncWatch 0.5.1 does", "refused (403)", played="refused (403)"),
+        ipv6 = youtube_check.verdict([row("as SyncWatch asks first", "refused (403)", played="refused (403)"),
                                       row("the same, IPv4 only", played="-"),
                                       row("the same, IPv6 only", "refused (403)", "refused (403)", "-")], True, True)
         self.assertIn("Over IPv4 YouTube sends the streams, over IPv6 it refuses them.", ipv6)
         self.assertIn("mpv played none of them, but YouTube sent the streams to Python for: the same, IPv4 only",
                       ipv6[0])
-        nothing = youtube_check.verdict([row("as SyncWatch 0.5.1 does", "refused (403)", "refused (403)",
+        nothing = youtube_check.verdict([row("as SyncWatch asks first", "refused (403)", "refused (403)",
                                              "refused (403)")], True, False)
         self.assertIn("none of the ways worked", nothing[0])
         self.assertIn("no IPv6 connection", " ".join(nothing))

@@ -162,6 +162,14 @@ def run_script(errors_seen):
     window.lobby.alone_button.click()
     spin(0.3)
     lobby["Watch alone shows the start screen"] = window.stack.currentWidget() is window.idle
+    lobby["🏠 at the top left"] = window.top_bar.isVisible() and window.top_bar.lobby.isVisible() and \
+        window.top_bar.lobby.mapTo(window, QPoint(0, 0)).y() < 40 and \
+        window.top_bar.lobby.mapTo(window, QPoint(0, 0)).x() < 40
+    header = window.sidebar.settings_button
+    lobby["⚙ and your picture at the top right"] = header.isVisible() and window.sidebar.profile_button.isVisible() \
+        and header.mapTo(window, QPoint(0, 0)).x() > window.width() - 120 and \
+        header.mapTo(window, QPoint(0, 0)).y() < 50
+    lobby["no ⚙ in the control bar"] = not hasattr(window.controls, "settings")
     lobby["the control bar is back"] = window.controls.isVisible()
     lobby["the room panel is back"] = window.sidebar.room.isVisible()
     print("LOBBY CHECKS:", lobby)
@@ -288,9 +296,10 @@ def run_script(errors_seen):
     print("CHAT CHECKS:", checks)
     FAILED.extend(name for name, ok in checks.items() if not ok)
     # 🏠 (0.5.2): back to the lobby; hosting alone, the room just closes (nobody to ask about)
-    window.controls.lobby.click()
+    window.top_bar.lobby.click()
     spin(0.5)
     checks = {"🏠 goes back to the lobby": window.stack.currentWidget() is window.lobby,
+              "no top bar in the lobby": not window.top_bar.isVisible(),
               "and leaves the room": not window.controller.connected and not window.controller.session.is_host,
               "nothing open any more": not window.player.has_media()}
     print("LOBBY BUTTON CHECKS:", checks)
@@ -301,15 +310,15 @@ def run_script(errors_seen):
     dialog.show()
     spin(0.3)
     shot_widget(dialog, "06_settings")
-    together = dialog.sections["Watching together"]
+    together = dialog.sections["Sync"]
     checks = {"advanced folded at first": not together.advanced_box.isVisible(),
               "every section in the list": dialog.nav.count() == len(dialog.sections)}
-    dialog.set_advanced_open("Watching together", True)
-    dialog.show_section("Watching together")
+    dialog.set_advanced_open("Sync", True)
+    dialog.show_section("Sync")
     spin(0.3)
     checks["advanced unfolds"] = together.advanced_box.isVisible()
-    shot_widget(dialog, "07_settings_advanced_together")
-    dialog.set_advanced_open("Watching together", False)
+    shot_widget(dialog, "07_settings_advanced_sync")
+    dialog.set_advanced_open("Sync", False)
     dialog.search.setText("jump")
     spin(0.3)
     shown = [key for key, widgets in dialog.rows.items() if widgets[0].isVisible()]

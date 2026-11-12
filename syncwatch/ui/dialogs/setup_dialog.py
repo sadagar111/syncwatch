@@ -1,10 +1,12 @@
-"""First launch: your name, an optional picture and where your films are."""
+"""First launch: your name, an optional picture and where your films are.
+Later (the profile button at the top right, 0.5.2): your name, picture and friend ID."""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QVBoxLayout)
 
@@ -14,8 +16,9 @@ from .avatar_editor import choose_avatar
 
 
 class SetupDialog(QDialog):
-    def __init__(self, settings, avatar: Optional[bytes], first_time: bool = True, parent=None):
+    def __init__(self, settings, avatar: Optional[bytes], first_time: bool = True, parent=None, friend_id: str = ""):
         super().__init__(parent)
+        self.first_time = first_time
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips)
         self.settings = settings
         self.avatar = avatar
@@ -52,8 +55,25 @@ class SetupDialog(QDialog):
         form = QFormLayout()
         form.addRow("Your name", self.name)
         form.addRow("Picture (optional)", picture_row)
-        form.addRow("Films folder", folder_row)
-        hint = QLabel("Everything here can be changed later in Settings.")
+        if first_time:
+            form.addRow("Films folder", folder_row)
+        else:
+            for widget in (self.folder, browse):
+                widget.hide()
+        if friend_id:
+            self.friend_id = QLabel(friend_id)
+            self.friend_id.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.friend_id.setToolTip("Made from this PC's own keys. Friends see it next to your name, so nobody can "
+                                      "pretend to be you by using your name.")
+            copy = QPushButton("Copy")
+            copy.clicked.connect(lambda: QGuiApplication.clipboard().setText(friend_id))
+            id_row = QHBoxLayout()
+            id_row.addWidget(self.friend_id)
+            id_row.addWidget(copy)
+            id_row.addStretch(1)
+            form.addRow("Your ID", id_row)
+        hint = QLabel("Everything here can be changed later in Settings." if first_time else
+                      "More in Settings: rooms, friends, playback and the rest.")
         hint.setObjectName("Hint")
 
         self.ok = QPushButton("Start watching" if first_time else "Save")
@@ -101,10 +121,11 @@ class SetupDialog(QDialog):
 
     def _save(self) -> None:
         self.settings.set("profile.name", self.name.text().strip())
-        folder = self.folder.text().strip()
-        if folder and Path(folder) == paths.DEFAULT_MOVIES_DIR:
-            folder = ""
-        self.settings.set("paths.movies_dir", folder)
+        if self.first_time:
+            folder = self.folder.text().strip()
+            if folder and Path(folder) == paths.DEFAULT_MOVIES_DIR:
+                folder = ""
+            self.settings.set("paths.movies_dir", folder)
         self.settings.save()
         self.accept()
 

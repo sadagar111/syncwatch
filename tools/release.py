@@ -541,7 +541,7 @@ def cmd_publish(args) -> None:
         if online != manifest_bytes:
             raise Stop("GitHub's manifest.json differs from the one just built. Don't share this release; ask Claude.")
     say(f"\nPublished SyncWatch {version}. Friends' apps will offer it within a few hours, or right away "
-        "with Settings > Updates > Check now.")
+        "with Settings > Updates & help > Check now.")
 
 
 # =============================================================== entry

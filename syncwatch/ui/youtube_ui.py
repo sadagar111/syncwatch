@@ -14,7 +14,7 @@ import time
 import urllib.request
 from urllib.parse import quote
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
@@ -202,6 +202,26 @@ class YouTube(QObject):
         self.busy.emit(f"Finding the YouTube video {ref.id}…")
         return True
 
+    def ask_again(self, video_id: str, start_s: int, refused: str, tried: List[str], quiet: bool = False) -> bool:
+        """YouTube refused the streams it gave its app ``refused`` ("TVHTML5", HTTP 403): ask yt-dlp
+        again as other apps (streams.next_way). ``tried`` holds the ways asked already (one is added).
+        False if there's no way left, or YouTube can't be asked here."""
+        way = streams.next_way(refused, tried)
+        if way is None or self.check():
+            return False
+        tried.append(way)
+        log.info("YouTube refused the streams of %s (%s client): asking again as %s (try %d of %d)",
+                 video_id, refused or "?", way, len(tried), streams.MAX_TRIES)
+        self._cache.pop(video_id, None)            # (that stream is the one refused)
+        self._drop_job()
+        job = self._new_job(video_id, client=way)
+        self._job, self._job_start, self._job_quiet = job, max(0, int(start_s)), quiet
+        job.found.connect(self._found)
+        job.failed.connect(self._failed)
+        job.start()
+        self.busy.emit(f"YouTube refused that stream, asking again another way ({len(tried)}/{streams.MAX_TRIES})…")
+        return True
+
     def prefetch(self, video_id: str) -> None:
         """Look a video up ahead (the next one in the queue), so it starts at once later."""
         if not links.is_video_id(video_id) or self._cached(video_id) is not None or video_id in self._prefetch \
@@ -228,7 +248,7 @@ class YouTube(QObject):
         self._playlist_jobs.clear()
 
     # ------------------------------------------------------------ results
-    def _new_job(self, video_id: str) -> ResolveJob:
+    def _new_job(self, video_id: str, client: str = "") -> ResolveJob:
         arguments = ["--height", str(self.settings.get("youtube.quality")),
                      "--codecs", str(self.settings.get("youtube.codecs")),
                      "--cache", str(self.cache_dir / "yt-dlp"),
@@ -238,6 +258,8 @@ class YouTube(QObject):
             arguments += ["--js", f"deno={deno}"]
         if self.engine() == "qt":
             arguments.append("--combined")
+        if client:
+            arguments += ["--client", client]
         return ResolveJob(video_id, arguments, int(self.settings.get("youtube.timeout_s")), self)
 
     def fetch_captions(self, video_id: str, lang: str, auto: bool, out: Path,

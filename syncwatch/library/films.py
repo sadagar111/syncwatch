@@ -1,7 +1,7 @@
 """The library folder: listing films, adding one (a copy, with progress), spotting duplicates.
 
 "Add film" copies a film from anywhere (Downloads, a USB stick, another drive) into the
-library folder (Settings > Playback > Library folder, normally "movies" next to
+library folder (Settings > Downloads & library > Library folder, normally "movies" next to
 SyncWatch). The original stays where it was.
 
 A copy is written to "<name>.part" first and only gets its real name once it's complete,

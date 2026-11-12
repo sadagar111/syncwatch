@@ -1,6 +1,6 @@
 """The sidebar: your room, who's watching, your friends, and what happened (activity feed).
 
-Each panel can be hidden in Settings > Interface, and the whole sidebar with
+Each panel can be hidden in Settings > Appearance, and the whole sidebar with
 the ☰ button or the Tab key. The panels only show things; the main window
 decides what happens when you click (signals).
 """
@@ -10,13 +10,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
                                QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__
-from .qtutil import asset_pixmap, avatar_pixmap
+from .qtutil import IconButton, asset_pixmap, avatar_pixmap
 
 
 class Panel(QFrame):
@@ -586,6 +586,9 @@ class UpdateBanner(QFrame):
 
 
 class Sidebar(QWidget):
+    profileClicked = Signal()
+    settingsClicked = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumWidth(260)
@@ -602,6 +605,18 @@ class Sidebar(QWidget):
         header.addWidget(title)
         header.addWidget(version)
         header.addStretch(1)
+        # top right (0.5.2): your profile, and the settings next to it
+        self.profile_button = QToolButton()
+        self.profile_button.setObjectName("ProfileButton")
+        self.profile_button.setIconSize(QSize(28, 28))
+        self.profile_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.profile_button.setToolTip("Your profile: name, picture and friend ID")
+        self.profile_button.clicked.connect(self.profileClicked)
+        self.settings_button = IconButton("settings", "⚙", "Settings")
+        self.settings_button.clicked.connect(self.settingsClicked)
+        header.addWidget(self.profile_button)
+        header.addWidget(self.settings_button)
+        self.set_profile_picture(None)
         self.update_banner = UpdateBanner()
         self.share_banner = ShareBanner()
         self.room = RoomPanel()
@@ -623,6 +638,9 @@ class Sidebar(QWidget):
         layout.addStretch(0)     # (takes the room left only while the activity feed is hidden, as in the lobby)
         self._lobby = False
         self._settings = None
+
+    def set_profile_picture(self, avatar: Optional[bytes]) -> None:
+        self.profile_button.setIcon(QIcon(avatar_pixmap(avatar, 28)))
 
     def set_lobby(self, on: bool) -> None:
         """In the lobby only your friends show (and an update, if there is one)."""

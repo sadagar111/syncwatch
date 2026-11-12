@@ -6,7 +6,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider, QToolButton,
-                               QVBoxLayout)
+                               QVBoxLayout, QWidget)
 
 from ..sync.controller import fmt_time
 from .qtutil import IconButton
@@ -32,11 +32,9 @@ class ControlBar(QFrame):
     volumeChanged = Signal(int)
     fullscreenClicked = Signal()
     sidebarClicked = Signal()
-    settingsClicked = Signal()
     openClicked = Signal()          # 📂 > Your films (the library)
     linkClicked = Signal()          # 📂 > Open a link (YouTube, magnet or web link)
     torrentFileClicked = Signal()   # 📂 > Open a .torrent file
-    lobbyClicked = Signal()         # 🏠 back to the lobby
     reactionChosen = Signal(str)
 
     def __init__(self, colors: dict, parent=None):
@@ -88,7 +86,6 @@ class ControlBar(QFrame):
         self.volume_label.setMinimumWidth(38)
         self.fullscreen = IconButton("fullscreen", "⛶", "Fullscreen (F)")
         self.sidebar = IconButton("sidebar", "☰", "Show/hide the sidebar (Tab)")
-        self.settings = IconButton("settings", "⚙", "Settings")
         self.open = IconButton("open", "📂", "Open: your films, a link or a .torrent file")
         self.open.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.open_menu = QMenu(self.open)
@@ -97,8 +94,6 @@ class ControlBar(QFrame):
         self.open_menu.addAction("📁  Open a .torrent file…", self.torrentFileClicked.emit)
         self.open.setMenu(self.open_menu)
         self.set_open_keys("", "")
-        self.lobby = IconButton("lobby", "🏠", "Back to the lobby (closes what's open; in a room, leaves it)")
-        self.lobby.clicked.connect(self.lobbyClicked)
         self.skip_intro = QPushButton("Skip intro ⏭")
         self.skip_intro.setToolTip("Jump to the end of this intro, opening or recap (key I)")
         self.skip_intro.setObjectName("Attention")
@@ -113,18 +108,17 @@ class ControlBar(QFrame):
         self.volume.valueChanged.connect(self.volumeChanged)
         self.fullscreen.clicked.connect(self.fullscreenClicked)
         self.sidebar.clicked.connect(self.sidebarClicked)
-        self.settings.clicked.connect(self.settingsClicked)
         self.skip_intro.clicked.connect(self.skipIntroClicked)
 
         row2 = QHBoxLayout()
-        for widget in (self.lobby, self.open, self.back, self.play, self.forward, self.skip_intro):
+        for widget in (self.open, self.back, self.play, self.forward, self.skip_intro):
             row2.addWidget(widget)
         row2.addSpacing(10)
         for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label, self.react):
             row2.addWidget(widget)
         row2.addStretch(1)
         for widget in (self.subs, self.mute, self.volume, self.volume_label, self.fullscreen,
-                       self.sidebar, self.settings):
+                       self.sidebar):
             row2.addWidget(widget)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 4, 10, 8)
@@ -211,3 +205,27 @@ class ControlBar(QFrame):
             self.fullscreen.set_face("exit_fullscreen", "⛶ Exit")
         else:
             self.fullscreen.set_face("fullscreen", "⛶")
+
+
+class TopBar(QWidget):
+    """Above the picture (0.5.2): 🏠 back to the lobby, and what's open. Not in the lobby itself,
+    not in fullscreen."""
+    lobbyClicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lobby = IconButton("lobby", "🏠", "Back to the lobby (closes what's open; in a room, leaves it)")
+        self.lobby.clicked.connect(self.lobbyClicked)
+        self.title = QLabel("")
+        self.title.setObjectName("Dim")
+        self.title.setTextFormat(Qt.TextFormat.PlainText)      # (a film's name or a video's title)
+        self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        row.addWidget(self.lobby)
+        row.addWidget(self.title, 1)
+
+    def set_title(self, text: str) -> None:
+        self.title.setText(text)
+        self.title.setToolTip(text)

@@ -1,27 +1,34 @@
-# Testing 0.5.2 (in progress): branch `v0.5.2-qol`
+# Testing 0.5.2: branch `v0.5.2-qol`
 
 1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch v0.5.2-qol`, then start `SyncWatch.bat`.
    Back to the published version: `git switch main`.
-2. **First, the YouTube check** (it tells me why YouTube videos don't play on your PC):
-   `tools\youtube_check.bat`, about a minute. Send me its text, or the `youtube_check.txt` it saves.
-   (No stream or IP addresses in it.)
-3. Then:
+2. Then:
 
 ## Q. Quality of life
 - [ ] **Q1** SyncWatch starts in the **lobby**: Host a room, Join a room (code box), Watch alone, Settings, with
       your friends on the right. Host / Join / Watch alone lead to the start screen (your films, links, Ideas).
-- [ ] **Q2** **🏠** (bottom left) goes back to the lobby and closes what's open. In a room with others it asks
-      first (it leaves the room; as host, it closes it for everyone).
+- [ ] **Q2** **🏠** at the top left goes back to the lobby and closes what's open. In a room with others it asks
+      first (it leaves the room; as host, it closes it for everyone). Leaving a room also goes back to the lobby.
 - [ ] **Q3** **📂** (bottom left) is a menu: Your films… / Open a link… / Open a .torrent file…, with the shortcuts.
 - [ ] **Q4** The background is **black**.
-- [ ] **Q5** **Settings** is one page, top to bottom: the sections on the left jump there, the search box at the
-      top finds settings (advanced ones too), and each section ends with a folded **Advanced** part
+- [ ] **Q5** **⚙ and your picture** are at the top right (⚙ is gone from the control bar). Your picture opens your
+      profile: name, picture, your ID (Copy).
+- [ ] **Q6** **Settings** is one page, top to bottom: Profile, Playback, Subtitles, Rooms & friends, Sync, YouTube,
+      Downloads & library, Ideas, Appearance, Keyboard shortcuts, Updates & help. The list on the left jumps, the
+      search box finds settings (advanced ones too), each section ends with a folded **Advanced** part
       ("Advanced (10) · 2 changed" when you changed some). Esc empties the search, then closes.
-- [ ] **Q6** The **log** is written again: Settings > Diagnostics > Open log folder: `syncwatch.log` has today's
-      date, and the startup checks say *Log file: writing syncwatch.log*. If it says *keeps growing*, another
+- [ ] **Q7** The **log** is written again: Settings > Updates & help > Open log folder: `syncwatch.log` has today's
+      date, and the startup checks say *Log file: writing syncwatch.log*. If they say *keeps growing*, another
       program has the old file open (SW-113).
-- [ ] **Q7** The log and *Copy report* show addresses only up to the website's name
+- [ ] **Q8** The log and *Copy report* show addresses only up to the website's name
       (`https://rr4---sn-….googlevideo.com/…`), never a whole link.
+- [ ] **Q9** **YouTube** videos play. If YouTube refuses a stream (it did on 11 Nov), the Activity panel says
+      *YouTube refused that stream; SyncWatch asks again another way* and the video plays anyway. You can't make
+      YouTube do that on purpose: just watch whether SW-609 still shows up. `tools\youtube_check.bat` says which
+      ways work on a PC.
+
+When it's good: I open the pull request (when you say so), you merge it, then `git switch main`, `git pull` and
+`tools\release.bat publish`. Before that, `tools\update_youtube_parts.bat` shows whether a newer yt-dlp is out.
 
 ---
 

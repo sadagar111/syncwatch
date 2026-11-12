@@ -43,7 +43,7 @@ POSTER = QSize(120, 180)
 GRID = QSize(142, 238)
 KEY_HELP = ("Recommendations, posters and trailers come from TMDB (The Movie Database). It's free: "
             "sign up at themoviedb.org, open Settings > API, ask for a key (personal use), then copy the "
-            "\"API Read Access Token\" into Settings > Discover > TMDB key.")
+            "\"API Read Access Token\" into Settings > Ideas > TMDB key.")
 def relay_help() -> str:
     problem = errors.problem("SW-636")
     return f"{problem.title}. {problem.explanation} {problem.tips[0]}"
@@ -804,7 +804,7 @@ class Discover(QObject):
         elif not self.key():
             self.dialog.set_note(relay_help() if self._relay_refused > 0 else KEY_HELP)
         else:
-            self.dialog.set_note("The TMDB key in Settings > Discover doesn't look right: copy the \"API Read "
+            self.dialog.set_note("The TMDB key in Settings > Ideas doesn't look right: copy the \"API Read "
                                  "Access Token\" (long) or the \"API Key\" (32 letters and digits) again.")
 
     def _fill_mine(self) -> None:

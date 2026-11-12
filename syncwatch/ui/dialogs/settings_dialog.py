@@ -156,7 +156,8 @@ class SettingsDialog(QDialog):
                 section.toggle = QToolButton()
                 section.toggle.setObjectName("AdvancedToggle")
                 section.toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-                section.toggle.clicked.connect(lambda _=False, n=name: self.set_advanced_open(n, not self.sections[n].open))
+                section.toggle.clicked.connect(
+                    lambda _=False, n=name: self.set_advanced_open(n, not self.sections[n].open))
                 section.layout.addWidget(section.toggle, alignment=Qt.AlignmentFlag.AlignLeft)
                 section.advanced_box = QWidget()
                 section.advanced_box.setObjectName("AdvancedBox")
@@ -274,12 +275,14 @@ class SettingsDialog(QDialog):
             if section.extras is not None:
                 section.extras.setVisible(not self._searching or whole)
             if section.toggle is not None:
-                section.toggle.setVisible(not self._searching or whole or any(k in matches for k in section.advanced_keys))
+                advanced_match = any(k in matches for k in section.advanced_keys)
+                section.toggle.setVisible(not self._searching or whole or advanced_match)
             self._show_advanced(section)
             visible = not self._searching or whole or bool(matches)
             section.frame.setVisible(visible)
             item = self.nav.item(index)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEnabled if visible else item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            enabled = Qt.ItemFlag.ItemIsEnabled
+            item.setFlags(item.flags() | enabled if visible else item.flags() & ~enabled)
             found += len(matches) if self._searching else 0
         self.nothing.setVisible(self._searching and found == 0)
         self.nothing.setText(f"No setting matches “{self.search.text().strip()}”." if self._searching else "")
@@ -506,7 +509,7 @@ class SettingsDialog(QDialog):
 
 
 def diagnostics_extras(logs_dir, copy_report: Callable[[], None], rerun_checks: Callable[[], None]):
-    """Buttons for the Diagnostics tab."""
+    """Buttons for the log and the startup checks (in Updates & help)."""
     def add(column: QVBoxLayout) -> None:
         row = QHBoxLayout()
         open_logs = QPushButton("Open log folder")
@@ -526,7 +529,7 @@ def diagnostics_extras(logs_dir, copy_report: Callable[[], None], rerun_checks: 
 
 def profile_extras(get_avatar: Callable[[], Optional[bytes]], change_avatar: Callable[[], None],
                    remove_avatar: Callable[[], None]):
-    """Picture controls for the Profile tab."""
+    """Picture controls for the Profile section."""
     from ..qtutil import avatar_pixmap
 
     def add(column: QVBoxLayout) -> None:
@@ -553,7 +556,7 @@ def profile_extras(get_avatar: Callable[[], Optional[bytes]], change_avatar: Cal
 
 
 def updates_extras(controller, window):
-    """Version info and buttons for the Updates tab."""
+    """Version info and buttons for the updates (in Updates & help)."""
     def add(column: QVBoxLayout) -> None:
         info = QLabel(controller.describe())
         info.setWordWrap(True)
@@ -584,7 +587,7 @@ def updates_extras(controller, window):
 
 
 def rooms_extras(controller):
-    """Your ID, and the people you blocked (with Unblock), for the Watching together tab."""
+    """Your ID, and the people you blocked (with Unblock), for the Rooms & friends section."""
     def add(column: QVBoxLayout) -> None:
         store = controller.rooms.store
         identity = controller.rooms.identity.public

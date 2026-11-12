@@ -42,7 +42,7 @@ class UpdateDialog(QDialog):
         update.setDefault(True)
         update.clicked.connect(self.updateClicked)
         skip = QPushButton("Skip this version")
-        skip.setToolTip("Don't remind me about this version. You can still update in Settings > Updates.")
+        skip.setToolTip("Don't remind me about this version. You can still update in Settings > Updates & help.")
         skip.clicked.connect(lambda: (self.skipClicked.emit(), self.reject()))
         later = QPushButton("Later")
         later.clicked.connect(self.reject)

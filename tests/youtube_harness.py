@@ -52,11 +52,16 @@ from syncwatch.ui import youtube_ui  # noqa: E402
 from tests.media_maker import make_film  # noqa: E402
 
 FIRST, SECOND, GONE, THIRD = "firstvideo1", "secondvideo", "deletedvid1", "thirdvideo1"
+REFUSED = "refusedvid1"     # (0.5.2) its first address is refused, as YouTube did on Alex's PC
 CHECKS = {}
 web_dir = data_dir / "web"
 web_dir.mkdir()
-for video, seconds in ((FIRST, 4), (SECOND, 4), (THIRD, 4)):
+for video, seconds in ((FIRST, 4), (SECOND, 4), (THIRD, 4), (REFUSED, 4)):
     make_film(web_dir / f"{video}.mkv", seconds=seconds)
+# a "YouTube" answer whose picture address the server then refuses (HTTP 403)
+(web_dir / f"{REFUSED}.html").write_text(
+    f'<html><head><title>Harness video, refused at first</title></head><body>'
+    f'<video src="refused/{REFUSED}.mkv"></video></body></html>', encoding="utf-8")
 # YouTube's subtitles (0.5 captions): the first video is a page with the film and an English <track>,
 # which yt-dlp's generic code reads like YouTube's subtitle list
 CAPTION_TEXT = "Hello from the harness captions"
@@ -71,6 +76,14 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def do_GET(self):  # noqa: N802 - /refused/...: "403 Forbidden", like YouTube's stream servers did
+        if self.path.startswith("/refused/"):
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        super().do_GET()
+
 
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=str(web_dir)))
 threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -80,9 +93,11 @@ BASE = f"http://127.0.0.1:{server.server_address[1]}"
 _new_job = youtube_ui.YouTube._new_job
 
 
-def _local_job(self, video_id):
-    job = _new_job(self, video_id)
+def _local_job(self, video_id, client=""):
+    job = _new_job(self, video_id, client=client)
     page = f"{video_id}.html" if (web_dir / f"{video_id}.html").exists() else f"{video_id}.mkv"
+    if client:                    # asked again as another YouTube app: this time the address works
+        page = f"{video_id}.mkv"
     job._arguments += ["--test-url", f"{BASE}/{page}"]
     return job
 
@@ -163,6 +178,18 @@ def run_script():
     CHECKS["the line is there"] = subs.cues_at(1500) == [(CAPTION_TEXT, False)]
     CHECKS["kept for next time"] = (window.ctx.profile.cache_dir / "youtube-subtitles" / f"{FIRST}.en.vtt").exists()
     shot(window, "02_first_video")
+
+    # 1c. YouTube refuses the stream's address (HTTP 403, 0.5.2): SyncWatch asks again another way
+    window.open_youtube(youtube_ui.links.VideoRef(REFUSED))
+    CHECKS["a refused stream is asked for again and plays"] = spin(40, lambda: (
+        getattr(window.player, "stream", None) is not None and window.player.stream.id == REFUSED
+        and window.player.is_ready() and window.player.stream.video_url.endswith(f"/{REFUSED}.mkv")
+        and "/refused/" not in window.player.stream.video_url))
+    CHECKS["the activity says so"] = any("asks again another way" in window.sidebar.activity.list.item(i).text()
+                                         for i in range(window.sidebar.activity.list.count()))
+    CHECKS["asked as another app once"] = window._refused_ways.get(REFUSED) == ["web_safari"]
+    window.controller.toggle()
+    spin(5, lambda: playing(window, REFUSED))
 
     # 2. queue two more, one of them gone from "YouTube"; at the end the next one starts by itself
     for video in (SECOND, GONE, THIRD):
