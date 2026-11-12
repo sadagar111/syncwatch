@@ -1,7 +1,7 @@
 {
   "_help": "Colours are #RRGGBB, or #RRGGBBAA where AA is opacity (00 = invisible, FF = solid). Restart SyncWatch after changing this file. If it has a mistake, SyncWatch shows SW-112 and uses its built-in colours.",
   "colors": {
-    "window": "#101318",
+    "window": "#000000",
     "panel": "#121620E6",
     "panel_border": "#2A3140",
     "text": "#E8EAED",

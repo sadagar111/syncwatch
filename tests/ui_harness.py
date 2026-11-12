@@ -109,6 +109,35 @@ def scripted_exec(self):
     return 0
 
 
+def open_menu_checks(window):
+    """The 📂 button (0.5.2) is a menu: your films, a link, a .torrent file. The link window and the
+    file picker wait for an answer, so here they only note that they were asked for."""
+    from unittest import mock
+    from PySide6.QtWidgets import QFileDialog
+    from syncwatch.ui import main_window as main_window_module
+    asked = []
+    menu = window.controls.open_menu
+    actions = {action.text().split("\t")[0]: action for action in menu.actions()}
+    with mock.patch.object(main_window_module.LinkDialog, "exec", lambda self: asked.append("link") or 0), \
+            mock.patch.object(QFileDialog, "getOpenFileName", lambda *a, **k: asked.append("torrent") or ("", "")):
+        for text in ("🔗  Open a link…", "📁  Open a .torrent file…", "📂  Your films…"):
+            if text in actions:
+                actions[text].trigger()
+                spin(0.3)
+    library = next((w for w in QApplication.topLevelWidgets() if w.isVisible() and w.windowTitle() == "Library"), None)
+    checks = {"menu has films, link, .torrent": list(actions) == ["📂  Your films…", "🔗  Open a link…",
+                                                                   "📁  Open a .torrent file…"],
+              "the menu shows the shortcuts": [a.text().split("\t")[-1] for a in menu.actions()][:2] == ["Ctrl+O", "Ctrl+L"],
+              "Open a link asks for one": "link" in asked,
+              "Open a .torrent file picks one": "torrent" in asked,
+              "Your films opens the library": library is not None}
+    if library is not None:
+        shot_widget(library, "02b_library_window")
+        library.close()
+    print("OPEN MENU CHECKS:", checks)
+    FAILED.extend(name for name, ok in checks.items() if not ok)
+
+
 def run_script(errors_seen):
     spin(1.5)
     window = main_window()
@@ -122,6 +151,21 @@ def run_script(errors_seen):
               "room buttons hidden outside a room": not window.controls.sync_up.isVisible()}
     window.resize(1280, 760)
     spin(0.3)
+    # the lobby (0.5.2): what SyncWatch starts with
+    lobby = {"starts in the lobby": window.stack.currentWidget() is window.lobby,
+             "no control bar in the lobby": not window.controls.isVisible(),
+             "friends on the right": window.sidebar.friends.isVisible(),
+             "no room panels in the lobby": not (window.sidebar.room.isVisible() or window.sidebar.people.isVisible()
+                                                 or window.sidebar.activity.isVisible()),
+             "four cards": len(window.lobby.cards) == 4 and all(card.isVisible() for card in window.lobby.cards)}
+    shot("00_lobby")
+    window.lobby.alone_button.click()
+    spin(0.3)
+    lobby["Watch alone shows the start screen"] = window.stack.currentWidget() is window.idle
+    lobby["the control bar is back"] = window.controls.isVisible()
+    lobby["the room panel is back"] = window.sidebar.room.isVisible()
+    print("LOBBY CHECKS:", lobby)
+    FAILED.extend(name for name, ok in lobby.items() if not ok)
     idle = window.idle
     card = idle.library.parentWidget()
     middle = card.mapTo(idle, QPoint(card.width() // 2, 0)).x()
@@ -137,6 +181,7 @@ def run_script(errors_seen):
         window.player.seek(20_000)
         spin(1.5)
         shot("02_film_paused")
+        open_menu_checks(window)
         window.controller.toggle()
         spin(1.0)
         shot("03_playing")
@@ -242,16 +287,44 @@ def run_script(errors_seen):
     shot("05c_chat")
     print("CHAT CHECKS:", checks)
     FAILED.extend(name for name, ok in checks.items() if not ok)
+    # 🏠 (0.5.2): back to the lobby; hosting alone, the room just closes (nobody to ask about)
+    window.controls.lobby.click()
+    spin(0.5)
+    checks = {"🏠 goes back to the lobby": window.stack.currentWidget() is window.lobby,
+              "and leaves the room": not window.controller.connected and not window.controller.session.is_host,
+              "nothing open any more": not window.player.has_media()}
+    print("LOBBY BUTTON CHECKS:", checks)
+    FAILED.extend(name for name, ok in checks.items() if not ok)
     from syncwatch.ui.dialogs.settings_dialog import SettingsDialog
     dialog = SettingsDialog(window.settings)
-    dialog.resize(680, 600)
+    dialog.resize(940, 660)
     dialog.show()
     spin(0.3)
-    shot_widget(dialog, "06_settings_basic")
-    dialog.advanced.setChecked(True)
-    dialog.tabs.setCurrentIndex(3)
+    shot_widget(dialog, "06_settings")
+    together = dialog.sections["Watching together"]
+    checks = {"advanced folded at first": not together.advanced_box.isVisible(),
+              "every section in the list": dialog.nav.count() == len(dialog.sections)}
+    dialog.set_advanced_open("Watching together", True)
+    dialog.show_section("Watching together")
     spin(0.3)
-    shot_widget(dialog, "07_settings_advanced_sync")
+    checks["advanced unfolds"] = together.advanced_box.isVisible()
+    shot_widget(dialog, "07_settings_advanced_together")
+    dialog.set_advanced_open("Watching together", False)
+    dialog.search.setText("jump")
+    spin(0.3)
+    shown = [key for key, widgets in dialog.rows.items() if widgets[0].isVisible()]
+    checks["search finds advanced settings too"] = "sync.jump_start_ms" in shown and "sync.jump_mode" in shown
+    checks["search hides the rest"] = "subs.size_pct" not in shown and not dialog.sections["Subtitles"].frame.isVisible()
+    shot_widget(dialog, "07b_settings_search")
+    dialog.search.setText("no such setting at all")
+    spin(0.2)
+    checks["says when nothing matches"] = dialog.nothing.isVisible()
+    dialog.search.clear()
+    spin(0.2)
+    checks["everything back after the search"] = dialog.sections["Subtitles"].frame.isVisible() and \
+        not together.advanced_box.isVisible()
+    print("SETTINGS CHECKS:", checks)
+    FAILED.extend(name for name, ok in checks.items() if not ok)
     dialog.close()
     from syncwatch import errors
     errors.report("SW-403", "SSLCertVerificationError: certificate verify failed")

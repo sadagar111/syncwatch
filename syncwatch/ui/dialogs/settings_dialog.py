@@ -1,20 +1,23 @@
 """The settings window, built automatically from ``settings.SCHEMA``.
 
-Every change applies immediately. Each row has a ↺ button to put that one
-setting back to its default. Advanced settings only appear when "Show
-advanced options" is ticked; when they're hidden but some were changed, a
-note says so, so nothing changes behaviour "invisibly".
+One page, top to bottom (since 0.5.2), like most apps and websites: a list of the sections on
+the left to jump, a search box at the top, and in every section its usual settings, the
+section's own buttons, then a folded "Advanced" part with the rest. "Advanced (6) · 2 changed"
+says when something in there differs from the defaults, so nothing changes behaviour unseen.
+
+Every change applies immediately. Each row has a ↺ button to put that one setting back to its
+default.
 """
 from __future__ import annotations
 
 from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import QPoint, QTimer, QUrl, Qt
-from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QKeySequence
+from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-                               QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QMessageBox,
-                               QPushButton, QScrollArea, QSpinBox, QTabWidget, QToolButton, QToolTip,
-                               QVBoxLayout, QWidget)
+                               QGridLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QMessageBox, QPushButton, QScrollArea, QSpinBox, QToolButton,
+                               QToolTip, QVBoxLayout, QWidget)
 
 from ... import settings as settings_module
 from ...settings import SCHEMA, SECTIONS, Setting
@@ -56,52 +59,130 @@ class InfoBadge(QLabel):
         self.show_help()
 
 
+class _Section:
+    """One part of the settings page: its heading, the usual settings, the section's own buttons
+    ("extras"), then a folded Advanced part with the rest."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.frame = QWidget()
+        self.layout = QVBoxLayout(self.frame)
+        self.layout.setContentsMargins(0, 6, 0, 18)
+        self.layout.setSpacing(8)
+        self.heading = QLabel(name)
+        self.heading.setObjectName("SettingsHeading")
+        self.layout.addWidget(self.heading)
+        self.grid = _grid()
+        self.layout.addLayout(self.grid)
+        self.extras: Optional[QWidget] = None
+        self.toggle: Optional[QToolButton] = None
+        self.advanced_box: Optional[QWidget] = None
+        self.advanced_grid: Optional[QGridLayout] = None
+        self.basic_keys: List[str] = []
+        self.advanced_keys: List[str] = []
+        self.open = False                  # the Advanced part is unfolded (when not searching)
+
+
+def _grid() -> QGridLayout:
+    grid = QGridLayout()
+    grid.setColumnStretch(1, 1)
+    grid.setHorizontalSpacing(10)
+    grid.setVerticalSpacing(8)
+    return grid
+
+
+LABEL_WIDTH = 280       # every section's labels as wide: the controls line up all the way down
+EDITOR_WIDTH = 340      # text boxes and lists no wider than this (a folder or a key a bit more)
+ADVANCED_INDENT = 14    # the Advanced part starts this much further right, behind a thin line
+
+
 class SettingsDialog(QDialog):
+    """One page, top to bottom: every section with its settings, the advanced ones folded away at
+    the end of each section. The list on the left jumps to a section; the search box shows only
+    the settings that match (advanced ones included)."""
+
     def __init__(self, settings, extras: Optional[Dict[str, Callable[[QVBoxLayout], None]]] = None, parent=None):
-        """``extras`` maps a section name to a function that adds custom widgets to its tab."""
+        """``extras`` maps a section name to a function that adds custom widgets to its section."""
         super().__init__(parent)
         self.settings = settings
         self.setWindowTitle("SyncWatch settings")
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips)
         self.inline_help: List[QLabel] = []
-        self.resize(780, 580)
+        self.resize(940, 660)
         self.rows: Dict[str, List[QWidget]] = {}
         self.editors: Dict[str, QWidget] = {}
         self.resets: Dict[str, QToolButton] = {}
         self._loading = False
+        self._searching = False
 
-        self.advanced = QCheckBox("Show advanced options")
-        self.advanced.setChecked(settings.get("ui.show_advanced"))
-        self.advanced.toggled.connect(self._advanced_toggled)
-        self.tabs = QTabWidget()
-        self.section_tabs: Dict[str, int] = {}
-        for section in SECTIONS:
-            page = QWidget()
-            column = QVBoxLayout(page)
-            grid = QGridLayout()
-            grid.setColumnStretch(1, 1)
-            grid.setHorizontalSpacing(10)
-            grid.setVerticalSpacing(8)
-            row = 0
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("🔍  Search settings")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(lambda text: self._filter(scroll_up=True))
+
+        self.nav = QListWidget()
+        self.nav.setObjectName("SettingsNav")
+        self.nav.setFixedWidth(200)
+        self.nav.currentRowChanged.connect(self._nav_clicked)
+
+        page = QWidget()
+        self.page_layout = QVBoxLayout(page)
+        self.page_layout.setContentsMargins(4, 0, 16, 0)
+        self.sections: Dict[str, _Section] = {}
+        for name in SECTIONS:
+            section = _Section(name)
             for setting in SCHEMA:
-                if setting.section != section or setting.hidden or setting.key == "ui.show_advanced":
+                if setting.section != name or setting.hidden:
                     continue
-                row = self._add_row(grid, row, setting)
-            column.addLayout(grid)
-            if extras and section in extras:
-                extras[section](column)
-            if section == "Keyboard":
+                if setting.advanced:
+                    section.advanced_keys.append(setting.key)
+                else:
+                    section.basic_keys.append(setting.key)
+            row = 0
+            for key in section.basic_keys:
+                row = self._add_row(section.grid, row, settings_module.BY_KEY[key])
+            if extras and name in extras:
+                section.extras = QWidget()
+                extra_layout = QVBoxLayout(section.extras)
+                extra_layout.setContentsMargins(0, 0, 0, 0)
+                extras[name](extra_layout)
+                section.layout.addWidget(section.extras)
+            if any(settings_module.BY_KEY[k].kind == "keys" for k in section.basic_keys + section.advanced_keys):
                 self.key_warning = QLabel("")
                 self.key_warning.setObjectName("Warn")
                 self.key_warning.setWordWrap(True)
-                column.addWidget(self.key_warning)
-            column.addStretch(1)
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setWidget(page)
-            self.section_tabs[section] = self.tabs.addTab(scroll, section)
+                section.layout.addWidget(self.key_warning)
+            if section.advanced_keys:
+                section.toggle = QToolButton()
+                section.toggle.setObjectName("AdvancedToggle")
+                section.toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+                section.toggle.clicked.connect(lambda _=False, n=name: self.set_advanced_open(n, not self.sections[n].open))
+                section.layout.addWidget(section.toggle, alignment=Qt.AlignmentFlag.AlignLeft)
+                section.advanced_box = QWidget()
+                section.advanced_box.setObjectName("AdvancedBox")
+                section.advanced_grid = _grid()
+                box_layout = QVBoxLayout(section.advanced_box)
+                box_layout.setContentsMargins(ADVANCED_INDENT - 2, 2, 0, 2)      # (2: the line on the left)
+                box_layout.addLayout(section.advanced_grid)
+                row = 0
+                for key in section.advanced_keys:
+                    row = self._add_row(section.advanced_grid, row, settings_module.BY_KEY[key], ADVANCED_INDENT)
+                section.layout.addWidget(section.advanced_box)
+            self.sections[name] = section
+            self.page_layout.addWidget(section.frame)
+            QListWidgetItem(name, self.nav)
+        self.nothing = QLabel("")
+        self.nothing.setObjectName("Dim")
+        self.nothing.setWordWrap(True)
+        self.page_layout.addWidget(self.nothing)
+        self.page_layout.addStretch(1)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setWidget(page)
+        self.scroll.verticalScrollBar().valueChanged.connect(self._scrolled)
 
-        self.note = QLabel("")
+        self.note = QLabel("Changes apply immediately.")
         self.note.setObjectName("Hint")
         self.note.setWordWrap(True)
         reset_all = QPushButton("Reset all to defaults")
@@ -111,27 +192,118 @@ class SettingsDialog(QDialog):
         close.clicked.connect(self.accept)
         buttons = QHBoxLayout()
         buttons.addWidget(reset_all)
-        buttons.addStretch(1)
+        buttons.addWidget(self.note, 1)
         buttons.addWidget(close)
+        middle = QHBoxLayout()
+        middle.setSpacing(12)
+        middle.addWidget(self.nav)
+        middle.addWidget(self.scroll, 1)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.advanced)
-        layout.addWidget(self.tabs, 1)
-        # Every section's tab in view (YouTube, torrents, Discover... added more): as wide as the tabs need
-        wanted = self.tabs.tabBar().sizeHint().width() + 48
-        screen = self.screen()
-        if screen is not None:
-            wanted = min(wanted, screen.availableGeometry().width() - 80)
-        if wanted > self.width():
-            self.resize(wanted, self.height())
-        layout.addWidget(self.note)
+        layout.addWidget(self.search)
+        layout.addLayout(middle, 1)
         layout.addLayout(buttons)
+        find = QShortcut(QKeySequence(QKeySequence.StandardKey.Find), self)
+        find.activated.connect(lambda: (self.search.setFocus(), self.search.selectAll()))
+        for section in self.sections.values():
+            self._show_advanced(section)
         self._apply_visibility()
         self._check_keys()
+        self.nav.setCurrentRow(0)
+
+    # ------------------------------------------------------------ sections and search
+    def show_section(self, name: str) -> None:
+        """Scroll so that section is at the top (also what the list on the left does)."""
+        section = self.sections.get(name)
+        if section is not None:
+            self.scroll.verticalScrollBar().setValue(section.frame.y())
+
+    def set_advanced_open(self, name: str, open_: bool) -> None:
+        section = self.sections[name]
+        section.open = open_
+        self._show_advanced(section)
+
+    def _show_advanced(self, section: _Section) -> None:
+        if section.toggle is None:
+            return
+        shown = section.open or (self._searching and any(self._row_matches(k) for k in section.advanced_keys))
+        section.advanced_box.setVisible(shown)
+        changed = sum(1 for k in section.advanced_keys if not self.settings.is_default(k))
+        count = len(section.advanced_keys)
+        text = f"{'▾' if shown else '▸'}  Advanced ({count})"
+        if changed:
+            text += f" · {changed} changed"
+        section.toggle.setText(text)
+        section.toggle.setToolTip("Hide the advanced settings" if shown else "Show the advanced settings")
+
+    def _nav_clicked(self, row: int) -> None:
+        if row >= 0 and not self._syncing_nav:
+            self.show_section(self.nav.item(row).text())
+
+    _syncing_nav = False
+
+    def _scrolled(self, value: int) -> None:
+        """The list on the left follows the scrolling: the section at the top is selected."""
+        current = None
+        for index, section in enumerate(self.sections.values()):
+            if section.frame.isVisible() and section.frame.y() <= value + 30:
+                current = index
+        if current is not None and current != self.nav.currentRow():
+            self._syncing_nav = True
+            self.nav.setCurrentRow(current)
+            self._syncing_nav = False
+
+    def _row_matches(self, key: str) -> bool:
+        words = self.search.text().lower().split()
+        if not words:
+            return True
+        setting = settings_module.BY_KEY[key]
+        text = f"{setting.label} {setting.help} {setting.key} {setting.section}".lower()
+        if setting.choices:
+            text += " " + " ".join(shown for _, shown in setting.choices).lower()
+        return all(word in text for word in words)
+
+    def _filter(self, scroll_up: bool = False) -> None:
+        words = self.search.text().lower().split()
+        self._searching = bool(words)
+        found = 0
+        for index, section in enumerate(self.sections.values()):
+            matches = [k for k in section.basic_keys + section.advanced_keys if self._row_matches(k)]
+            whole = self._searching and all(word in section.name.lower() for word in words)
+            for key in section.basic_keys + section.advanced_keys:
+                self._show_row(key, whole or key in matches)
+            if section.extras is not None:
+                section.extras.setVisible(not self._searching or whole)
+            if section.toggle is not None:
+                section.toggle.setVisible(not self._searching or whole or any(k in matches for k in section.advanced_keys))
+            self._show_advanced(section)
+            visible = not self._searching or whole or bool(matches)
+            section.frame.setVisible(visible)
+            item = self.nav.item(index)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEnabled if visible else item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            found += len(matches) if self._searching else 0
+        self.nothing.setVisible(self._searching and found == 0)
+        self.nothing.setText(f"No setting matches “{self.search.text().strip()}”." if self._searching else "")
+        if scroll_up:
+            self.scroll.verticalScrollBar().setValue(0)
+
+    def _show_row(self, key: str, visible: bool) -> None:
+        inline = bool(self.settings.get("ui.settings_help_inline"))
+        for widget in self.rows.get(key, []):
+            widget.setVisible(visible and (inline or widget not in self.inline_help))
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt naming)
+        """Esc first empties the search box, then closes."""
+        if event.key() == Qt.Key.Key_Escape and self.search.text():
+            self.search.clear()
+            return
+        super().keyPressEvent(event)
 
     # ------------------------------------------------------------ building rows
-    def _add_row(self, grid: QGridLayout, row: int, setting: Setting) -> int:
-        """Adds one setting (two grid rows if it has an explanation). Returns the next free row."""
+    def _add_row(self, grid: QGridLayout, row: int, setting: Setting, indent: int = 0) -> int:
+        """Adds one setting (two grid rows if it has an explanation). Returns the next free row.
+        ``indent``: how far right this grid starts (the Advanced part), so the controls still line up."""
         label_box = QWidget()
+        label_box.setFixedWidth(LABEL_WIDTH - indent)
         label_row = QHBoxLayout(label_box)
         label_row.setContentsMargins(0, 0, 0, 0)
         label_row.setSpacing(5)
@@ -144,12 +316,15 @@ class SettingsDialog(QDialog):
         editor = self._editor(setting)
         if setting.help:
             editor.setToolTip(setting.help)
+        if setting.kind != "bool":
+            editor.setMaximumWidth(EDITOR_WIDTH + (100 if setting.kind in ("path", "keys") else 0))
         reset = QToolButton()
+        reset.setObjectName("ResetButton")
         reset.setText("↺")
         reset.setToolTip("Back to default")
         reset.clicked.connect(lambda _=False, k=setting.key: self._reset(k))
-        grid.addWidget(label_box, row, 0)
-        grid.addWidget(editor, row, 1)
+        grid.addWidget(label_box, row, 0, Qt.AlignmentFlag.AlignVCenter)
+        grid.addWidget(editor, row, 1, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         grid.addWidget(reset, row, 2)
         widgets = [label_box, editor, reset]
         if setting.help:
@@ -291,7 +466,6 @@ class SettingsDialog(QDialog):
         for setting in SCHEMA:
             if setting.key in self.editors:
                 self._load_value(setting)
-        self.advanced.setChecked(self.settings.get("ui.show_advanced"))
         self._update_note()
         self._check_keys()
 
@@ -307,31 +481,13 @@ class SettingsDialog(QDialog):
             line.setText(folder)
             self._set(key, folder)
 
-    def _advanced_toggled(self, on: bool) -> None:
-        self.settings.set("ui.show_advanced", on)
-        self._apply_visibility()
-
     def _apply_visibility(self) -> None:
-        show = self.advanced.isChecked()
-        inline = bool(self.settings.get("ui.settings_help_inline"))
-        for setting in SCHEMA:
-            for widget in self.rows.get(setting.key, []):
-                visible = show or not setting.advanced
-                if widget in self.inline_help:
-                    visible = visible and inline
-                widget.setVisible(visible)
-        for section, index in self.section_tabs.items():
-            has_basic = any(s.section == section and not s.advanced and not s.hidden for s in SCHEMA)
-            self.tabs.setTabVisible(index, show or has_basic or section in ("Profile", "Diagnostics"))
-        self._update_note()
+        """The explanations under the settings (or not), and what the search box asks for."""
+        self._filter()
 
     def _update_note(self) -> None:
-        changed = self.settings.changed_advanced()
-        if not self.advanced.isChecked() and changed:
-            self.note.setText(f"{len(changed)} advanced setting(s) differ from the defaults and still apply. "
-                              "Tick \"Show advanced options\" to see them.")
-        else:
-            self.note.setText("Changes apply immediately.")
+        for section in self.sections.values():
+            self._show_advanced(section)
 
     def _check_keys(self) -> None:
         used: Dict[str, str] = {}

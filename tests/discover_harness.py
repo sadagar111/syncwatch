@@ -88,6 +88,7 @@ def titles(dialog, tab):
 
 def run_script():
     window = main_window()
+    window.watch_alone()          # past the lobby (0.5.2) to the start screen
     window.resize(1280, 820)
     spin(1.0)
     shot(window, "01_start")

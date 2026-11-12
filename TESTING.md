@@ -1,3 +1,30 @@
+# Testing 0.5.2 (in progress): branch `v0.5.2-qol`
+
+1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch v0.5.2-qol`, then start `SyncWatch.bat`.
+   Back to the published version: `git switch main`.
+2. **First, the YouTube check** (it tells me why YouTube videos don't play on your PC):
+   `tools\youtube_check.bat`, about a minute. Send me its text, or the `youtube_check.txt` it saves.
+   (No stream or IP addresses in it.)
+3. Then:
+
+## Q. Quality of life
+- [ ] **Q1** SyncWatch starts in the **lobby**: Host a room, Join a room (code box), Watch alone, Settings, with
+      your friends on the right. Host / Join / Watch alone lead to the start screen (your films, links, Ideas).
+- [ ] **Q2** **🏠** (bottom left) goes back to the lobby and closes what's open. In a room with others it asks
+      first (it leaves the room; as host, it closes it for everyone).
+- [ ] **Q3** **📂** (bottom left) is a menu: Your films… / Open a link… / Open a .torrent file…, with the shortcuts.
+- [ ] **Q4** The background is **black**.
+- [ ] **Q5** **Settings** is one page, top to bottom: the sections on the left jump there, the search box at the
+      top finds settings (advanced ones too), and each section ends with a folded **Advanced** part
+      ("Advanced (10) · 2 changed" when you changed some). Esc empties the search, then closes.
+- [ ] **Q6** The **log** is written again: Settings > Diagnostics > Open log folder: `syncwatch.log` has today's
+      date, and the startup checks say *Log file: writing syncwatch.log*. If it says *keeps growing*, another
+      program has the old file open (SW-113).
+- [ ] **Q7** The log and *Copy report* show addresses only up to the website's name
+      (`https://rr4---sn-….googlevideo.com/…`), never a whole link.
+
+---
+
 # Testing 0.5.1: branch `v0.5.1-fixes` (the pull request into main)
 
 1. **Get it:** in your SyncWatch folder, `git fetch` then `git switch v0.5.1-fixes`, then start `SyncWatch.bat`

@@ -5,8 +5,8 @@ Everything in this folder can be replaced to change how SyncWatch looks.
 Keep the same file name, save as PNG, and restart SyncWatch.
 If a file is missing or broken, SyncWatch uses a plain default and keeps working.
 
-Current files are deliberately plain placeholders (a red triangle, a blue
-rectangle, a grey circle) waiting for a real design.
+Current files are deliberately plain placeholders (a red triangle, a black
+background, a grey circle) waiting for a real design.
 
 FILE                 SIZE (suggested)        WHERE IT'S USED
 logo.png             512 x 512, transparent  Window icon, top of the sidebar (shown about 28 px high),

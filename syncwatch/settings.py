@@ -338,9 +338,12 @@ SCHEMA: List[Setting] = [
        "TMDB's language code, e.g. en-US, sk-SK or cs-CZ.", advanced=True, max_len=5),
 
     # ---- Interface --------------------------------------------------------------------
-    _s("ui.show_advanced", "bool", False, "Show advanced options", UI),
+    _s("ui.show_advanced", "bool", False, "Show advanced options", UI, hidden=True),   # (before 0.5.2)
     _s("ui.settings_help_inline", "bool", False, "Show explanations under the settings", UI,
        "Writes each setting's explanation underneath it, instead of only when you point at the ⓘ."),
+    _s("ui.start_in_lobby", "bool", True, "Start with the lobby", UI,
+       "When SyncWatch starts: the lobby (host a room, join one, watch alone). Off: straight to your films, "
+       "links and Ideas.", advanced=True),
     _s("ui.sidebar", "bool", True, "Show the sidebar", UI),
     _s("ui.panel_connection", "bool", True, "Show the room panel", UI),
     _s("ui.panel_people", "bool", True, "Show the people panel", UI),

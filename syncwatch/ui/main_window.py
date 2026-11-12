@@ -26,6 +26,7 @@ from ..library import chapters as chapter_rules, episodes
 from ..settings import RESTART_KEYS, SCHEMA
 from ..sync.controller import Controller, fmt_time
 from .controls import ControlBar
+from .lobby import LobbyScreen
 from .dialogs import error_dialog
 from .dialogs.avatar_editor import choose_avatar
 from .dialogs.settings_dialog import (SettingsDialog, diagnostics_extras, profile_extras, rooms_extras,
@@ -322,6 +323,9 @@ class MainWindow(QMainWindow):
         self.settings.subscribe("ui.panel_queue", lambda k, v: self.queue_changed())
         self._wire()
         self._apply_all_settings()
+        # the lobby first (0.5.2), unless that's switched off; a film given at start skips it anyway.
+        # (Before the window's size is set: without the control bar it may be narrower.)
+        self.show_page(self.lobby if self.settings.get("ui.start_in_lobby") else self.idle)
         self._restore_geometry()
 
         self.tick_timer = QTimer(self)
@@ -348,8 +352,10 @@ class MainWindow(QMainWindow):
         self.background = Background(theme)
         self.setCentralWidget(self.background)
 
+        self.lobby = LobbyScreen(self.settings.get("room.last_code"))   # what SyncWatch starts with (0.5.2)
         self.idle = IdleScreen()
         self.stack = QStackedWidget()
+        self.stack.addWidget(self.lobby)
         self.stack.addWidget(self.idle)
         self.video: Optional[QWidget] = None
         self._place_video(self.player)
@@ -365,7 +371,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self.stack, 1)
         left_layout.addWidget(self.controls)
 
-        self.sidebar = Sidebar(self.settings.get("room.last_code"))
+        self.sidebar = Sidebar()
         self.sidebar.vote = VotePanel()                    # the film vote, under "Up next" (0.5)
         self.sidebar.vote.hide()
         self.sidebar.layout().insertWidget(self.sidebar.layout().indexOf(self.sidebar.queue) + 1, self.sidebar.vote)
@@ -406,13 +412,19 @@ class MainWindow(QMainWindow):
         ui.sidebarClicked.connect(self.toggle_sidebar)
         ui.settingsClicked.connect(self.open_settings)
         ui.openClicked.connect(self.open_library)
+        ui.lobbyClicked.connect(self.back_to_lobby)
+        self.lobby.hostClicked.connect(self._host)
+        self.lobby.joinClicked.connect(self._join)
+        self.lobby.aloneClicked.connect(self.watch_alone)
+        self.lobby.settingsClicked.connect(self.open_settings)
+        ui.linkClicked.connect(self.ask_youtube_link)
+        ui.torrentFileClicked.connect(self.pick_torrent_file)
         ui.seek.seekRequested.connect(c.seek)
         ui.seek.previewChanged.connect(lambda ms: ui.time_label.setText(fmt_time(ms)))
         ui.subs_menu.aboutToShow.connect(self._build_subs_menu)
 
         room = self.sidebar.room
         room.hostClicked.connect(self._host)
-        room.joinClicked.connect(self._join)
         room.leaveClicked.connect(self._leave)
         room.copyClicked.connect(self._copy_code)
         room.newCodeClicked.connect(self._new_code)
@@ -563,21 +575,66 @@ class MainWindow(QMainWindow):
 
     def _host(self) -> None:
         self.controller.host_room()
+        self.leave_lobby()
         self._refresh_soon()
 
     def _join(self, text: str) -> None:
         if self.controller.join_room(text):
             self.settings.set("room.last_code", text.strip()[:600])
+            self.leave_lobby()
         self._refresh_soon()
 
     def _leave(self) -> None:
-        c = self.controller
-        if c.is_host and c.peers and not self._confirm(
-                "Close your room?", f"{len(c.peers)} {'person is' if len(c.peers) == 1 else 'people are'} "
-                                    "watching with you. Closing the room ends it for everyone.", "Close room"):
+        """The room panel's Leave / Close room / Cancel: out of the room, back to the lobby."""
+        if not self._confirm_leaving():
             return
-        c.leave()
+        self.controller.leave()
+        self.back_to_lobby(asked=True)
+
+    def _confirm_leaving(self) -> bool:
+        """Before leaving a room: the host with people in it is asked first (it ends for everyone)."""
+        c = self.controller
+        if c.is_host and c.peers:
+            return self._confirm("Close your room?", f"{len(c.peers)} {'person is' if len(c.peers) == 1 else 'people are'} "
+                                                     "watching with you. Closing the room ends it for everyone.",
+                                 "Close room")
+        return True
+
+    # ---------------------------------------------------------------- the lobby (0.5.2)
+    def show_page(self, page) -> None:
+        """Lobby, start screen or video: the control bar and the full sidebar aren't for the lobby."""
+        self.stack.setCurrentWidget(page)
+        in_lobby = page is self.lobby
+        self.controls.setVisible(not in_lobby)
+        self.sidebar.set_lobby(in_lobby)
+        if in_lobby:
+            self.lobby.set_name(self.settings.get("profile.name"))
         self._refresh_soon()
+
+    def leave_lobby(self) -> None:
+        """Host, Join or Watch alone was chosen: the start screen, unless something already plays."""
+        if self.stack.currentWidget() is self.lobby:
+            self.show_page(self.idle)
+
+    def watch_alone(self) -> None:
+        self.leave_lobby()
+
+    def back_to_lobby(self, asked: bool = False) -> None:
+        """🏠: close what's open and go back to the lobby. In a room that also means leaving it."""
+        c = self.controller
+        in_room = c.connected or c.joining or c.session.is_host
+        if in_room and not asked:
+            if c.is_host:
+                if not self._confirm_leaving():          # (asks only if people are in the room)
+                    return
+            elif c.connected and not self._confirm("Back to the lobby?", "You'll leave the room. You can join "
+                                                   "again with its code.", "Leave the room"):
+                return
+            c.leave()
+        if self.player.has_media() or getattr(self.player, "stream", None) is not None:
+            self.close_film()
+        self.youtube.stop()
+        self.show_page(self.lobby)
 
     def _copy_code(self) -> None:
         code = self.controller.session.code
@@ -629,6 +686,7 @@ class MainWindow(QMainWindow):
         room = self.controller.friends.room_of(key)
         if room is not None:
             self.controller.join_code(room.code)
+            self.leave_lobby()
         self._refresh_soon()
 
     def _friend_remove(self, key: bytes) -> None:
@@ -709,7 +767,7 @@ class MainWindow(QMainWindow):
             self._film_key = film_key(path.name, size)
             self.previews.film_opened(path, self._film_key)        # pictures over the seek bar (0.5)
             self.setWindowTitle(f"SyncWatch: {path.name}")
-            self.stack.setCurrentWidget(self.video)
+            self.show_page(self.video)
             self.subtitles.film_opened(path, self._film_key)
             self.controller.set_film(path.name, size, 0)
 
@@ -950,7 +1008,7 @@ class MainWindow(QMainWindow):
         self.previews.clear()
         self._start_at_ms = max(0, int(start_s)) * 1000
         self.setWindowTitle(f"SyncWatch: {stream.label}")
-        self.stack.setCurrentWidget(self.video)
+        self.show_page(self.video)
         if stream.kind == "torrent":
             self.subtitles.film_closed()
             self.controller.set_film(stream.title, stream.size, 0, magnet=self.torrents.magnet())
@@ -1242,7 +1300,8 @@ class MainWindow(QMainWindow):
         self.subtitles.film_closed()
         self._film_key = ""
         self.setWindowTitle("SyncWatch")
-        self.stack.setCurrentWidget(self.idle)
+        if self.stack.currentWidget() is not self.lobby:
+            self.show_page(self.idle)
         self.controller.set_film("", 0, 0)
         self._refresh_soon()
 
@@ -1651,6 +1710,7 @@ class MainWindow(QMainWindow):
             "keys.settings": self.open_settings,
             "keys.help": self.toggle_help,
         }
+        self.controls.set_open_keys(self.settings.get("keys.open"), self.settings.get("keys.youtube"))
         for key, action in actions.items():
             sequence = self.settings.get(key)
             if not sequence:

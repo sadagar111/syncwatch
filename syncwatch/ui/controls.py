@@ -33,7 +33,10 @@ class ControlBar(QFrame):
     fullscreenClicked = Signal()
     sidebarClicked = Signal()
     settingsClicked = Signal()
-    openClicked = Signal()
+    openClicked = Signal()          # 📂 > Your films (the library)
+    linkClicked = Signal()          # 📂 > Open a link (YouTube, magnet or web link)
+    torrentFileClicked = Signal()   # 📂 > Open a .torrent file
+    lobbyClicked = Signal()         # 🏠 back to the lobby
     reactionChosen = Signal(str)
 
     def __init__(self, colors: dict, parent=None):
@@ -86,7 +89,16 @@ class ControlBar(QFrame):
         self.fullscreen = IconButton("fullscreen", "⛶", "Fullscreen (F)")
         self.sidebar = IconButton("sidebar", "☰", "Show/hide the sidebar (Tab)")
         self.settings = IconButton("settings", "⚙", "Settings")
-        self.open = IconButton("open", "📂", "Library: your films")
+        self.open = IconButton("open", "📂", "Open: your films, a link or a .torrent file")
+        self.open.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.open_menu = QMenu(self.open)
+        self._films_action = self.open_menu.addAction("", self.openClicked.emit)
+        self._link_action = self.open_menu.addAction("", self.linkClicked.emit)
+        self.open_menu.addAction("📁  Open a .torrent file…", self.torrentFileClicked.emit)
+        self.open.setMenu(self.open_menu)
+        self.set_open_keys("", "")
+        self.lobby = IconButton("lobby", "🏠", "Back to the lobby (closes what's open; in a room, leaves it)")
+        self.lobby.clicked.connect(self.lobbyClicked)
         self.skip_intro = QPushButton("Skip intro ⏭")
         self.skip_intro.setToolTip("Jump to the end of this intro, opening or recap (key I)")
         self.skip_intro.setObjectName("Attention")
@@ -102,11 +114,10 @@ class ControlBar(QFrame):
         self.fullscreen.clicked.connect(self.fullscreenClicked)
         self.sidebar.clicked.connect(self.sidebarClicked)
         self.settings.clicked.connect(self.settingsClicked)
-        self.open.clicked.connect(self.openClicked)
         self.skip_intro.clicked.connect(self.skipIntroClicked)
 
         row2 = QHBoxLayout()
-        for widget in (self.open, self.back, self.play, self.forward, self.skip_intro):
+        for widget in (self.lobby, self.open, self.back, self.play, self.forward, self.skip_intro):
             row2.addWidget(widget)
         row2.addSpacing(10)
         for widget in (self.sync_up, self.sync_me, self.follow, self.gap_label, self.react):
@@ -127,6 +138,11 @@ class ControlBar(QFrame):
             widget.hide()
 
     # ------------------------------------------------------------ updates from the main window
+    def set_open_keys(self, films: str, link: str) -> None:
+        """The 📂 menu shows the shortcuts (they're settings, so they can change)."""
+        self._films_action.setText("📂  Your films…" + (f"\t{films}" if films else ""))
+        self._link_action.setText("🔗  Open a link…" + (f"\t{link}" if link else ""))
+
     def _follow_toggled(self, on: bool, emit: bool = True) -> None:
         self.follow.setText("🔗 Following the room" if on else "👤 On my own")
         self.follow.setToolTip("Your buttons control everyone. Click to watch on your own."

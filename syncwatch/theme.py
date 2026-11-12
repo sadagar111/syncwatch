@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 DEFAULT_COLORS: Dict[str, str] = {
-    "window": "#101318", "panel": "#121620E6", "panel_border": "#2A3140", "text": "#E8EAED",
+    "window": "#000000", "panel": "#121620E6", "panel_border": "#2A3140", "text": "#E8EAED",
     "text_dim": "#9AA3B2", "accent": "#E5484D", "accent_text": "#FFFFFF", "button": "#262C38",
     "button_hover": "#323A4A", "button_pressed": "#3C4658", "button_text": "#E8EAED",
     "input": "#1A1F29", "good": "#3CCB7F", "warn": "#F5A524", "bad": "#F0506E",
@@ -137,5 +137,17 @@ QTabWidget::pane {{ border: 1px solid {c('panel_border')}; border-radius: {r}px;
 QTabBar::tab {{ background: {c('button')}; padding: 6px 12px; border-top-left-radius: {r}px; border-top-right-radius: {r}px; }}
 QTabBar::tab:selected {{ background: {c('button_pressed')}; }}
 QDialog {{ background: {c('window')}; }}
+QListWidget#SettingsNav {{ background: transparent; border: none; padding: 0px; }}
+QListWidget#SettingsNav::item {{ padding: 7px 10px; border-radius: {r}px; }}
+QListWidget#SettingsNav::item:selected {{ background: {c('button_hover')}; color: {c('text')}; }}
+QListWidget#SettingsNav::item:disabled {{ color: {c('panel_border')}; }}
+#SettingsHeading {{ font-size: {theme.font_size_pt + 5}pt; font-weight: bold; }}
+QToolButton#AdvancedToggle {{ background: transparent; border: none; color: {c('text_dim')}; padding: 4px 0px;
+    font-weight: bold; }}
+QToolButton#AdvancedToggle:hover {{ color: {c('text')}; }}
+#AdvancedBox {{ border-left: 2px solid {c('panel_border')}; }}
+QToolButton#ResetButton {{ background: transparent; border: none; padding: 2px 6px; color: {c('text_dim')}; }}
+QToolButton#ResetButton:hover {{ color: {c('text')}; background: {c('button_hover')}; }}
+QToolButton#ResetButton:disabled {{ color: transparent; }}
 QSplitter::handle {{ background: transparent; }}
 """
