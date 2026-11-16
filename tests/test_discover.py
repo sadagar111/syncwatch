@@ -265,6 +265,11 @@ class TmdbTests(unittest.TestCase):
             with self.subTest(relay=relay), self.assertRaises(TmdbError) as caught:
                 client.search("matrix")
             self.assertEqual(caught.exception.kind, "relay")
+        # the window shows the relay's reason (0.5.2): "HTTP 503 nokey"
+        client = tmdb.Client("", self.folder / "why", images=self.server.images, relay=older.url)
+        with self.assertRaises(TmdbError) as caught:
+            client.trending()
+        self.assertEqual(caught.exception.detail, "HTTP 503 nokey")
         busy = self.relay(limits=(60, 1))
         client = tmdb.Client("", self.folder / "busy", images=self.server.images, relay=busy.url)
         client.search("matrix")

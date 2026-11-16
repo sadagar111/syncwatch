@@ -484,6 +484,8 @@ class Client:
                     kind = "missing"
                 elif exc.code == 429 or said in ("busy", "network", "tmdb") or (exc.code >= 500 and not said):
                     kind = "busy"
+                elif said == "parameter":      # the relay didn't like this one question: the relay itself is fine
+                    kind = "odd"
                 else:       # no key there, TMDB refused it, an older relay, or not a relay at all
                     kind = "relay"
                 raise TmdbError(kind, f"HTTP {exc.code} {said}".strip()) from None
