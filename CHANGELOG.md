@@ -6,6 +6,7 @@
 - ⚙ and your picture are now at the top right. Your picture opens your profile: name, picture and your friend ID.
 - 📂 (bottom left) now also opens links and .torrent files.
 - **YouTube:** when YouTube refuses a video's stream (it does that now and then), SyncWatch asks again another way by itself instead of showing an error.
+- **Ideas:** a Search button next to the box; when film search can't reach TMDB, the window says why and tries again as soon as you search.
 - The background is black.
 - **Fixed:** on Windows the log file could stop being written (once it was full while another program had it open). Logs and copied reports no longer contain whole links or stream addresses, only the website's name.
 
