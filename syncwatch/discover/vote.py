@@ -4,7 +4,7 @@ Held by the host's app, like the YouTube queue (youtube/queue.py): members send 
 vote", "suggest this film", "my vote", "I have these"), the host's app checks them and sends the
 whole vote to everyone after every change. Votes are open (friends see who voted for what), one per
 person, and can be changed until the host closes the vote. Everyone's app tells which suggested
-films it has in its library (Settings > Discover), so the room sees which film is ready to play.
+films it has in its library (Settings > Ideas), so the room sees which film is ready to play.
 No Qt in here.
 
     vote = Vote()

@@ -2,24 +2,33 @@
 
     python -E -P resolve.py <video ID> [--height 1080] [--codecs compatible|any] [--combined]
                             [--js deno=<path>] [--cache <folder>] [--timeout 30]
+                            [--client tv,web_safari] [--ip 4|6]
     python -E -P resolve.py <playlist ID> --playlist [--cache <folder>] [--timeout 30]
     python -E -P resolve.py <video ID> --captions <language> [--auto] --out <file.vtt>
                             [--js deno=<path>] [--cache <folder>] [--timeout 30]
 
 Prints exactly one line of JSON (ASCII only) and exits:
     {"ok": {"id", "title", "channel", "duration", "live", "thumbnail", "height",
-            "video": {"url", "codec", "height", "fps"}, "audio": {"url", "codec"} or null,
+            "video": {"url", "codec", "height", "fps", "client"},
+            "audio": {"url", "codec", "client"} or null,
             "headers": {...}, "expires": <unix time>,
-            "captions": [{"lang", "name", "auto"}, ...]}}             exit code 0
+            "captions": [{"lang", "name", "auto"}, ...],
+            "warnings": ["<yt-dlp's warnings, without addresses>", ...]}}   exit code 0
     {"ok": {"playlist", "title", "entries": [{"id", "title", "duration"}, ...]}}   (--playlist: at
             most MAX_PLAYLIST videos, only their IDs and titles; nothing is looked up per video)
     {"ok": {"id", "lang", "auto", "file", "bytes"}}   (--captions: the subtitles were written to
             "file": --out, ending in .vtt, or .srt if YouTube had no WebVTT)
-    {"error": "<kind>", "message": "<yt-dlp's text>"}                exit code 1
+    {"error": "<kind>", "message": "<yt-dlp's text>", "warnings": [...]}   exit code 1
 
 Kinds: unavailable, private, signin (age-restricted / members only), bot (YouTube wants proof
 this isn't a bot), live, network, outdated (YouTube changed something: yt-dlp needs an update),
 missing (yt-dlp isn't installed), nosubs (--captions: no subtitles in that language), other.
+
+--client picks which YouTube apps yt-dlp pretends to be ("tv", "web_safari", "-tv" = the usual
+ones without tv; yt-dlp's own default if not given), --ip whether it asks over IPv4 or IPv6.
+YouTube ties a stream address to the app and the IP address that asked for it, and sometimes
+refuses the streams it gave one app (HTTP 403): "client" says which app each stream came from
+(from the address's "c=", e.g. TVHTML5), and the player can ask again another way.
 
 "captions" lists the video's subtitles by language code: the uploader's ("auto": false) and
 YouTube's automatic ones ("auto": true; speech recognition, "<code>-orig" for the spoken language,
@@ -44,7 +53,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import parse_qs, urlsplit
 
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -55,6 +64,12 @@ _GONE = ("[private video]", "[deleted video]", "[unavailable video]")
 DEFAULT_LIFETIME_S = 5 * 3600     # YouTube's stream addresses usually work about 6 hours
 MAX_TITLE = 200
 HEADERS_KEPT = ("User-Agent", "Accept", "Accept-Language", "Referer", "Origin")
+CLIENT_RE = re.compile(r"^-?[a-z][a-z0-9_]{1,29}$")    # a yt-dlp YouTube client: tv, web_safari, -tv
+CLIENT_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,39}$")  # YouTube's name for it in an address: TVHTML5
+MAX_CLIENTS = 6
+MAX_WARNINGS = 12
+_ADDRESS = re.compile(r"(?i)\b(?:https?|wss?)://[^\s'\"<>]+")
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 CAPTION_LANG_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,3}$")   # en, pt-BR, zh-Hans, en-orig
 MAX_CAPTIONS = 300               # YouTube translates its automatic captions into ~150 languages
 MAX_CAPTION_BYTES = 3_000_000
@@ -121,6 +136,47 @@ def _expires(urls: List[str], now: float) -> float:
     return min(times) if times else now + DEFAULT_LIFETIME_S
 
 
+def _client(url: str) -> str:
+    """Which YouTube app a stream address was given to ("c=TVHTML5"), or ""."""
+    try:
+        value = parse_qs(urlsplit(url).query).get("c", [""])[0]
+    except ValueError:
+        return ""
+    return value if CLIENT_CODE_RE.match(value) else ""
+
+
+def clean_warning(message: Any) -> str:
+    """One of yt-dlp's warnings, fit for SyncWatch's log: no addresses (they hold the IP address
+    and keys), no colours or control characters, short."""
+    text = _ANSI.sub("", str(message or "")).strip()
+    if text[:8].upper() == "WARNING:":
+        text = text[8:]
+    text = _ADDRESS.sub("<address>", text)
+    text = "".join(ch if ch.isprintable() else " " for ch in text)
+    return " ".join(text.split())[:300]
+
+
+class WarningCollector:
+    """yt-dlp's "logger": keeps its warnings (cleaned, at most MAX_WARNINGS) and drops the rest.
+    It also keeps yt-dlp from printing anything: this process's output is one line of JSON."""
+
+    def __init__(self, into: List[str]):
+        self.into = into
+
+    def debug(self, message) -> None:
+        pass
+
+    info = debug
+
+    def warning(self, message) -> None:
+        text = clean_warning(message)
+        if text and text not in self.into and len(self.into) < MAX_WARNINGS:
+            self.into.append(text)
+
+    def error(self, message) -> None:
+        pass
+
+
 def _headers(fmt: Dict[str, Any]) -> Dict[str, str]:
     raw = fmt.get("http_headers") or {}
     return {key: str(value) for key, value in raw.items() if key in HEADERS_KEPT and value}
@@ -148,8 +204,9 @@ def summarize(info: Dict[str, Any], now: Optional[float] = None) -> Dict[str, An
         "thumbnail": str(info.get("thumbnail") or ""),
         "height": int(video.get("height") or 0),
         "video": {"url": video["url"], "codec": str(video.get("vcodec") or ""), "height": int(video.get("height") or 0),
-                  "fps": float(video.get("fps") or 0)},
-        "audio": {"url": audio["url"], "codec": str(audio.get("acodec") or "")} if audio else None,
+                  "fps": float(video.get("fps") or 0), "client": _client(video["url"])},
+        "audio": ({"url": audio["url"], "codec": str(audio.get("acodec") or ""), "client": _client(audio["url"])}
+                  if audio else None),
         "headers": _headers(video),
         "expires": _expires(urls, now),
         "captions": caption_list(info),
@@ -175,7 +232,11 @@ def caption_list(info: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def ydl_options(height: int, codecs: str, combined: bool, js: Optional[str], cache: Optional[str],
-                timeout: float) -> Dict[str, Any]:
+                timeout: float, clients: Sequence[str] = (), ip: int = 0,
+                warnings: Optional[List[str]] = None) -> Dict[str, Any]:
+    """yt-dlp's options. ``clients``: which YouTube apps to ask as (see the module text), checked by
+    the caller with CLIENT_RE; ``ip``: 4 or 6 to ask only over that, 0 = as Windows chooses;
+    ``warnings``: a list that receives yt-dlp's warnings."""
     options: Dict[str, Any] = {
         "quiet": True, "no_warnings": True, "noprogress": True, "noplaylist": True,
         "skip_download": True, "socket_timeout": timeout, "color": {"stdout": "never", "stderr": "never"},
@@ -186,7 +247,21 @@ def ydl_options(height: int, codecs: str, combined: bool, js: Optional[str], cac
     if js:
         name, _, path = js.partition("=")
         options["js_runtimes"] = {name.strip().lower(): ({"path": path} if path else {})}
+    if clients:
+        options["extractor_args"] = {"youtube": {"player_client": list(clients)}}
+    if ip in (4, 6):
+        options["source_address"] = "0.0.0.0" if ip == 4 else "::"     # what --force-ipv4/6 do
+    if warnings is not None:
+        options["logger"] = WarningCollector(warnings)
     return options
+
+
+def parse_clients(text: str) -> List[str]:
+    """"tv,web_safari" -> ["tv", "web_safari"]; ValueError for anything that isn't a client name."""
+    names = [name.strip() for name in (text or "").split(",") if name.strip()]
+    if len(names) > MAX_CLIENTS or not all(CLIENT_RE.match(name) for name in names):
+        raise ValueError(f"not a list of YouTube client names: {text[:100]!r}")
+    return names
 
 
 def resolve(target: str, options: Dict[str, Any]) -> Dict[str, Any]:
@@ -286,6 +361,8 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--js", default="", help="JavaScript runtime, e.g. deno=C:\\...\\deno.exe")
     parser.add_argument("--cache", default="")
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--client", default="", help="YouTube apps to ask as, e.g. tv,web_safari (yt-dlp's choice if empty)")
+    parser.add_argument("--ip", type=int, choices=(0, 4, 6), default=0, help="ask only over IPv4 / IPv6")
     parser.add_argument("--captions", default="", help="fetch the subtitles in this language instead")
     parser.add_argument("--auto", action="store_true", help="with --captions: YouTube's automatic ones")
     parser.add_argument("--out", default="", help="with --captions: where they go (a .vtt file)")
@@ -304,17 +381,25 @@ def main(argv: List[str]) -> int:
     except ImportError as exc:
         say({"error": "missing", "message": f"yt-dlp isn't installed ({exc})"})
         return 1
-    options = ydl_options(args.height, args.codecs, args.combined, args.js or None, args.cache or None, args.timeout)
+    try:
+        clients = parse_clients(args.client)
+    except ValueError as exc:
+        say({"error": "other", "message": str(exc)})
+        return 2
+    warnings: List[str] = []
+    options = ydl_options(args.height, args.codecs, args.combined, args.js or None, args.cache or None, args.timeout,
+                          clients, args.ip, warnings)
     try:
         result = resolve(target, options)
     except LookupError:
-        say({"error": "live", "message": "live streams aren't supported yet"})
+        say({"error": "live", "message": "live streams aren't supported yet", "warnings": warnings})
         return 1
     except Exception as exc:  # noqa: BLE001 - everything yt-dlp can throw ends up here
         text = f"{type(exc).__name__}: {exc}"
-        say({"error": classify(text), "message": text[:2000]})
+        say({"error": classify(text), "message": text[:2000], "warnings": warnings})
         return 1
     result["id"] = args.video
+    result["warnings"] = warnings
     say({"ok": result})
     return 0
 

@@ -6,7 +6,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider, QToolButton,
-                               QVBoxLayout)
+                               QVBoxLayout, QWidget)
 
 from ..sync.controller import fmt_time
 from .qtutil import IconButton
@@ -32,8 +32,9 @@ class ControlBar(QFrame):
     volumeChanged = Signal(int)
     fullscreenClicked = Signal()
     sidebarClicked = Signal()
-    settingsClicked = Signal()
-    openClicked = Signal()
+    openClicked = Signal()          # 📂 > Your films (the library)
+    linkClicked = Signal()          # 📂 > Open a link (YouTube, magnet or web link)
+    torrentFileClicked = Signal()   # 📂 > Open a .torrent file
     reactionChosen = Signal(str)
 
     def __init__(self, colors: dict, parent=None):
@@ -85,8 +86,14 @@ class ControlBar(QFrame):
         self.volume_label.setMinimumWidth(38)
         self.fullscreen = IconButton("fullscreen", "⛶", "Fullscreen (F)")
         self.sidebar = IconButton("sidebar", "☰", "Show/hide the sidebar (Tab)")
-        self.settings = IconButton("settings", "⚙", "Settings")
-        self.open = IconButton("open", "📂", "Library: your films")
+        self.open = IconButton("open", "📂", "Open: your films, a link or a .torrent file")
+        self.open.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.open_menu = QMenu(self.open)
+        self._films_action = self.open_menu.addAction("", self.openClicked.emit)
+        self._link_action = self.open_menu.addAction("", self.linkClicked.emit)
+        self.open_menu.addAction("📁  Open a .torrent file…", self.torrentFileClicked.emit)
+        self.open.setMenu(self.open_menu)
+        self.set_open_keys("", "")
         self.skip_intro = QPushButton("Skip intro ⏭")
         self.skip_intro.setToolTip("Jump to the end of this intro, opening or recap (key I)")
         self.skip_intro.setObjectName("Attention")
@@ -101,8 +108,6 @@ class ControlBar(QFrame):
         self.volume.valueChanged.connect(self.volumeChanged)
         self.fullscreen.clicked.connect(self.fullscreenClicked)
         self.sidebar.clicked.connect(self.sidebarClicked)
-        self.settings.clicked.connect(self.settingsClicked)
-        self.open.clicked.connect(self.openClicked)
         self.skip_intro.clicked.connect(self.skipIntroClicked)
 
         row2 = QHBoxLayout()
@@ -113,7 +118,7 @@ class ControlBar(QFrame):
             row2.addWidget(widget)
         row2.addStretch(1)
         for widget in (self.subs, self.mute, self.volume, self.volume_label, self.fullscreen,
-                       self.sidebar, self.settings):
+                       self.sidebar):
             row2.addWidget(widget)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 4, 10, 8)
@@ -127,6 +132,11 @@ class ControlBar(QFrame):
             widget.hide()
 
     # ------------------------------------------------------------ updates from the main window
+    def set_open_keys(self, films: str, link: str) -> None:
+        """The 📂 menu shows the shortcuts (they're settings, so they can change)."""
+        self._films_action.setText("📂  Your films…" + (f"\t{films}" if films else ""))
+        self._link_action.setText("🔗  Open a link…" + (f"\t{link}" if link else ""))
+
     def _follow_toggled(self, on: bool, emit: bool = True) -> None:
         self.follow.setText("🔗 Following the room" if on else "👤 On my own")
         self.follow.setToolTip("Your buttons control everyone. Click to watch on your own."
@@ -195,3 +205,27 @@ class ControlBar(QFrame):
             self.fullscreen.set_face("exit_fullscreen", "⛶ Exit")
         else:
             self.fullscreen.set_face("fullscreen", "⛶")
+
+
+class TopBar(QWidget):
+    """Above the picture (0.5.2): 🏠 back to the lobby, and what's open. Not in the lobby itself,
+    not in fullscreen."""
+    lobbyClicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.lobby = IconButton("lobby", "🏠", "Back to the lobby (closes what's open; in a room, leaves it)")
+        self.lobby.clicked.connect(self.lobbyClicked)
+        self.title = QLabel("")
+        self.title.setObjectName("Dim")
+        self.title.setTextFormat(Qt.TextFormat.PlainText)      # (a film's name or a video's title)
+        self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        row.addWidget(self.lobby)
+        row.addWidget(self.title, 1)
+
+    def set_title(self, text: str) -> None:
+        self.title.setText(text)
+        self.title.setToolTip(text)

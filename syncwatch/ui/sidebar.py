@@ -1,6 +1,6 @@
 """The sidebar: your room, who's watching, your friends, and what happened (activity feed).
 
-Each panel can be hidden in Settings > Interface, and the whole sidebar with
+Each panel can be hidden in Settings > Appearance, and the whole sidebar with
 the ☰ button or the Tab key. The panels only show things; the main window
 decides what happens when you click (signals).
 """
@@ -10,13 +10,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu,
                                QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
 from .. import __version__
-from .qtutil import asset_pixmap, avatar_pixmap
+from .qtutil import IconButton, asset_pixmap, avatar_pixmap
 
 
 class Panel(QFrame):
@@ -61,7 +61,6 @@ class WaitingEntry:
 
 class RoomPanel(Panel):
     hostClicked = Signal()
-    joinClicked = Signal(str)
     leaveClicked = Signal()
     copyClicked = Signal()
     newCodeClicked = Signal()
@@ -69,32 +68,21 @@ class RoomPanel(Panel):
     denyClicked = Signal(bytes, bool)        # (who, block too)
     approveAllClicked = Signal()
 
-    def __init__(self, last_code: str = "", parent=None):
+    def __init__(self, parent=None):
         super().__init__("Room", parent)
         self.status = QLabel("Not in a room")
         self.status.setTextFormat(Qt.TextFormat.PlainText)   # has the host's name in it
         self.status.setWordWrap(True)
         self.body.addWidget(self.status)
 
-        # not in a room
-        self.host_button = _small_button("Host my room", "Open your room; friends join with its code.", accent=True)
+        # not in a room: a room can still be opened for what's on (joining one is in the lobby, 0.5.2)
+        self.host_button = _small_button("Host a room", "Open your room with what's on now; friends join with "
+                                                        "its code.", accent=True)
         self.host_button.clicked.connect(self.hostClicked)
-        self.join_title = QLabel("Join a room:")
-        self.join_title.setObjectName("Dim")
-        self.code_input = QLineEdit(last_code)
-        self.code_input.setPlaceholderText("Paste a room code (SW-…)")
-        self.code_input.returnPressed.connect(self._join)
-        self.join_button = _small_button("Join")
-        self.join_button.clicked.connect(self._join)
-        join_row = QHBoxLayout()
-        join_row.addWidget(self.code_input, 1)
-        join_row.addWidget(self.join_button)
         self.idle_box = QWidget()
         idle = QVBoxLayout(self.idle_box)
         idle.setContentsMargins(0, 0, 0, 0)
         idle.addWidget(self.host_button, alignment=Qt.AlignmentFlag.AlignLeft)
-        idle.addWidget(self.join_title)
-        idle.addLayout(join_row)
         self.body.addWidget(self.idle_box)
 
         # hosting: the code
@@ -135,11 +123,6 @@ class RoomPanel(Panel):
         self._state: Optional[tuple] = None
         self._waiting_keys: Tuple = ()
         self.set_state("none")
-
-    def _join(self) -> None:
-        text = self.code_input.text().strip()
-        if text:
-            self.joinClicked.emit(text)
 
     def _copy(self) -> None:
         self.copyClicked.emit()
@@ -603,7 +586,10 @@ class UpdateBanner(QFrame):
 
 
 class Sidebar(QWidget):
-    def __init__(self, last_code: str = "", parent=None):
+    profileClicked = Signal()
+    settingsClicked = Signal()
+
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumWidth(260)
         header = QHBoxLayout()
@@ -619,9 +605,21 @@ class Sidebar(QWidget):
         header.addWidget(title)
         header.addWidget(version)
         header.addStretch(1)
+        # top right (0.5.2): your profile, and the settings next to it
+        self.profile_button = QToolButton()
+        self.profile_button.setObjectName("ProfileButton")
+        self.profile_button.setIconSize(QSize(28, 28))
+        self.profile_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.profile_button.setToolTip("Your profile: name, picture and friend ID")
+        self.profile_button.clicked.connect(self.profileClicked)
+        self.settings_button = IconButton("settings", "⚙", "Settings")
+        self.settings_button.clicked.connect(self.settingsClicked)
+        header.addWidget(self.profile_button)
+        header.addWidget(self.settings_button)
+        self.set_profile_picture(None)
         self.update_banner = UpdateBanner()
         self.share_banner = ShareBanner()
-        self.room = RoomPanel(last_code)
+        self.room = RoomPanel()
         self.people = PeoplePanel()
         self.queue = QueuePanel()
         self.queue.hide()                  # shown once YouTube is used (see apply_settings / the window)
@@ -637,13 +635,32 @@ class Sidebar(QWidget):
         layout.addWidget(self.queue)
         layout.addWidget(self.friends)
         layout.addWidget(self.activity, 1)
+        layout.addStretch(0)     # (takes the room left only while the activity feed is hidden, as in the lobby)
+        self._lobby = False
+        self._settings = None
+
+    def set_profile_picture(self, avatar: Optional[bytes]) -> None:
+        self.profile_button.setIcon(QIcon(avatar_pixmap(avatar, 28)))
+
+    def set_lobby(self, on: bool) -> None:
+        """In the lobby only your friends show (and an update, if there is one)."""
+        self._lobby = on
+        self._apply_panels()
 
     def show_update(self, version: str, ready: bool = False) -> None:
         self.update_banner.set_version(version, ready)
 
     def apply_settings(self, settings) -> None:
-        self.room.setVisible(settings.get("ui.panel_connection"))
-        self.people.setVisible(settings.get("ui.panel_people"))
-        self.friends.setVisible(settings.get("ui.panel_friends"))
-        self.activity.setVisible(settings.get("ui.panel_activity"))
+        self._settings = settings
+        self._apply_panels()
         self.activity.max_items = int(settings.get("ui.activity_max"))
+
+    def _apply_panels(self) -> None:
+        settings = self._settings
+        if settings is None:
+            return
+        room_panels = not self._lobby
+        self.room.setVisible(room_panels and settings.get("ui.panel_connection"))
+        self.people.setVisible(room_panels and settings.get("ui.panel_people"))
+        self.friends.setVisible(settings.get("ui.panel_friends"))
+        self.activity.setVisible(room_panels and settings.get("ui.panel_activity"))

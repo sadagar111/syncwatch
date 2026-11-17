@@ -4,6 +4,9 @@ mpv gets picture and sound as one "EDL" address: ``edl://!new_stream;...%LEN%url
 That's how mpv's own YouTube support joins separate streams: both play as one film, so jumping,
 pausing and the position work exactly as with a file. Every address is written with its length in
 front (``%LEN%``), so no character in it can break the EDL.
+
+YouTube sometimes refuses the streams it gave one of its apps (HTTP 403: on Alex's PC in Nov 2026,
+for a while, the TV app's). The player then asks again as other apps: next_way() says which.
 """
 from __future__ import annotations
 
@@ -17,6 +20,28 @@ from .links import LIST_RE, is_video_id
 EXPIRY_MARGIN_S = 15 * 60        # ask YouTube again when an address has less than this left
 CAPTION_LANG_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8}){0,3}$")
 MAX_CAPTIONS = 300
+CLIENT_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,39}$")
+
+# YouTube's name for an app in a stream address ("c=TVHTML5") -> yt-dlp's name for asking as it
+CLIENT_NAMES = {"TVHTML5": "tv", "TVHTML5_SIMPLY": "tv_simply", "WEB": "web", "MWEB": "mweb",
+                "WEB_EMBEDDED_PLAYER": "web_embedded", "WEB_CREATOR": "web_creator", "ANDROID_VR": "android_vr",
+                "ANDROID": "android", "IOS": "ios"}
+# After YouTube refused a stream: first yt-dlp's own choice without the app that was refused, then
+# these (they need no extra proof from the PC; the embedded player works for most videos).
+FALLBACK_CLIENTS = ("web_safari", "web_embedded")
+MAX_TRIES = 2                    # asking again, per video
+
+
+def next_way(refused: str, tried: List[str]) -> Optional[str]:
+    """The next --client to ask yt-dlp with, after YouTube refused the streams of app ``refused``
+    ("TVHTML5"), or None when MAX_TRIES ways were tried already or none is left."""
+    if len(tried) >= MAX_TRIES:
+        return None
+    name = CLIENT_NAMES.get(refused, "")
+    for way in ([f"default,-{name}"] if name else []) + [w for w in FALLBACK_CLIENTS if w != name]:
+        if way not in tried:
+            return way
+    return None
 
 
 class BadStream(ValueError):
@@ -73,6 +98,7 @@ class Stream:
     headers: Dict[str, str] = field(default_factory=dict)
     expires: float = 0.0
     captions: Tuple[Caption, ...] = ()
+    client: str = ""             # which YouTube app the picture's address was given to ("TVHTML5")
 
     kind = "youtube"
     problem = "SW-609"           # reported if the player can't play it
@@ -161,7 +187,9 @@ def from_json(raw: Dict[str, Any]) -> Stream:
         video_url=_url(video.get("url")), audio_url=_url(audio["url"]) if audio.get("url") else "",
         video_codec=_text(video, "codec", 64), audio_codec=_text(audio, "codec", 64) if audio else "",
         height=max(0, height), fps=max(0.0, fps), headers=clean_headers, expires=expires,
-        captions=captions_from_json(raw.get("captions")))
+        captions=captions_from_json(raw.get("captions")),
+        client=video.get("client") if isinstance(video.get("client"), str) and CLIENT_CODE_RE.match(video["client"])
+        else "")
 
 
 MAX_PLAYLIST = 50

@@ -3,7 +3,7 @@
 TMDB is free for personal, non-commercial use with a key: themoviedb.org > Settings > API (the
 long "API Read Access Token" or the short "API Key", both work). Without a key of one's own,
 SyncWatch's relay asks TMDB with its key (since 0.5.1: relay/src/tmdb.js, only these questions).
-A key in SyncWatch's settings (Settings > Discover) is used instead and only ever sent to
+A key in SyncWatch's settings (Settings > Ideas) is used instead and only ever sent to
 api.themoviedb.org: it's never logged, never put into error reports and never part of the cache.
 
 Everything TMDB answers is checked (types, lengths, ranges, what an image path may look like) and
@@ -484,6 +484,8 @@ class Client:
                     kind = "missing"
                 elif exc.code == 429 or said in ("busy", "network", "tmdb") or (exc.code >= 500 and not said):
                     kind = "busy"
+                elif said == "parameter":      # the relay didn't like this one question: the relay itself is fine
+                    kind = "odd"
                 else:       # no key there, TMDB refused it, an older relay, or not a relay at all
                     kind = "relay"
                 raise TmdbError(kind, f"HTTP {exc.code} {said}".strip()) from None

@@ -43,7 +43,7 @@ POSTER = QSize(120, 180)
 GRID = QSize(142, 238)
 KEY_HELP = ("Recommendations, posters and trailers come from TMDB (The Movie Database). It's free: "
             "sign up at themoviedb.org, open Settings > API, ask for a key (personal use), then copy the "
-            "\"API Read Access Token\" into Settings > Discover > TMDB key.")
+            "\"API Read Access Token\" into Settings > Ideas > TMDB key.")
 def relay_help() -> str:
     problem = errors.problem("SW-636")
     return f"{problem.title}. {problem.explanation} {problem.tips[0]}"
@@ -52,6 +52,19 @@ def relay_help() -> str:
 PROBLEMS = {"nokey": "SW-631", "key": "SW-632", "network": "SW-633", "busy": "SW-634", "odd": "SW-635",
             "missing": "SW-635", "relay": "SW-636"}
 RELAY_RETRY_S = 600          # after the relay said it can't ask TMDB, try it again this much later
+
+
+def relay_reason(detail: str) -> str:
+    """Why the relay couldn't ask TMDB, from its answer ("HTTP 503 nokey"), for the note in the window."""
+    words = detail.split()
+    said = words[2] if len(words) > 2 else ""
+    if said == "nokey":
+        return "Reason: the relay has no TMDB key yet (its TMDB_KEY secret is missing)."
+    if said == "key":
+        return "Reason: TMDB didn't accept the relay's key (check the TMDB_KEY secret)."
+    if "404" in words[1:2]:
+        return "Reason: this relay is an older version that can't ask TMDB yet."
+    return f"Reason: the relay answered \"{detail}\"." if detail else ""
 
 
 @dataclass
@@ -117,7 +130,9 @@ class TmdbWorker(QObject):
             try:
                 result = job(client, lambda done, total, t=tag: self.progress.emit(t, done, total))
             except tmdb.TmdbError as exc:
-                log.info("TMDB: %s (%s)", exc.kind, tag.split(":")[0])
+                # (the detail is "HTTP 503 nokey" or an error's name: never an address or a key)
+                log.info("TMDB: %s (%s) %s", exc.kind, tag.split(":")[0], str(exc.detail)[:80])
+                self.last_detail = str(exc.detail)[:80]
                 self.failed.emit(tag, exc.kind)
             except Exception:  # noqa: BLE001 - a bug here must not end the thread
                 log.exception("TMDB job %s failed", tag.split(":")[0])
@@ -233,10 +248,14 @@ class DiscoverWindow(QDialog):
         self.search.setClearButtonEnabled(True)
         self.search.setMaximumWidth(260)
         self.search.returnPressed.connect(self._search)
+        self.search_button = QPushButton("🔍  Search")
+        self.search_button.setToolTip("Find a film on TMDB (or press Enter in the box)")
+        self.search_button.clicked.connect(self._search)
         self.surprise = QPushButton("🎲  Pick one for me")
         self.surprise.setToolTip("One of the best few in \"For you\", at random")
         self.surprise.clicked.connect(self._surprise)
         top.addWidget(self.search)
+        top.addWidget(self.search_button)
         top.addWidget(self.surprise)
 
         self.note = QLabel("")
@@ -773,6 +792,10 @@ class Discover(QObject):
             self.worker.ask("trending", lambda client, report: client.trending())
 
     def search(self, text: str) -> None:
+        if not self.key() and self._relay_refused > 0:
+            # asked for by hand: try the relay again now (it may have got its key in the meantime)
+            self._relay_refused = -1e9
+            self._configure()
         if not self.can_ask():
             self._note_for_key()
             return
@@ -804,7 +827,7 @@ class Discover(QObject):
         elif not self.key():
             self.dialog.set_note(relay_help() if self._relay_refused > 0 else KEY_HELP)
         else:
-            self.dialog.set_note("The TMDB key in Settings > Discover doesn't look right: copy the \"API Read "
+            self.dialog.set_note("The TMDB key in Settings > Ideas doesn't look right: copy the \"API Read "
                                  "Access Token\" (long) or the \"API Key\" (32 letters and digits) again.")
 
     def _fill_mine(self) -> None:
@@ -863,6 +886,8 @@ class Discover(QObject):
         if self.dialog is not None:
             problem = errors.problem(PROBLEMS.get(kind, "SW-635"))
             note = {"nokey": KEY_HELP, "relay": relay_help()}.get(kind, f"{problem.title}. {problem.explanation}")
+            if kind == "relay":
+                note = f"{note} {relay_reason(getattr(self.worker, 'last_detail', ''))}".strip()
             self.dialog.set_note(note)
 
     def _progress(self, tag: str, done: int, total: int) -> None:

@@ -312,6 +312,14 @@ class _HeaderRecorder:
                 seen.append(dict(self.headers))
                 super().end_headers()
 
+            def do_GET(self):  # noqa: N802 - /refused/...: what YouTube answered on Alex's PC (11 Nov 2026)
+                if self.path.startswith("/refused/"):
+                    self.send_response(403)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                super().do_GET()
+
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=str(folder)))
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -380,6 +388,26 @@ class StreamTests(unittest.TestCase):
         self.assertTrue(spin(10, self.player.is_ready))
         self.assertIsNone(self.player.stream)
         self.assertEqual(self.player.path, FILM)
+
+    def test_a_refused_stream_is_asked_for_again(self):
+        """YouTube refuses the addresses (HTTP 403): the window gets the chance to ask again (0.5.2),
+        and if it does, no problem is shown."""
+        asked = []
+        self.player.refused = lambda stream, position: asked.append((stream.id, position)) or True
+        with Reports() as reports:
+            self.assertTrue(self.player.load_stream(self.stream(video_url=f"{self.web.base}/refused/picture.mkv")))
+            self.assertTrue(spin(15, lambda: asked), "the refusal never came")
+            spin(0.5)
+        self.assertEqual(asked, [("dQw4w9WgXcQ", 0)])
+        self.assertNotIn("SW-609", reports.codes)
+
+    def test_a_refused_stream_with_no_other_way_is_reported(self):
+        self.player.refused = lambda stream, position: False
+        with Reports() as reports, mock.patch.object(errors, "build", wraps=errors.build) as built:
+            self.assertTrue(self.player.load_stream(self.stream(video_url=f"{self.web.base}/refused/picture.mkv")))
+            self.assertTrue(spin(15, lambda: "SW-609" in reports.codes), reports.codes)
+        self.assertIn("HTTP error 403", " ".join(str(call.args[1]) for call in built.call_args_list
+                                                   if call.args and call.args[0] == "SW-609"))
 
     def test_a_broken_stream_is_reported(self):
         with Reports() as reports:

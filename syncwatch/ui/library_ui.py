@@ -1,6 +1,6 @@
 """The film library in the window: your films, "Add film", and the steps behind it.
 
-The list shows the films in the library folder (Settings > Playback > Library folder).
+The list shows the films in the library folder (Settings > Downloads & library > Library folder).
 It's on the start screen, and in the Library window (📂 button, Ctrl+O) once a film is
 open. Double-click a film to play it.
 

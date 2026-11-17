@@ -7,7 +7,6 @@ next video of a queue that was looked up ahead, starts straight away.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
 import threading
@@ -15,15 +14,16 @@ import time
 import urllib.request
 from urllib.parse import quote
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import QObject, QProcess, Qt, QTimer, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from .. import errors
+from .. import errors, privacy
 from ..library import weblinks as web_links
 from ..torrent import links as torrent_links
 from ..youtube import links, resolve, streams
+from ..youtube.parts import find_js_runtime, ytdlp_installed  # noqa: F401 - (tests replace them here)
 
 log = logging.getLogger("syncwatch.youtube")
 
@@ -33,19 +33,6 @@ PROBLEMS = {"unavailable": "SW-602", "private": "SW-602", "signin": "SW-603", "b
 CACHE_SIZE = 50
 
 
-def find_js_runtime(setting: str) -> Optional[str]:
-    """Deno for yt-dlp: the one chosen in the settings, else the one inside SyncWatch's runtime."""
-    if setting:
-        return setting if Path(setting).is_file() else None
-    try:
-        from deno import find_deno_bin  # noqa: PLC0415 - the "deno" package only holds deno.exe
-        return find_deno_bin()
-    except (ImportError, FileNotFoundError):
-        return None
-
-
-def ytdlp_installed() -> bool:
-    return importlib.util.find_spec("yt_dlp") is not None
 
 
 class ResolveJob(QObject):
@@ -106,6 +93,7 @@ class ResolveJob(QObject):
             message = json.loads(lines[-1]) if lines else {}
         except ValueError:
             message = {}
+        self._log_warnings(message)
         if "ok" in message:
             try:
                 self._finish("", "", self._parse_ok(message["ok"]))
@@ -119,6 +107,21 @@ class ResolveJob(QObject):
 
     def _parse_ok(self, raw):
         return streams.from_json(raw)
+
+    def _log_warnings(self, message) -> None:
+        """yt-dlp's warnings (resolve.py already took the addresses out; cleaned again here anyway):
+        they say why YouTube's formats were skipped, which explains many failures."""
+        if not isinstance(message, dict):
+            return
+        ok = message.get("ok") if isinstance(message.get("ok"), dict) else {}
+        found = message.get("warnings") or ok.get("warnings") or []
+        apps = [part.get("client") for part in (ok.get("video"), ok.get("audio")) if isinstance(part, dict)]
+        apps = [app for app in apps if isinstance(app, str) and resolve.CLIENT_CODE_RE.match(app)]
+        if apps:
+            log.info("YouTube video %s: streams from YouTube's %s client", self.video_id, " + ".join(dict.fromkeys(apps)))
+        for text in found[:resolve.MAX_WARNINGS] if isinstance(found, list) else []:
+            if isinstance(text, str) and text.strip():
+                log.warning("yt-dlp about %s: %s", self.video_id, privacy.clean(text)[:300])
 
 
 class PlaylistJob(ResolveJob):
@@ -199,6 +202,26 @@ class YouTube(QObject):
         self.busy.emit(f"Finding the YouTube video {ref.id}…")
         return True
 
+    def ask_again(self, video_id: str, start_s: int, refused: str, tried: List[str], quiet: bool = False) -> bool:
+        """YouTube refused the streams it gave its app ``refused`` ("TVHTML5", HTTP 403): ask yt-dlp
+        again as other apps (streams.next_way). ``tried`` holds the ways asked already (one is added).
+        False if there's no way left, or YouTube can't be asked here."""
+        way = streams.next_way(refused, tried)
+        if way is None or self.check():
+            return False
+        tried.append(way)
+        log.info("YouTube refused the streams of %s (%s client): asking again as %s (try %d of %d)",
+                 video_id, refused or "?", way, len(tried), streams.MAX_TRIES)
+        self._cache.pop(video_id, None)            # (that stream is the one refused)
+        self._drop_job()
+        job = self._new_job(video_id, client=way)
+        self._job, self._job_start, self._job_quiet = job, max(0, int(start_s)), quiet
+        job.found.connect(self._found)
+        job.failed.connect(self._failed)
+        job.start()
+        self.busy.emit(f"YouTube refused that stream, asking again another way ({len(tried)}/{streams.MAX_TRIES})…")
+        return True
+
     def prefetch(self, video_id: str) -> None:
         """Look a video up ahead (the next one in the queue), so it starts at once later."""
         if not links.is_video_id(video_id) or self._cached(video_id) is not None or video_id in self._prefetch \
@@ -225,7 +248,7 @@ class YouTube(QObject):
         self._playlist_jobs.clear()
 
     # ------------------------------------------------------------ results
-    def _new_job(self, video_id: str) -> ResolveJob:
+    def _new_job(self, video_id: str, client: str = "") -> ResolveJob:
         arguments = ["--height", str(self.settings.get("youtube.quality")),
                      "--codecs", str(self.settings.get("youtube.codecs")),
                      "--cache", str(self.cache_dir / "yt-dlp"),
@@ -235,6 +258,8 @@ class YouTube(QObject):
             arguments += ["--js", f"deno={deno}"]
         if self.engine() == "qt":
             arguments.append("--combined")
+        if client:
+            arguments += ["--client", client]
         return ResolveJob(video_id, arguments, int(self.settings.get("youtube.timeout_s")), self)
 
     def fetch_captions(self, video_id: str, lang: str, auto: bool, out: Path,

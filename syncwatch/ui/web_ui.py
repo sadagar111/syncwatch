@@ -3,7 +3,7 @@ and the progress for the control bar.
 
 A link plays straight from its address (mpv streams it and can jump anywhere when the server allows
 starting in the middle). With "Download it while it plays" the film is also saved, in the background,
-into the download folder (Settings > Downloads), and moves into the library once it's complete; the
+into the download folder (Settings > Downloads & library), and moves into the library once it's complete; the
 player keeps playing from the link meanwhile. A link to a .torrent file goes to the torrent player.
 The work happens in a background thread; the signals arrive in the window's thread.
 """

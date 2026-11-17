@@ -32,7 +32,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import QByteArray, QLocale, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QOpenGLContext, QPalette
@@ -54,17 +54,9 @@ VIDEO_OUTPUTS = ("window", "opengl", "none")
 
 
 
-# mpv's own Lua scripts (console, menus, auto profiles...) aren't used: SyncWatch has its own controls.
-# Off, they can't run Lua at all: on Windows every Lua error, even one a script catches itself,
-# shows up as a "fatal exception" (0xE24C4A02, LuaJIT's way of unwinding), and Python's crash
-# logger then wrote out every thread while they ran, which could itself crash SyncWatch.
-LUA_SCRIPTS_OFF = (
-    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_positioning": "no",   # mpv 0.40+
-     "load_context_menu": "no", "load_auto_profiles": "no"},
-    {"load_console": "no", "load_select": "no", "load_commands": "no", "load_auto_profiles": "no"},   # 0.39
-    {"load_osd_console": "no", "load_auto_profiles": "no"},                                         # 0.33-0.38
-    {},
-)
+HTTP_ERROR = re.compile(r"\bHTTP error (\d{3})\b")   # mpv's network messages ("[curl] HTTP error 403",
+                                                     # "[ffmpeg] http: HTTP error 403 Forbidden")
+
 
 class StartFailed(Exception):
     """mpv couldn't be started; the window falls back to the Qt player (SW-209)."""
@@ -221,6 +213,10 @@ class MpvPlayer(QObject):
         self._last_playing = False
         self._last_child_check = 0.0
         self._reported: set = set()   # problem codes already shown for this film
+        self._http_error = 0          # the last "HTTP error <n>" mpv met for this film (403: refused)
+        # (stream, position in ms) -> True if someone asks for the stream again (YouTube refused it,
+        # 0.5.2: the window asks yt-dlp again as another YouTube app); False = report the problem
+        self.refused: Optional[Callable[[object, int], bool]] = None
         self._from_mpv.connect(self._on_mpv, Qt.ConnectionType.QueuedConnection)
 
     # ------------------------------------------------------------ setting up
@@ -232,13 +228,7 @@ class MpvPlayer(QObject):
         return self.widget
 
     def _lua_choices(self):
-        """Which LUA_SCRIPTS_OFF this libmpv knows (by its client API: 2.5 = mpv 0.40, 2.4 = 0.39), then older ones."""
-        try:
-            version = tuple(self.module._mpv_client_api_version())
-        except Exception:  # noqa: BLE001 - unknown: try them all
-            version = (9, 9)
-        start = 0 if version >= (2, 5) else 1 if version >= (2, 4) else 2
-        return LUA_SCRIPTS_OFF[start:]
+        return mpvlib.lua_scripts_off(self.module)
 
     def start(self) -> None:
         """Start mpv, after the video widget has its place in the window. Raises StartFailed."""
@@ -424,6 +414,7 @@ class MpvPlayer(QObject):
         self._tracks = []
         self._chapters = []
         self._reported.clear()
+        self._http_error = 0
         self._load_seq += 1
         self._wanted_entry = None
         self._async("set", "pause", "yes")          # open paused: shows the first picture
@@ -551,6 +542,9 @@ class MpvPlayer(QObject):
             self._send("vo-failed", text)
         elif "Could not open/initialize audio device" in text:
             self._send("ao-failed", text)
+        http = HTTP_ERROR.search(text)
+        if http:
+            self._send("http-error", int(http.group(1)))
 
     def _on_mpv(self, what: str, value, when: float) -> None:
         """GUI thread: everything mpv reported."""
@@ -622,6 +616,8 @@ class MpvPlayer(QObject):
             # once mpv has taken the latest jump (a restart from an earlier jump doesn't count).
             if self._waiting and (self._wait_kind == "load" or self._seek_acked):
                 self._finish_waiting(when)
+        elif what == "http-error":
+            self._http_error = int(value)
         elif what == "end-file":
             reason, error, entry = value
             if entry != self._wanted_entry:
@@ -629,7 +625,14 @@ class MpvPlayer(QObject):
             if reason == self.module.MpvEventEndFile.ERROR and (self.path is not None or self.stream is not None):
                 self._failed = True
                 self._waiting = False
-                self._problem(self._load_problem(), f"mpv: {self._error_text(error)}")
+                stream, position = self.stream, int(max(0.0, self._pos))
+                if stream is not None and self._http_error == 403 and self.refused is not None \
+                        and self.refused(stream, position):
+                    log.info("mpv: the server refused the stream (HTTP 403); it's asked for again")
+                    self._report_playing()
+                    return
+                why = self._error_text(error) + (f" (HTTP error {self._http_error})" if self._http_error else "")
+                self._problem(self._load_problem(), f"mpv: {why}")
                 self._report_playing()
         elif what == "decoder-failed":
             prefix, text = value

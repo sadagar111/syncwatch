@@ -214,7 +214,8 @@ class CodeHealthTests(unittest.TestCase):
         code = ("import sys; import syncwatch.settings, syncwatch.errors, syncwatch.subtitles.parsers, "
                 "syncwatch.subtitles.mkv, syncwatch.sync.controller, syncwatch.net.relay, syncwatch.theme, "
                 "syncwatch.room.session, syncwatch.room.friends, syncwatch.room.context, "
-                "syncwatch.filmstate, syncwatch.log; print('PySide6' in sys.modules)")
+                "syncwatch.filmstate, syncwatch.log, syncwatch.privacy, syncwatch.youtube.parts, "
+                "syncwatch.mpvlib; print('PySide6' in sys.modules)")
         out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, check=True)
         self.assertEqual(out.stdout.strip(), "False")
 
